@@ -23,7 +23,8 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 ## Architecture
 
 - Next.js App Router, TypeScript, Tailwind + shadcn/ui
-- Postgres via Prisma. Schema in `prisma/schema.prisma`, which is the source of truth for the data model
+- Postgres via Prisma. **PRD §5 is the source of truth for the data model**; `prisma/schema.prisma` is its implementation. If the schema needs to diverge, change §5 first and say why — a schema that has drifted ahead of the PRD is how the next maintainer ends up trusting the wrong document
+- Prisma 7: connection URLs live in `prisma.config.ts`, not in the schema. The client is generated to `generated/prisma` (gitignored) and imported from `@/generated/prisma/client`
 - Server actions for mutations, server components for data fetching
 - `lib/assignment.ts` and `lib/passes.ts` contain pure functions with no database access. Keep them that way; they are the two pieces with real logic and they are tested in isolation.
 
@@ -53,3 +54,13 @@ Two things carry real logic and get real tests:
 Test cases for both are enumerated in `BUILD_PLAN.md` phases 2 and 6. Those cases are the spec. If a test contradicts them, the test is wrong.
 
 Everything else gets light smoke coverage. Do not chase coverage percentage.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

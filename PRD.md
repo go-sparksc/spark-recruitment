@@ -52,14 +52,19 @@ Instance
   id, name, passwordHash, createdAt, archivedAt
   currentStage: WRITTEN | FIRST_ROUND | SECOND_ROUND | COMPLETE
 
-Field                          // one per retained CSV column
+Field                          // one per CSV column
   id, instanceId
-  sourceHeader                 // exact header text from the CSV
+  sourceHeader                 // exact header text from the CSV, verbatim
   displayName                  // admin-editable
   category: DEMOGRAPHIC | RESPONSE | OTHER
   groupKey                     // nullable; several columns sharing one question, e.g. "ethnicity"
   isMultiSelect                // bool; true when multiple columns in a group can be set at once
   ordinal
+  isIncluded                   // bool, default true; false = value retained but excluded
+                               //   from every review surface. See FR-2.
+  visibleToWrittenReviewer     // nullable bool; null = the §6 default for this category
+  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default for this category
+  UNIQUE (instanceId, ordinal)
 
 Applicant
   id, instanceId
@@ -69,6 +74,9 @@ Applicant
   data: jsonb                  // { fieldId: value }
   status: ACTIVE | ADVANCED | REJECTED | SPARKLET
   stageReached: WRITTEN | FIRST_ROUND | SECOND_ROUND
+  UNIQUE (instanceId, email)   // makes FR-3 duplicate resolution a database
+                               //   guarantee, not a UI convention. Blank emails
+                               //   are null, and Postgres permits many nulls.
 
 RubricCategory
   id, instanceId, name, maxPoints, ordinal
@@ -91,11 +99,14 @@ Score                          // written round
 ReviewNote
   id, assignmentId, body
 
-InterviewResult                // first round, imported
+InterviewResult                // first round, imported. Two rows per applicant.
   id, applicantId
   interviewerName, score
-InterviewNotes
-  id, applicantId, body
+
+InterviewNotes                 // one row per applicant; only one interviewer of
+  id, applicantId, body        //   the pair writes them, and the "Your Name"
+  interviewerName              //   column records which
+  UNIQUE (applicantId)
 
 FirstRoundVote
   id, applicantId, reviewerId, value: YES | NO | SKIP
@@ -108,6 +119,12 @@ ConflictOfInterest
 Pass                           // second round
   id, instanceId, ordinal, openedAt, closedAt
   status: OPEN | CLOSED
+  UNIQUE (instanceId, ordinal) // passes are sequential
+
+PassApplicant                  // membership, fixed at pass creation per FR-17
+  id, passId, applicantId
+  resolution: SPARKLET | REJECTED | CARRIED | NEEDS_ADMIN   // null until resolved
+  UNIQUE (passId, applicantId)
 
 PassVote
   id, passId, applicantId, reviewerId
@@ -119,13 +136,28 @@ Decision
   id, applicantId, stage, outcome: ADVANCE | REJECT | SPARKLET
   actor: SYSTEM | ADMIN
   decidedAt
+  UNIQUE (applicantId, stage)  // one decision per applicant per stage; a
+                               //   reversal updates the row and is audited
+
+RoundAccessCode                // the per-round reviewer code from §8
+  id, instanceId, round
+  codeHash                     // hashed, never stored in plaintext
+  UNIQUE (instanceId, round)
+
+AuditLog                       // admin overrides, per §8
+  id, instanceId
+  actor, action
+  entityType, entityId
+  previousValue: jsonb
+  createdAt
 ```
 
-Three notes on this model:
+Four notes on this model:
 
 - `Applicant.data` as JSONB rather than a key-value table. CSV columns vary cycle to cycle, so the schema cannot be fixed, but Postgres can still index and query inside JSONB. A separate `Field` table carries the human-facing metadata. This is meaningfully simpler than entity-attribute-value and just as flexible.
 - **Every score, vote, and note references `applicantId`, never a name.** This is the fix for the current workbook's core problem.
 - The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check. `groupKey` ties them back to a single logical question and `isMultiSelect` tells the UI and the demographic aggregations to treat them as one field rather than ten independent ones.
+- **`PassApplicant` exists because pass membership cannot be reconstructed after the fact.** FR-17 fixes membership at pass creation, but `Applicant.status` only ever shows the *current* state; once an applicant is resolved there is no way to ask "who was in pass 1?" without a stored roster. It is also where the all-COI case lands: §7.4 requires that an applicant every reviewer has recused from be distinguishable from a unanimous result, and `NEEDS_ADMIN` is that distinction. Resolution is a property of an applicant *within a pass*, not of the applicant.
 
 ## 6. Field visibility matrix
 
@@ -277,7 +309,7 @@ These need answers before or during the relevant build phase. They are the place
 3. **Live vote visibility in passes.** See FR-17.
 4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later.
 5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking.
-6. **Interview score scale.** The `1R Scores` sheet has four categories plus an average. FR-12 assumes a single score per interviewer. Confirm which the imported sheet will actually carry.
+6. **Interview score scale.** ~~Confirm which the imported sheet will actually carry.~~ **Resolved on the facts:** the S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 assumes. `InterviewResult` as modeled above holds one `score` per interviewer and is deliberately left that way for now; Phase 5 will need to add a category dimension to it (either four columns, or a child `InterviewCategoryScore` row set keyed by `interviewResultId`). What remains open is a product question, not a data question: does the first-round reviewer dashboard (FR-14) show all four categories, or only the average? Showing four is more information; showing one is faster to read on a phone. Decide before Phase 5 designs the import contract.
 7. **Multi-select demographic counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. Count them once in each category (totals exceed 100%), count them in a separate "Multiracial" bucket, or report both views. Club decision, not technical. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable.
 
 ## 11. Out of scope for v1, worth noting for v2
