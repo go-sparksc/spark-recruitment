@@ -57,6 +57,8 @@ Field                          // one per retained CSV column
   sourceHeader                 // exact header text from the CSV
   displayName                  // admin-editable
   category: DEMOGRAPHIC | RESPONSE | OTHER
+  groupKey                     // nullable; several columns sharing one question, e.g. "ethnicity"
+  isMultiSelect                // bool; true when multiple columns in a group can be set at once
   ordinal
 
 Applicant
@@ -119,10 +121,11 @@ Decision
   decidedAt
 ```
 
-Two notes on this model:
+Three notes on this model:
 
 - `Applicant.data` as JSONB rather than a key-value table. CSV columns vary cycle to cycle, so the schema cannot be fixed, but Postgres can still index and query inside JSONB. A separate `Field` table carries the human-facing metadata. This is meaningfully simpler than entity-attribute-value and just as flexible.
 - **Every score, vote, and note references `applicantId`, never a name.** This is the fix for the current workbook's core problem.
+- The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check. `groupKey` ties them back to a single logical question and `isMultiSelect` tells the UI and the demographic aggregations to treat them as one field rather than ten independent ones.
 
 ## 6. Field visibility matrix
 
@@ -275,6 +278,7 @@ These need answers before or during the relevant build phase. They are the place
 4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later.
 5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking.
 6. **Interview score scale.** The `1R Scores` sheet has four categories plus an average. FR-12 assumes a single score per interviewer. Confirm which the imported sheet will actually carry.
+7. **Multi-select demographic counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. Count them once in each category (totals exceed 100%), count them in a separate "Multiracial" bucket, or report both views. Club decision, not technical. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable.
 
 ## 11. Out of scope for v1, worth noting for v2
 
