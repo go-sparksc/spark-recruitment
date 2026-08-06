@@ -1,0 +1,500 @@
+// Spark SC recruitment platform — data model.
+//
+// PRD.md section 5 is the source of truth for this model. This file is its
+// implementation. If the two disagree, the PRD is right and this file is a bug.
+//
+// The one rule that governs everything here: no score, vote, note, or decision
+// references an applicant by name. They all reference `applicantId`. Name
+// matching happens only at import boundaries, through the FR-13 reconciliation
+// flow. Keying by name across sheets is the core defect of the spreadsheet this
+// replaces, where a single typo silently orphaned a record.
+//
+// Prisma 7: connection URLs live in prisma.config.ts, not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// An instance can be COMPLETE. A round cannot, which is why these are separate.
+enum InstanceStage {
+  WRITTEN
+  FIRST_ROUND
+  SECOND_ROUND
+  COMPLETE
+}
+
+/// Distinct reviewer rosters and distinct field visibility per round. See PRD section 6.
+enum Round {
+  WRITTEN
+  FIRST_ROUND
+  SECOND_ROUND
+}
+
+enum FieldCategory {
+  DEMOGRAPHIC
+  RESPONSE
+  OTHER
+}
+
+enum ApplicantStatus {
+  ACTIVE
+  ADVANCED
+  REJECTED
+  SPARKLET
+}
+
+enum AssignmentOrigin {
+  AUTO
+  MANUAL
+  CLAIMED_FROM_POOL
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  RETURNED_TO_POOL
+}
+
+/// FR-9 requires a reason when a reviewer returns an applicant to the pool.
+enum ReturnReason {
+  CONFLICT_OF_INTEREST
+  OTHER
+}
+
+/// SKIP is both an explicit abstention and what a conflict of interest resolves to.
+enum VoteValue {
+  YES
+  NO
+  SKIP
+}
+
+enum PassStatus {
+  OPEN
+  CLOSED
+}
+
+/// NEEDS_ADMIN is the all-COI case from PRD section 7.4. It must stay
+/// distinguishable from unanimity — an applicant every reviewer recused from
+/// has not been decided, and must never be auto-resolved.
+enum PassResolution {
+  SPARKLET
+  REJECTED
+  CARRIED
+  NEEDS_ADMIN
+}
+
+enum DecisionOutcome {
+  ADVANCE
+  REJECT
+  SPARKLET
+}
+
+enum DecisionActor {
+  SYSTEM
+  ADMIN
+}
+
+// ---------------------------------------------------------------------------
+// Instance and configuration
+// ---------------------------------------------------------------------------
+
+/// One recruitment cycle. Instances are cycles, not customers — this is not multi-tenant.
+model Instance {
+  id           String        @id @default(cuid())
+  name         String
+  /// argon2id. Never logged, never returned by an API, never displayed.
+  passwordHash String
+  currentStage InstanceStage @default(WRITTEN)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  archivedAt   DateTime?
+
+  applicants       Applicant[]
+  assignments      Assignment[]
+  auditLogs        AuditLog[]
+  fields           Field[]
+  passes           Pass[]
+  reviewers        Reviewer[]
+  roundAccessCodes RoundAccessCode[]
+  rubricCategories RubricCategory[]
+}
+
+/// One per CSV column. Carries the human-facing metadata that `Applicant.data`
+/// deliberately does not, so the JSONB blob stays a value store and nothing else.
+model Field {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  /// Exact header text from the CSV, verbatim — newlines, curly quotes, trailing
+  /// spaces and all. Not unique: real form exports do emit duplicate headers, and
+  /// rejecting an import over that would be the wrong behavior.
+  sourceHeader String
+  /// Admin-editable. Defaults to a cleaned version of sourceHeader.
+  displayName  String
+  category     FieldCategory
+
+  /// Several columns sharing one logical question, e.g. the ten one-hot ethnicity
+  /// columns all carry groupKey "ethnicity". Null for standalone columns.
+  groupKey      String?
+  /// True when more than one column in the group can be set at once. Tells the UI
+  /// and the demographic aggregations to treat the group as one field, not ten.
+  isMultiSelect Boolean @default(false)
+  ordinal       Int
+
+  /// False keeps the value but excludes the column from every review surface.
+  /// Junk columns like "Response Type" and "Network ID" land here. Exclusion is a
+  /// presentation decision, not a lossy one, so it stays reversible without re-import.
+  isIncluded Boolean @default(true)
+
+  /// Per-round overrides for OTHER fields, which PRD section 6 makes configurable.
+  /// Null means "use the category default for that round". Server-side enforcement
+  /// reads these; the client is never trusted to hide anything.
+  visibleToWrittenReviewer    Boolean?
+  visibleToFirstRoundReviewer Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([instanceId, ordinal])
+  @@index([instanceId, category])
+  @@index([instanceId, groupKey])
+}
+
+model RubricCategory {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  name       String
+  maxPoints  Int
+  ordinal    Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  scores Score[]
+
+  @@unique([instanceId, ordinal])
+}
+
+/// Per-round reviewer access code from PRD section 8. A name dropdown alone would
+/// let anyone with the link vote as anyone; the code closes that at the cost of
+/// one extra field.
+model RoundAccessCode {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  round      Round
+  /// Hashed. Same rules as the instance password.
+  codeHash   String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([instanceId, round])
+}
+
+// ---------------------------------------------------------------------------
+// Applicants and reviewers
+// ---------------------------------------------------------------------------
+
+model Applicant {
+  id             String   @id @default(cuid())
+  instanceId     String
+  instance       Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  sourceRowIndex Int
+
+  /// Promoted out of `data` because it is the join key for later imports (FR-12).
+  /// Nullable: FR-3 surfaces blank-email rows for the admin to resolve.
+  email       String?
+  /// Promoted out of `data` for display. Never used to key anything.
+  displayName String
+
+  /// { fieldId: value }. JSONB rather than entity-attribute-value: CSV columns
+  /// vary cycle to cycle so the schema cannot be fixed, but Postgres can still
+  /// index and query inside JSONB. Keys are Field ids, never header text.
+  data Json
+
+  status       ApplicantStatus @default(ACTIVE)
+  stageReached Round           @default(WRITTEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments      Assignment[]
+  conflicts        ConflictOfInterest[]
+  decisions        Decision[]
+  firstRoundVotes  FirstRoundVote[]
+  interviewNotes   InterviewNotes?
+  interviewResults InterviewResult[]
+  passMemberships  PassApplicant[]
+  passVotes        PassVote[]
+
+  /// FR-3 makes the admin resolve duplicate emails before commit. This makes that
+  /// a database guarantee rather than a UI convention. Postgres permits many nulls
+  /// in a unique index, so blank-email rows are unaffected.
+  @@unique([instanceId, email])
+  @@index([instanceId, status])
+}
+
+model Reviewer {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  /// Not unique. Two reviewers can share a name — which is exactly why every
+  /// vote in this schema references reviewerId instead.
+  firstName String
+  lastName  String
+
+  /// An existing Spark SC member. At most one may review any given applicant.
+  isSparklet Boolean @default(false)
+  /// Which rounds this reviewer serves in.
+  rounds     Round[]
+
+  /// Load-bearing: PRD section 7.4 says a reviewer added mid-round votes only in
+  /// passes created after they were added.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments     Assignment[]
+  conflicts       ConflictOfInterest[]
+  firstRoundVotes FirstRoundVote[]
+  passVotes       PassVote[]
+
+  @@index([instanceId])
+}
+
+// ---------------------------------------------------------------------------
+// Written round
+// ---------------------------------------------------------------------------
+
+model Assignment {
+  id          String    @id @default(cuid())
+  instanceId  String
+  instance    Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  round       Round
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    Reviewer  @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  /// MANUAL marks an admin override, so regenerating assignments can warn before
+  /// clobbering it rather than silently discarding a deliberate decision (FR-8).
+  origin AssignmentOrigin @default(AUTO)
+  status AssignmentStatus @default(ACTIVE)
+
+  /// FR-9 requires a reason on return-to-pool. returnNote carries the free text
+  /// when the reason is OTHER.
+  returnReason ReturnReason?
+  returnNote   String?
+  returnedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  note   ReviewNote?
+  scores Score[]
+
+  @@unique([round, applicantId, reviewerId])
+  @@index([instanceId, round])
+  @@index([reviewerId, round, status])
+}
+
+model Score {
+  id               String         @id @default(cuid())
+  assignmentId     String
+  assignment       Assignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  rubricCategoryId String
+  rubricCategory   RubricCategory @relation(fields: [rubricCategoryId], references: [id], onDelete: Cascade)
+  points           Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assignmentId, rubricCategoryId])
+}
+
+/// One free-text note per assignment, per FR-9.
+model ReviewNote {
+  id           String     @id @default(cuid())
+  assignmentId String     @unique
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  body         String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// First round
+// ---------------------------------------------------------------------------
+
+/// Imported per FR-12. Two rows per applicant expected, one per interviewer.
+/// No uniqueness: interviewer names are free text and two interviewers can share one.
+///
+/// NOTE for Phase 5: PRD open decision 6 is resolved on the facts — the S26
+/// `1R Scores` sheet carries four category scores plus an average per interviewer,
+/// not the single score modeled here. This needs a category dimension before the
+/// FR-12 import contract is written.
+model InterviewResult {
+  id              String    @id @default(cuid())
+  applicantId     String
+  applicant       Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  interviewerName String
+  /// Float, not Int, so it survives whichever shape open decision 6 settles on.
+  score           Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([applicantId])
+}
+
+/// One row per applicant. Only one interviewer of each pair writes the notes;
+/// the source sheet's "Your Name" column records which one.
+model InterviewNotes {
+  id              String    @id @default(cuid())
+  applicantId     String    @unique
+  applicant       Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  interviewerName String?
+  body            String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FirstRoundVote {
+  id          String    @id @default(cuid())
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    Reviewer  @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+  value       VoteValue
+
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// FR-15 excludes skips from both numerator and denominator of yes%.
+  @@unique([applicantId, reviewerId])
+  @@index([applicantId])
+}
+
+// ---------------------------------------------------------------------------
+// Second round and passes
+// ---------------------------------------------------------------------------
+
+/// Sticky across all passes once flagged (FR-16).
+model ConflictOfInterest {
+  id          String    @id @default(cuid())
+  round       Round
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    Reviewer  @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([round, applicantId, reviewerId])
+  @@index([applicantId, round])
+}
+
+/// A second-round voting session. Sequential; exactly one is OPEN at a time.
+model Pass {
+  id         String     @id @default(cuid())
+  instanceId String
+  instance   Instance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  ordinal    Int
+  status     PassStatus @default(OPEN)
+  openedAt   DateTime   @default(now())
+  closedAt   DateTime?
+
+  members PassApplicant[]
+  votes   PassVote[]
+
+  @@unique([instanceId, ordinal])
+}
+
+/// Pass membership, fixed at creation (FR-17).
+///
+/// This table exists because membership cannot be reconstructed after the fact.
+/// `Applicant.status` only ever shows the current state, so once an applicant is
+/// resolved there is no way to ask "who was in pass 1?" without a stored roster.
+/// Resolution is a property of an applicant *within a pass*, not of the applicant.
+model PassApplicant {
+  id          String          @id @default(cuid())
+  passId      String
+  pass        Pass            @relation(fields: [passId], references: [id], onDelete: Cascade)
+  applicantId String
+  applicant   Applicant       @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  /// Null until the applicant resolves within this pass.
+  resolution  PassResolution?
+  resolvedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([passId, applicantId])
+  @@index([passId, resolution])
+}
+
+/// A vote requires an explicit submit. Selecting yes/no without submitting
+/// records nothing, so the absence of a row is meaningful.
+model PassVote {
+  id          String    @id @default(cuid())
+  passId      String
+  pass        Pass      @relation(fields: [passId], references: [id], onDelete: Cascade)
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    Reviewer  @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+  value       VoteValue
+
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([passId, applicantId, reviewerId])
+  @@index([passId, applicantId])
+}
+
+// ---------------------------------------------------------------------------
+// Decisions and audit
+// ---------------------------------------------------------------------------
+
+model Decision {
+  id          String          @id @default(cuid())
+  applicantId String
+  applicant   Applicant       @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  stage       Round
+  outcome     DecisionOutcome
+  actor       DecisionActor
+  decidedAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  /// One decision per applicant per stage. A reversal updates this row, and the
+  /// previous value lands in AuditLog.
+  @@unique([applicantId, stage])
+  @@index([applicantId])
+}
+
+/// Admin overrides, per PRD section 8: manual assignment, manual rejection,
+/// decision reversal. Records actor, timestamp, and previous value.
+model AuditLog {
+  id            String   @id @default(cuid())
+  instanceId    String
+  instance      Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  actor         String
+  action        String
+  entityType    String
+  entityId      String
+  previousValue Json?
+  createdAt     DateTime @default(now())
+
+  @@index([instanceId, createdAt])
+}
