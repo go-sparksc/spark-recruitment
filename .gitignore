@@ -141,3 +141,23 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Vercel
+.vercel
+
+# Prisma Client is generated, not committed (Prisma 7 emits outside node_modules)
+/generated/prisma
+
+# Applicant data never enters this repo. See PRD.md section 8.
+# The S26 export contains real names, USC emails, essays about family trauma
+# and immigration status, self-reported ethnicity, and first-generation status.
+# Development runs on prisma/seed.ts synthetic data instead.
+*.csv
+*.xlsx
+*.xls
+/data
+/uploads
+
+# Exception: the header row of the application export. Column names only,
+# zero applicant rows. Phase 1 CSV import is built against its shape.
+!fixtures/sample-headers.csv
