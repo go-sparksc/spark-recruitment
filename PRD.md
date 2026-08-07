@@ -53,18 +53,34 @@ Instance
   id, name, passwordHash, createdAt, archivedAt
   currentStage: WRITTEN | FIRST_ROUND | SECOND_ROUND | COMPLETE
 
+FieldGroup                     // several CSV columns forming one logical question
+  id, instanceId
+  key                          // stable slug, e.g. "ethnicity"
+  displayName                  // admin-editable; the heading FR-19 renders
+  category: DEMOGRAPHIC | RESPONSE | OTHER
+  isMultiSelect                // bool; true when members can be checked together
+  isIncluded                   // bool, default true; applies to every member
+  ordinal
+  visibleToWrittenReviewer     // nullable bool; null = the §6 default
+  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default
+  UNIQUE (instanceId, key)
+
 Field                          // one per CSV column
   id, instanceId
   sourceHeader                 // exact header text from the CSV, verbatim
   displayName                  // admin-editable
+  groupId                      // nullable; the FieldGroup this column belongs to
+  groupRole: OPTION | FREE_TEXT   // nullable; set only when groupId is set
   category: DEMOGRAPHIC | RESPONSE | OTHER
-  groupKey                     // nullable; several columns sharing one question, e.g. "ethnicity"
-  isMultiSelect                // bool; true when multiple columns in a group can be set at once
+                               //   the group's value wins when groupId is set
   ordinal
   isIncluded                   // bool, default true; false = value retained but excluded
-                               //   from every review surface. See FR-2.
-  visibleToWrittenReviewer     // nullable bool; null = the §6 default for this category
-  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default for this category
+                               //   from every review surface. See FR-2. The group's
+                               //   value wins when groupId is set.
+  visibleToWrittenReviewer     // nullable bool; null = the §6 default for this category.
+                               //   The group's value wins when groupId is set.
+  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default for this category.
+                               //   The group's value wins when groupId is set.
   UNIQUE (instanceId, ordinal)
 
 Applicant
@@ -169,7 +185,7 @@ Five notes on this model:
 
 - `Applicant.data` as JSONB rather than a key-value table. CSV columns vary cycle to cycle, so the schema cannot be fixed, but Postgres can still index and query inside JSONB. A separate `Field` table carries the human-facing metadata. This is meaningfully simpler than entity-attribute-value and just as flexible.
 - **Every score, vote, and note references `applicantId`, never a name.** This is the fix for the current workbook's core problem.
-- The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check. `groupKey` ties them back to a single logical question and `isMultiSelect` tells the UI and the demographic aggregations to treat them as one field rather than ten independent ones.
+- The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check, plus a free-text column for anything not listed. These become one FieldGroup with ten OPTION members and one FREE_TEXT member, which is what tells the UI and the demographic aggregations to treat them as one question rather than eleven independent ones. Category, inclusion, and the §6 visibility toggles are properties of the group, not of its members, so a group cannot end up half hidden and half visible, and a partially excluded group cannot occur. The FREE_TEXT member is a member for display and reconciliation only: it is excluded from the checked predicate and from the 1/n counting in §10.7.
 - **`PassApplicant` exists because pass membership cannot be reconstructed after the fact.** FR-17 fixes membership at pass creation, but `Applicant.status` only ever shows the *current* state; once an applicant is resolved there is no way to ask "who was in pass 1?" without a stored roster. It is also where the all-COI case lands: §7.4 requires that an applicant every reviewer has recused from be distinguishable from a unanimous result, and `NEEDS_ADMIN` is that distinction. Resolution is a property of an applicant *within a pass*, not of the applicant.
 - **The interview rubric is its own table, and `InterviewResult.score` is imported rather than derived.** `InterviewCategory` is deliberately separate from `RubricCategory`: the written rubric and the interview rubric are different instruments with different categories, and goal 5 requires both be reconfigurable between cycles, which rules out fixed columns. `score` holds the average exactly as the source sheet carries it — if it disagrees with the mean of the category rows, the sheet wins, because that is the number the interviewers actually recorded. There is deliberately no `UNRESOLVED` on `ApplicantStatus`: an applicant left undecided when the second round closes is identified by their row in the final pass, not by a second copy of that fact on the applicant. See FR-17.
 
@@ -192,7 +208,7 @@ The written-reviewer row is a deliberate change from the current spreadsheet, wh
 
 Names are hidden from written reviewers for the same reason (open decision 4). Written reviewers see an anonymous label built from `sourceRowIndex`, e.g. "Applicant 47." Names remain visible to admins throughout, including on FR-10, since decisions cannot be made against anonymous labels. A written reviewer who recognizes an applicant from the essay itself can still return to pool.
 
-**Email is hidden from written reviewers too, and the row above is not redundant.** USC addresses are `firstname.lastname@usc.edu` — an email is a name in disguise, and FR-2 makes email un-excludable, so it exists on every applicant. Both `Applicant.displayName` and `Applicant.email` are promoted columns rather than `Field` rows, so neither is covered by the per-field `visibleToWrittenReviewer` toggle. The server-side visibility layer therefore has two inputs: `Field` rows for CSV-derived columns, and fixed rules for the promoted ones (`displayName` and `email` hidden in the written round, `sourceRowIndex` exposed only as the anonymous label).
+**Email is hidden from written reviewers too, and the row above is not redundant.** USC addresses are `firstname.lastname@usc.edu` — an email is a name in disguise, and FR-2 makes email un-excludable, so it exists on every applicant. Both `Applicant.displayName` and `Applicant.email` are promoted columns rather than `Field` rows, so neither is covered by the per-field `visibleToWrittenReviewer` toggle. The server-side visibility layer therefore has three inputs: FieldGroup rows for grouped columns, Field rows for ungrouped ones, and fixed rules for the promoted ones (displayName and email hidden in the written round, sourceRowIndex exposed only as the anonymous label). Resolving a field to its effective category, inclusion, and visibility belongs in one shared helper, not re-derived per surface.
 
 ## 7. Functional requirements
 
@@ -207,9 +223,13 @@ Names are hidden from written reviewers for the same reason (open decision 4). W
 - Include/exclude checkbox (default on)
 - Category selector: Demographics / Responses / Other
 
+Some questions arrive as several columns. The ten one-hot ethnicity columns are one question, not ten. The mapping table detects likely groups by their value signature (every non-empty value in the column is the same literal) and presents them pre-filled for confirmation. The admin can rename a group, split it, merge two, or drag an ungrouped column into one. The free-text write-in will not be detected, since its values vary by definition, so attaching it to its group is a manual step the mapping table must support. Include/exclude and category are set on the group and apply to every member; individual members of a group cannot be excluded or categorized separately.
+
 Two columns require explicit designation and cannot be excluded: **email** (used as the join key for later imports) and **display name** (first + last, or a single name column).
 
 **FR-3 Import preview and commit.** Show row count, detected duplicates by email, and rows with a blank email or name. Admin resolves or discards these before commit. On commit, create one Applicant per row.
+
+An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. Corrections after commit happen by editing an applicant's fields directly, or by deleting the instance and importing again. This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
 **FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
 
@@ -360,7 +380,7 @@ These need answers before or during the relevant build phase. They are the place
 
    **Applicants who check nothing go in a "Not specified" bucket**, counted as a whole person there. `1/n` is undefined at `n = 0`, and without the bucket those applicants vanish from the breakdown entirely and the weighted column silently sums to the responder count rather than the headcount. With it, the invariant holds as stated: **weighted totals sum to the headcount.** Note that an applicant who checks no box but writes into the free-text `Specify your ethnicity…` column has given a real answer that the count cannot read; they belong in "Not specified" too, and the free-text values are worth showing beneath the breakdown rather than discarding.
 
-   **What counts as checked:** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text `Specify your ethnicity…` column carries no `groupKey` and is not a member of the one-hot set.
+   **What counts as checked:** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text Specify your ethnicity… column is a member of the group with groupRole = FREE_TEXT. It is excluded from the checked predicate and from 1/n, and it is what FR-19 displays beneath the breakdown. Being a member is what lets FR-19 find it; being FREE_TEXT is what keeps it out of the count. Inclusion is set on the group and applies to every member, so n is never counted over a partially excluded set.
 
 ## 11. Out of scope for v1, worth noting for v2
 
