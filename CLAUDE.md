@@ -32,7 +32,8 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
 - **Instance** — one recruitment cycle. Has a name and a password.
 - **Sparklet** — an existing Spark SC member. Reviewers can be Sparklets. Constraint: at most one Sparklet reviews any given applicant.
-- **Unassigned pool** — ~5% of applicants held with no reviewers, so reviewers hitting a conflict of interest can swap out and others can pick up slack.
+- **Field group** — several CSV columns forming one logical question, such as the ten one-hot ethnicity columns plus the free-text write-in. Category, inclusion, and field visibility are set on the group and apply to every member. The write-in is a member for display only and is excluded from demographic counting. See PRD §5 and §10.7.
+- **Unassigned pool** — ~5% of assignment slots held open, spread across distinct applicants who each start with 2 reviewers instead of 3. Never whole applicants with zero reviewers. A reviewer hitting a conflict of interest returns their slot to the pool and any reviewer can claim an open slot. See PRD §10.1 and BUILD_PLAN Phase 2.
 - **Pass** — a second-round voting session. Sequential. Membership fixed at creation to applicants still ACTIVE. Unanimous yes makes a Sparklet, unanimous no rejects, mixed carries forward.
 - **Round** — WRITTEN, FIRST_ROUND, SECOND_ROUND. Distinct reviewer rosters and distinct field visibility per round.
 
