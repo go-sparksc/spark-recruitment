@@ -1,7 +1,13 @@
 # Phase 0 — Foundation
 
-**Status:** implemented
+**Status:** implemented; partially superseded by PRD v1.1
 **Gate (BUILD_PLAN):** `prisma migrate dev` runs clean, seed populates, and a synthetic applicant's JSONB `data` resolves against the `Field` table.
+
+> **Superseded by PRD v1.1.** PRD v1.1 resolved open decisions 1–7 after this phase shipped. Three things below are now out of date, and are left as written because this file is a design record rather than a live spec:
+>
+> - **Judgment call 12** says `InterviewResult` is "deliberately left single-score" with the category dimension optional. Decision 6 is now fully resolved: the interview rubric is an instance-scoped `InterviewCategory` model with `InterviewCategoryScore` children, and `InterviewResult.score` is the imported average, never recomputed. Still Phase 5 work, but no longer an open shape.
+> - **`sourceRowIndex` gained a unique constraint** (`20260807000000_applicant_source_row_index_unique`). Decision 4 hides names from written reviewers, who now see "Applicant 47" instead — which makes this column user-facing identity rather than provenance.
+> - **The one-hot encoding note** below ("stores the column's own label when checked and `""` when not") is now load-bearing rather than incidental: decision 7's fractional counting depends on it, so PRD §10.7 states the checked/unchecked predicate explicitly.
 
 ## What this phase built
 

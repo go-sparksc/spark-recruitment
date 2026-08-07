@@ -45,6 +45,11 @@ enum FieldCategory {
   OTHER
 }
 
+/// There is deliberately no UNRESOLVED here. An applicant left undecided when the
+/// second round closes is identified by `PassApplicant.resolution = NEEDS_ADMIN` on
+/// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
+/// second copy of that fact with no rule for which one wins when they disagree.
+/// FR-19, FR-20 and archive-and-purge read the pass row, never this column.
 enum ApplicantStatus {
   ACTIVE
   ADVANCED
@@ -81,9 +86,17 @@ enum PassStatus {
   CLOSED
 }
 
-/// NEEDS_ADMIN is the all-COI case from PRD section 7.4. It must stay
-/// distinguishable from unanimity — an applicant every reviewer recused from
-/// has not been decided, and must never be auto-resolved.
+/// NEEDS_ADMIN covers two situations, both requiring an admin decision: every
+/// reviewer recused (PRD section 7.4), and the "Close second round" action finding
+/// the applicant still undecided on the final pass. The underlying PassVote rows
+/// tell them apart — eleven skips reads very differently from 7-4.
+///
+/// It must stay distinguishable from unanimity: an applicant every reviewer recused
+/// from has not been decided, and must never be auto-resolved.
+///
+/// This records what happened in ONE pass. It does not control membership in the
+/// next one — that is recomputed from Applicant.status at each pass creation, so an
+/// applicant can carry NEEDS_ADMIN on pass 1 and still appear in pass 2.
 enum PassResolution {
   SPARKLET
   REJECTED
@@ -208,12 +221,17 @@ model Applicant {
   id             String   @id @default(cuid())
   instanceId     String
   instance       Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  /// Also the anonymous label a written reviewer sees — "Applicant 47" — since
+  /// PRD section 6 hides names from that round. That makes it user-facing identity,
+  /// not just provenance, which is why it is unique per instance below.
   sourceRowIndex Int
 
   /// Promoted out of `data` because it is the join key for later imports (FR-12).
   /// Nullable: FR-3 surfaces blank-email rows for the admin to resolve.
+  /// Hidden from written reviewers: a USC address is a name in disguise (section 6).
   email       String?
   /// Promoted out of `data` for display. Never used to key anything.
+  /// Hidden from written reviewers per section 6.
   displayName String
 
   /// { fieldId: value }. JSONB rather than entity-attribute-value: CSV columns
@@ -240,6 +258,11 @@ model Applicant {
   /// a database guarantee rather than a UI convention. Postgres permits many nulls
   /// in a unique index, so blank-email rows are unaffected.
   @@unique([instanceId, email])
+  /// "Applicant 47" must name exactly one person. Without this, two applicants can
+  /// share a label, two reviewers can score different people under one name, and a
+  /// return-to-pool conversation about an applicant is ambiguous. Same class of
+  /// guarantee as the email constraint above.
+  @@unique([instanceId, sourceRowIndex])
   @@index([instanceId, status])
 }
 

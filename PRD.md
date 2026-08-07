@@ -15,7 +15,7 @@ Concrete failure modes visible in the current file:
 - **Applicant identity is re-keyed by name across sheets.** `Decisions` uses `ID` + `Full Name`, `1RD Voting` uses `Name` only, `1R Notes` uses free-text `Applicant Name` typed by interviewers. Any typo or accidental cell manipulation can silently orphan a record or break the workbook.
 - **Voting is a manually maintained reviewer-by-applicant grid.** `Voting Results` has 30 reviewer columns. `2RD Vote` has 11. Adding or removing a reviewer means restructuring a sheet mid-round.
 - **Rubric scores and demographics live in the same rows.** There is no mechanism to show a first-round interviewer the scores without also exposing race, first-gen status, and written responses.
-- **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it. Training a new operator on the workbook takes significant time and close oversight. 
+- **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it. Training a new operator on the workbook takes significant time and close oversight.
 - **Editing the workbook is difficult.** Updating or making changes to the workbook is tricky and cumbersome, with significant limitations based on how the workbook was originally built. Changes to the rubric, number or types of questions, and other variables between application cycles requires significant maintenance of the workbook beforehand.
 
 ## 2. Goals
@@ -100,9 +100,21 @@ Score                          // written round
 ReviewNote
   id, assignmentId, body
 
+InterviewCategory              // the first-round interview rubric. Instance-scoped
+  id, instanceId               //   and admin-configured, per goal 5. NOT the same
+  name, maxPoints, ordinal     //   rows as RubricCategory, which is the written rubric.
+  UNIQUE (instanceId, ordinal)
+
 InterviewResult                // first round, imported. Two rows per applicant.
   id, applicantId
-  interviewerName, score
+  interviewerName
+  score                        // the average as it appears in the source sheet,
+                               //   imported verbatim. Never recomputed from the
+                               //   category rows. See open decision 6.
+
+InterviewCategoryScore         // one per category per InterviewResult
+  id, interviewResultId, interviewCategoryId, points
+  UNIQUE (interviewResultId, interviewCategoryId)
 
 InterviewNotes                 // one row per applicant; only one interviewer of
   id, applicantId, body        //   the pair writes them, and the "Your Name"
@@ -153,12 +165,13 @@ AuditLog                       // admin overrides, per §8
   createdAt
 ```
 
-Four notes on this model:
+Five notes on this model:
 
 - `Applicant.data` as JSONB rather than a key-value table. CSV columns vary cycle to cycle, so the schema cannot be fixed, but Postgres can still index and query inside JSONB. A separate `Field` table carries the human-facing metadata. This is meaningfully simpler than entity-attribute-value and just as flexible.
 - **Every score, vote, and note references `applicantId`, never a name.** This is the fix for the current workbook's core problem.
 - The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check. `groupKey` ties them back to a single logical question and `isMultiSelect` tells the UI and the demographic aggregations to treat them as one field rather than ten independent ones.
 - **`PassApplicant` exists because pass membership cannot be reconstructed after the fact.** FR-17 fixes membership at pass creation, but `Applicant.status` only ever shows the *current* state; once an applicant is resolved there is no way to ask "who was in pass 1?" without a stored roster. It is also where the all-COI case lands: §7.4 requires that an applicant every reviewer has recused from be distinguishable from a unanimous result, and `NEEDS_ADMIN` is that distinction. Resolution is a property of an applicant *within a pass*, not of the applicant.
+- **The interview rubric is its own table, and `InterviewResult.score` is imported rather than derived.** `InterviewCategory` is deliberately separate from `RubricCategory`: the written rubric and the interview rubric are different instruments with different categories, and goal 5 requires both be reconfigurable between cycles, which rules out fixed columns. `score` holds the average exactly as the source sheet carries it — if it disagrees with the mean of the category rows, the sheet wins, because that is the number the interviewers actually recorded. There is deliberately no `UNRESOLVED` on `ApplicantStatus`: an applicant left undecided when the second round closes is identified by their row in the final pass, not by a second copy of that fact on the applicant. See FR-17.
 
 ## 6. Field visibility matrix
 
@@ -167,6 +180,7 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 | Field category | Written reviewer | First-round reviewer | Second-round reviewer | Admin |
 |---|---|---|---|---|
 | Applicant name | **Hidden** | Visible | Visible | Visible |
+| Applicant email | **Hidden** | Visible | Visible | Visible |
 | DEMOGRAPHIC | Hidden | Hidden | Visible | Visible |
 | RESPONSE | Visible | **Hidden** | Visible | Visible |
 | OTHER | Configurable, default hidden | Configurable, default hidden | Visible | Visible |
@@ -177,6 +191,8 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 The written-reviewer row is a deliberate change from the current spreadsheet, where reviewers see whatever columns are in front of them. Written reviewers grading essays have no need for ethnicity or first-gen status, and hiding them removes a bias vector at no cost.
 
 Names are hidden from written reviewers for the same reason (open decision 4). Written reviewers see an anonymous label built from `sourceRowIndex`, e.g. "Applicant 47." Names remain visible to admins throughout, including on FR-10, since decisions cannot be made against anonymous labels. A written reviewer who recognizes an applicant from the essay itself can still return to pool.
+
+**Email is hidden from written reviewers too, and the row above is not redundant.** USC addresses are `firstname.lastname@usc.edu` — an email is a name in disguise, and FR-2 makes email un-excludable, so it exists on every applicant. Both `Applicant.displayName` and `Applicant.email` are promoted columns rather than `Field` rows, so neither is covered by the per-field `visibleToWrittenReviewer` toggle. The server-side visibility layer therefore has two inputs: `Field` rows for CSV-derived columns, and fixed rules for the promoted ones (`displayName` and `email` hidden in the written round, `sourceRowIndex` exposed only as the anonymous label).
 
 ## 7. Functional requirements
 
@@ -205,12 +221,17 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 **FR-7 Auto-assignment.** Generate assignments subject to:
 
-- Exactly 3 reviewers per assigned applicant
 - At most 1 Sparklet per applicant
-- Reviewer load as even as possible: no reviewer exceeds `ceil(total_slots / reviewer_count)`
-- 5% of assignment slots (rounded, minimum 3) left unassigned, distributed so that each affected applicant is short exactly one reviewer rather than concentrating gaps on few applicants
+- Every applicant gets 3 reviewers, except those short one slot to the pool, who get 2. No applicant ever gets fewer than 2 from auto-assignment.
+- Reviewer load as even as possible: no reviewer exceeds `ceil(total_slots / reviewer_count)`, where `total_slots = applicant_count × 3` — the full grid, not the reduced count after the pool is withheld. At 150 applicants and 30 reviewers that is `ceil(450 / 30) = 15`. Using the full grid keeps the bound stable as returns add slots back to the pool mid-round.
+- Pool size is exactly `min(max(floor(0.05 × total_slots), 3), applicant_count)` — the floor first, then the minimum of 3, then the cap, which wins over both. At 150 applicants: `floor(22.5) = 22` slots across 22 distinct applicants. **Floor, not round**: 22, never 23. At 10 applicants: `floor(1.5) = 1`, raised to 3. At 2 applicants: raised to 3, then capped back to 2.
+- Each pooled slot comes off a *different* applicant, so an affected applicant is short exactly one reviewer. This is why the pool cannot exceed `applicant_count`: with 2 applicants, a 3-slot minimum would force someone short two, which defeats the purpose. On instances that small the pool is 2 slots, or fewer.
 
-**Feasibility constraint.** With 3 slots per applicant and at most 1 Sparklet each, non-Sparklets must fill at least 2 of every 3 slots. If Sparklets make up more than one third of the roster, even load and the Sparklet constraint are mutually unsatisfiable. The system must detect this before generating and tell the admin plainly: "You have 14 Sparklets among 30 reviewers. Even distribution is not possible under the one-Sparklet-per-applicant rule. Options: add non-Sparklet reviewers, or allow Sparklet load to be lighter than average." Silently violating one of the constraints is the wrong behavior.
+**Feasibility constraint.** With at most 1 Sparklet per applicant, non-Sparklets must fill at least 2 of every 3-slot applicant and at least 1 of every 2-slot applicant. At 150 applicants with a 22-slot pool that is `2 × 128 + 1 × 22 = 278` of 428 assignable slots, or 64.9% — so the "Sparklets ≤ one third of the roster" rule of thumb is deliberately conservative. **The precheck computes against actual assignable slots, not the one-third shortcut.**
+
+When the check fails, the system must not silently violate a constraint. It tells the admin plainly: "You have 14 Sparklets among 30 reviewers. Even distribution is not possible under the one-Sparklet-per-applicant rule. Options: add non-Sparklet reviewers, or allow Sparklet load to be lighter than average."
+
+**Per open decision 2, the second option is offered as an action, not just as prose.** Choosing it generates under a relaxed load rule: the one-Sparklet-per-applicant constraint is never broken, Sparklets take whatever the constraint allows, and non-Sparklets absorb the remainder bounded by `ceil(non_sparklet_slots / non_sparklet_count)`. In the example above that is 16 non-Sparklets carrying ≥278 slots, about 17.4 each, against the 15 that the unrelaxed rule would give. The admin sees both numbers before confirming. The one-Sparklet rule is never the thing that gives.
 
 **FR-8 Manual assignment override.** Admin can assign, unassign, or swap any reviewer on any applicant. Overrides are marked `origin: MANUAL` so a later regeneration does not clobber them without warning.
 
@@ -231,7 +252,9 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 **FR-12 Score and notes import.** Two uploads with a defined contract:
 
-*First Round Scores* — required columns: `Applicant Email` (or `Applicant Name` if email is unavailable), `Interviewer Name`, `Score`. Two rows per applicant expected.
+*First Round Scores* — required columns: `Applicant Email` (or `Applicant Name` if email is unavailable), `Interviewer Name`, one column per configured `InterviewCategory`, and `Average`. Two rows per applicant expected, one per interviewer.
+
+The category columns are matched to `InterviewCategory` rows by the same mapping table FR-2 uses for applicant columns, so a cycle that changes its interview rubric does not need a code change. `Average` imports verbatim into `InterviewResult.score`; the category columns become `InterviewCategoryScore` rows. The importer does **not** recompute the average or reject a row whose average disagrees with its categories — interviewers sometimes adjust it deliberately — but it does flag the disagreement in the preview so the admin sees it before commit.
 
 *First Round Notes* — required columns: `Applicant Email` (or `Applicant Name`), `Notes`. One row per applicant.
 
@@ -239,7 +262,7 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
-**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the four category scores collapsed by default and expandable, plus the interview notes. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
+**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
 
 **FR-15 First-round results.** Applicants ranked by yes percentage descending, where `yes% = yes / (yes + no)`, skips excluded from both numerator and denominator. Show raw counts alongside the percentage; 2/2 and 14/14 are not the same signal. Selection and demographic-breakdown behavior mirrors FR-11.
 
@@ -254,21 +277,32 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 - A reviewer with an active COI on an applicant has their vote in that pass automatically set to SKIP and cannot vote on that applicant.
 - A vote requires an explicit submit action. Selecting yes/no without submitting records nothing.
 - An applicant is **resolved** within a pass when every non-SKIP reviewer has submitted:
-  - All YES → `status = SPARKLET`, excluded from future passes
-  - All NO → `status = REJECTED`, excluded from future passes
-  - Mixed → stays ACTIVE, carries into the next pass
+  - All YES → `PassApplicant.resolution = SPARKLET`, `Applicant.status = SPARKLET`, excluded from future passes
+  - All NO → `resolution = REJECTED`, `status = REJECTED`, excluded from future passes
+  - Mixed → `resolution = CARRIED`, stays ACTIVE, carries into the next pass
 - An admin can manually reject any applicant within a pass, excluding them from future passes.
 - Closing a pass without full votes leaves unvoted applicants ACTIVE and carried forward.
+
+**`PassApplicant.resolution` records what happened to an applicant *in that pass*. It does not control membership in the next one.** Membership is recomputed at each pass creation from `Applicant.status`, so an applicant can carry a terminal-looking `NEEDS_ADMIN` on pass 1 and still appear in pass 2. These are separate questions and the schema keeps them separate deliberately.
+
+**Closing the second round.** Passes do not end on their own — an admin ends them with an explicit "Close second round" action, which is what moves `Instance.currentStage` to `COMPLETE`. That action writes `resolution = NEEDS_ADMIN` onto the final pass's rows for every applicant still unresolved, and is the *only* thing that produces FR-19's Unresolved group. Three properties it must have:
+
+- **Idempotent.** Running it twice writes the same rows and changes nothing the second time.
+- **Blocked when no pass exists.** An admin who reaches the second round, creates no pass, and closes the round would otherwise leave every applicant unresolved with no `PassApplicant` row to find them by, and FR-19 would render an empty Unresolved group over a live pool. Tell the admin to create a pass first.
+- **Audited**, per §8, alongside the other admin overrides.
+
+Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no `UNRESOLVED` status, because an applicant's fate at the end of the round is already recorded on their final pass row and a second copy could disagree with the first. **FR-19, FR-20, and the §8 archive-and-purge therefore identify unresolved applicants by that row, never by `status`.** A successor reading `ACTIVE` in a `COMPLETE` instance is looking at the wrong column.
 
 **Edge cases that must be handled explicitly, not left to inference:**
 
 | Case | Required behavior |
 |---|---|
-| All reviewers have COI on an applicant | Cannot resolve. Flag to admin for manual decision. Do not treat as unanimous. |
+| All reviewers have COI on an applicant | Cannot resolve. `resolution = NEEDS_ADMIN` on that pass. Do not treat as unanimous. The applicant stays ACTIVE and **carries into the next pass**, where a reviewer without a conflict may yet be added — `NEEDS_ADMIN` describes the pass, not the applicant. |
 | Pass created with zero ACTIVE applicants | Block creation, tell the admin the pool is resolved. |
 | A reviewer is added mid-round | They vote only in passes created after they are added. Existing open pass treats them as SKIP. |
 | Admin reopens a closed pass | Not supported in v1. Corrections happen via manual override on the applicant. |
-| Passes end with an applicant still unresolved | Admin must decide explicitly. The applicant is neither SPARKLET nor REJECTED, and FR-19 lists them in a third "Unresolved" group rather than defaulting them either way. |
+| Passes end with an applicant still unresolved | The "Close second round" action writes `resolution = NEEDS_ADMIN` on their final pass row. They are neither SPARKLET nor REJECTED, and FR-19 lists them under Unresolved rather than defaulting them either way. |
+| Second round closed with no pass ever created | Block the close. See "Closing the second round" above. |
 
 **Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, with counts revealed to everyone at pass close. Reviewers should not have knowledge of other reviewers' votes.
 
@@ -276,7 +310,10 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 ### 7.5 Final and export
 
-**FR-19 Final dashboard.** All second-round applicants sorted into New Sparklet, Rejected, and Unresolved, with full profiles accessible. Unresolved means passes ended before a unanimous result; those applicants require an explicit admin decision and must not be silently dropped.
+**FR-19 Final dashboard.** All second-round applicants sorted into New Sparklet, Rejected, and Unresolved, with full profiles accessible.
+
+**Unresolved** is every applicant whose row in the final pass carries `resolution = NEEDS_ADMIN` — which covers both an applicant every reviewer recused from and one who simply never reached a unanimous result before the round closed. Both require an explicit admin decision and must not be silently dropped. The group is identified by that pass row, never by `Applicant.status`, which stays `ACTIVE`; see FR-17. The underlying votes remain visible, so an admin can tell the two situations apart — eleven skips reads very differently from 7–4.
+
 Demographic breakdown of the Sparklet class against each preceding stage, replacing the manual `Overall Stats` sheet.
 
 **FR-20 Export.** One-click export of the entire instance as JSON, plus per-stage CSVs (all applicants with scores, decisions by stage, final class with emails). Non-negotiable for succession: the club must never be locked into this tool.
@@ -312,8 +349,18 @@ These need answers before or during the relevant build phase. They are the place
 3. **Live vote visibility in passes.** RESOLVED: See FR-17.
 4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later. Answer: Written reviewers should not see applicant names.
 5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking. Answer: Agree with the v1 recommendation.
-6. **Interview score scale.** ~~Confirm which the imported sheet will actually carry.~~ **Resolved on the facts:** the S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 assumes. `InterviewResult` as modeled above holds one `score` per interviewer and is deliberately left that way for now; Phase 5 will need to add a category dimension to it (either four columns, or a child `InterviewCategoryScore` row set keyed by `interviewResultId`). What remains open is a product question, not a data question: does the first-round reviewer dashboard (FR-14) show all four categories, or only the average? Showing four is more information; showing one is faster to read on a phone. Decide before Phase 5 designs the import contract. Answer: show the average prominently, with the four category scores available but collapsed by default, for both interviewers. Ten numbers on a phone screen works against FR-14's friction goal if all are shown at once. This makes the category dimension on `InterviewResult` required rather than optional in Phase 5.
-7. **Multi-select demographic counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. Count them once in each category (totals exceed 100%), count them in a separate "Multiracial" bucket, or report both views. Club decision, not technical. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable. Answer: fractional counting. An applicant checking n categories contributes 1/n to each, so two boxes gives 0.5 each and three gives 0.33 each. Category totals then sum to the headcount rather than exceeding it. Display: show one decimal place alongside a raw headcount, e.g. "East Asian: 12.5 weighted / 18 checked," since a panel showing fractional people with no explanation will read as a bug to a successor.
+6. **Interview score scale. RESOLVED.** The S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 originally assumed.
+
+   *Display:* show the average prominently, with the category scores available but collapsed by default, for both interviewers. Ten numbers on a phone screen works against FR-14's friction goal if all are shown at once.
+
+   *Model:* §5 now carries `InterviewCategory` and `InterviewCategoryScore`. The interview rubric is **instance-scoped and admin-configured, not four fixed columns and not shared with `RubricCategory`** — the written and interview rubrics are different instruments, and goal 5 requires both be reconfigurable between cycles. `InterviewResult.score` is the average **as imported**, never recomputed from the category rows; see FR-12 for how a disagreement between the two is surfaced. This is Phase 5 schema work and is not in the current migration.
+7. **Multi-select demographic counting. RESOLVED: fractional counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable.
+
+   An applicant checking *n* categories contributes `1/n` to each: two boxes gives 0.5 each, three gives 0.33 each. Display one decimal place alongside a raw headcount — "East Asian: 12.5 weighted / 18 checked" — since a panel showing fractional people with no explanation will read as a bug to a successor.
+
+   **Applicants who check nothing go in a "Not specified" bucket**, counted as a whole person there. `1/n` is undefined at `n = 0`, and without the bucket those applicants vanish from the breakdown entirely and the weighted column silently sums to the responder count rather than the headcount. With it, the invariant holds as stated: **weighted totals sum to the headcount.** Note that an applicant who checks no box but writes into the free-text `Specify your ethnicity…` column has given a real answer that the count cannot read; they belong in "Not specified" too, and the free-text values are worth showing beneath the breakdown rather than discarding.
+
+   **What counts as checked:** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text `Specify your ethnicity…` column carries no `groupKey` and is not a member of the one-hot set.
 
 ## 11. Out of scope for v1, worth noting for v2
 

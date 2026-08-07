@@ -71,18 +71,32 @@ Each phase lists what to build, the prompt shape that works, and a verification 
 
 **This is the phase to slow down on.** Write your test cases first, in prose, before Claude writes anything:
 
+**These cases assume the PRD v1.1 pool definition — 5% of assignment *slots*, not 5% of applicants.** Every applicant is assigned; ~22 of them are short exactly one reviewer. The older "7 applicants held with zero reviewers" model is gone, and any number derived from it is wrong.
+
 ```
 30 reviewers, 8 Sparklets, 150 applicants
-  → 143 assigned (7 in pool), 429 slots, load 14 or 15, no applicant with 2 Sparklets
+  → 450 total slots, pool = floor(0.05 × 450) = 22 (NOT 23 — floor, not round)
+  → all 150 applicants assigned: 128 with 3 reviewers, 22 with 2
+  → 428 slots filled, load ceiling ceil(450/30) = 15, no applicant with 2 Sparklets
+  → the 22 short applicants are 22 DISTINCT applicants, never one applicant short two
 
 30 reviewers, 15 Sparklets, 150 applicants
   → feasibility check FAILS, explains why, does not generate
+  → offers "allow uneven Sparklet load" as an ACTION, not just prose (decision 2)
+  → taking it generates with the one-Sparklet rule still intact and
+    non-Sparklets over the 15 ceiling; both numbers shown before confirming
 
 3 reviewers, 0 Sparklets, 10 applicants
-  → every reviewer on every assigned applicant, still respects the 5% pool
+  → 30 slots, pool = max(floor(1.5), 3) = 3
+  → 7 applicants get all 3 reviewers, 3 applicants get 2. NOT every reviewer
+    on every applicant — the old case said that and it is now wrong.
+
+2 reviewers, 2 applicants
+  → 6 slots, floor(0.3) = 0, minimum 3, but pool caps at applicant_count = 2
+  → the exactly-one-short rule beats the minimum-3 rule; no applicant loses two
 
 31 reviewers, 150 applicants
-  → 429 slots / 31 does not divide evenly; loads differ by at most 1
+  → 428 slots across 31 does not divide evenly; loads differ by at most 1
 
 Regeneration after manual overrides exist
   → warns, and preserves MANUAL assignments unless explicitly told otherwise
@@ -142,7 +156,9 @@ Applicant D: 2 reviewers have COI, other 9 all YES
   → SPARKLET (COI counts as SKIP, excluded from unanimity)
 
 Applicant E: all 11 reviewers have COI
-  → unresolved, flagged for admin. NOT auto-advanced.
+  → pass 1 resolution = NEEDS_ADMIN, flagged for admin. NOT auto-advanced.
+  → E stays ACTIVE and DOES appear in pass 2. NEEDS_ADMIN describes the pass,
+    not the applicant; membership is recomputed from status at each creation.
 
 Pass 1 closed with applicant F having 5 of 11 votes
   → F stays ACTIVE, carries to pass 2
@@ -152,6 +168,15 @@ Reviewer added between pass 1 and pass 2
 
 Admin manually rejects G during pass 1
   → REJECTED immediately, absent from pass 2
+
+"Close second round" with H unresolved in the final pass
+  → writes NEEDS_ADMIN on H's FINAL pass row; H's status stays ACTIVE
+  → H appears in FR-19's Unresolved group, found by that row and never by status
+  → running the close twice changes nothing the second time
+
+"Close second round" when no pass was ever created
+  → blocked. Otherwise every applicant is unresolved with no pass row to
+    find them by, and FR-19 renders an empty group over a live pool.
 ```
 
 **Prompt shape:** PRD §7.4 in full including the edge case table, plus the cases above. Ask for the resolution logic as a pure function taking a vote set and returning a status, tested independently of the database.

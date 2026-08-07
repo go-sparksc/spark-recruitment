@@ -1,4 +1,4 @@
-// Scratch verification: do the two unique constraints actually bite?
+// Scratch verification: do the three unique constraints actually bite?
 //
 // Run with:  npx tsx prisma/checks/unique-constraints.ts
 //
@@ -16,6 +16,7 @@ import { SEED_INSTANCE_ID, createSeedClient } from "../seed/client";
 const prisma = createSeedClient();
 
 const APPLICANT_INDEX = "Applicant_instanceId_email_key";
+const SOURCE_ROW_INDEX = "Applicant_instanceId_sourceRowIndex_key";
 const ASSIGNMENT_INDEX = "Assignment_round_applicantId_reviewerId_key";
 
 const createdApplicantIds: string[] = [];
@@ -100,7 +101,27 @@ async function main() {
     createdApplicantIds.push(duplicateApplicantId);
   });
 
-  // --- 2. Assignment (round, applicantId, reviewerId) -----------------------
+  // --- 2. Applicant (instanceId, sourceRowIndex) ----------------------------
+  // The anonymous label a written reviewer sees is built from sourceRowIndex, so
+  // it has to name exactly one person (PRD section 6).
+  //
+  // The probe row carries a NULL email so that the email constraint cannot be what
+  // fires. Postgres permits many nulls in a unique index, so the only thing this
+  // row can collide on is sourceRowIndex.
+  const duplicateRowIndexId = "check_duplicate_source_row_index";
+
+  await expectRejection("Applicant (instanceId, sourceRowIndex)", SOURCE_ROW_INDEX, async () => {
+    await prisma.$executeRaw`
+      INSERT INTO "Applicant"
+        ("id", "instanceId", "sourceRowIndex", "email", "displayName", "data", "updatedAt")
+      VALUES
+        (${duplicateRowIndexId}, ${SEED_INSTANCE_ID}, ${applicant.sourceRowIndex}, NULL,
+         'Duplicate Row Index Probe', '{}'::jsonb, NOW())
+    `;
+    createdApplicantIds.push(duplicateRowIndexId);
+  });
+
+  // --- 3. Assignment (round, applicantId, reviewerId) -----------------------
   // This one needs a row to collide with, so the first insert is expected to
   // succeed and is registered for cleanup immediately.
   const originalAssignment = await prisma.assignment.create({
@@ -151,7 +172,7 @@ async function cleanup() {
 
 async function confirmRestored() {
   const leftover = await prisma.applicant.count({
-    where: { id: { in: ["check_duplicate_applicant"] } },
+    where: { id: { in: ["check_duplicate_applicant", "check_duplicate_source_row_index"] } },
   });
   const leftoverAssignments = await prisma.assignment.count({
     where: { id: { in: ["check_assignment_original", "check_duplicate_assignment"] } },
