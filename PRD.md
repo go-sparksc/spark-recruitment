@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai
-**Status:** Draft v1, pre-build
+**Status:** v1.1, Phase 0 complete
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -12,11 +12,11 @@ Spark SC currently runs recruitment out of a single Excel workbook. The S26 file
 
 Concrete failure modes visible in the current file:
 
-- **Applicant identity is re-keyed by name across sheets.** `Decisions` uses `ID` + `Full Name`, `1RD Voting` uses `Name` only, `1R Notes` uses free-text `Applicant Name` typed by interviewers. Any typo silently orphans a record.
+- **Applicant identity is re-keyed by name across sheets.** `Decisions` uses `ID` + `Full Name`, `1RD Voting` uses `Name` only, `1R Notes` uses free-text `Applicant Name` typed by interviewers. Any typo or accidental cell manipulation can silently orphan a record or break the workbook.
 - **Voting is a manually maintained reviewer-by-applicant grid.** `Voting Results` has 30 reviewer columns. `2RD Vote` has 11. Adding or removing a reviewer means restructuring a sheet mid-round.
 - **Rubric scores and demographics live in the same rows.** There is no mechanism to show a first-round interviewer the scores without also exposing race, first-gen status, and written responses.
-- **Aggregations are hand-built.** `Overall Stats` and `WR Data` contain hardcoded counts (`Males 30`, `Females 36`, `Limit 76`, `Curr 67`) that have to be recomputed by hand whenever a decision changes.
-- **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it.
+- **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it. Training a new operator on the workbook takes significant time and close oversight. 
+- **Editing the workbook is difficult.** Updating or making changes to the workbook is tricky and cumbersome, with significant limitations based on how the workbook was originally built. Changes to the rubric, number or types of questions, and other variables between application cycles requires significant maintenance of the workbook beforehand.
 
 ## 2. Goals
 
@@ -24,7 +24,8 @@ Concrete failure modes visible in the current file:
 2. **Near-zero reviewer friction.** A reviewer opens a link, picks a round and their name, and starts grading. No account creation, no download, no spreadsheet training.
 3. **Structural bias controls.** Field-level visibility per round, enforced by the system rather than by an admin remembering to hide columns.
 4. **Survives succession.** A new Co-President with no context can run a full cycle from documentation alone.
-5. **Portfolio-legible.** The data model, the assignment algorithm, and the pass state machine are the three pieces worth talking about in a PM interview. They should be clean enough to explain in five minutes.
+5. **Flexible to future application changes.** The system should be flexible and able to adapt to changes in number of questions, types of questions, rubric criteria, point values, or number of categories.
+6. **Portfolio-legible.** The data model, the assignment algorithm, and the pass state machine are the three pieces worth talking about in a PM interview. They should be clean enough to explain in five minutes.
 
 ## 3. Non-goals (v1)
 
@@ -38,10 +39,10 @@ Concrete failure modes visible in the current file:
 
 | Role | Count per cycle | Access | Needs |
 |---|---|---|---|
-| Administrator | 2–4 (Co-Presidents, recruitment leads) | Password per instance | Setup, assignment, overrides, decisions, exports |
-| Written reviewer | ~30 | Round link + access code + name | Read assigned profiles, score against rubric, return conflicts |
+| Administrator | 2–6 (Co-Presidents, E-Board) | Password per instance | Setup, assignment, overrides, decisions, exports |
+| Written reviewer | ~30-40 | Round link + access code + name | Read assigned profiles, score against rubric, return conflicts |
 | First-round reviewer | ~15–25 | Same | Read interview scores and notes, vote yes/no |
-| Second-round reviewer | ~11–15 | Same | Read full profile, flag conflicts, submit votes per pass |
+| Second-round reviewer | ~10–15 | Same | Read full profile, flag conflicts, submit votes per pass |
 
 ## 5. Core data model
 
@@ -165,7 +166,7 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 
 | Field category | Written reviewer | First-round reviewer | Second-round reviewer | Admin |
 |---|---|---|---|---|
-| Applicant name | Visible | Visible | Visible | Visible |
+| Applicant name | **Hidden** | Visible | Visible | Visible |
 | DEMOGRAPHIC | Hidden | Hidden | Visible | Visible |
 | RESPONSE | Visible | **Hidden** | Visible | Visible |
 | OTHER | Configurable, default hidden | Configurable, default hidden | Visible | Visible |
@@ -174,6 +175,8 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 | Other reviewers' scores/votes | Hidden | Hidden | Hidden until pass closes | Visible |
 
 The written-reviewer row is a deliberate change from the current spreadsheet, where reviewers see whatever columns are in front of them. Written reviewers grading essays have no need for ethnicity or first-gen status, and hiding them removes a bias vector at no cost.
+
+Names are hidden from written reviewers for the same reason (open decision 4). Written reviewers see an anonymous label built from `sourceRowIndex`, e.g. "Applicant 47." Names remain visible to admins throughout, including on FR-10, since decisions cannot be made against anonymous labels. A written reviewer who recognizes an applicant from the essay itself can still return to pool.
 
 ## 7. Functional requirements
 
@@ -205,7 +208,7 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 - Exactly 3 reviewers per assigned applicant
 - At most 1 Sparklet per applicant
 - Reviewer load as even as possible: no reviewer exceeds `ceil(total_slots / reviewer_count)`
-- 5% of applicants (rounded, minimum 1) held in an **unassigned pool** with 0 reviewers
+- 5% of assignment slots (rounded, minimum 3) left unassigned, distributed so that each affected applicant is short exactly one reviewer rather than concentrating gaps on few applicants
 
 **Feasibility constraint.** With 3 slots per applicant and at most 1 Sparklet each, non-Sparklets must fill at least 2 of every 3 slots. If Sparklets make up more than one third of the roster, even load and the Sparklet constraint are mutually unsatisfiable. The system must detect this before generating and tell the admin plainly: "You have 14 Sparklets among 30 reviewers. Even distribution is not possible under the one-Sparklet-per-applicant rule. Options: add non-Sparklet reviewers, or allow Sparklet load to be lighter than average." Silently violating one of the constraints is the wrong behavior.
 
@@ -214,11 +217,11 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 **FR-9 Reviewer dashboard, written.** Reviewer selects Round → Written, then their name from a dropdown. They see:
 
 - Their assigned applicants as a list with completion state (0/4 scored, 4/4 scored)
-- An applicant detail view: display name, all RESPONSE fields, rubric always visible alongside
+- An applicant detail view: anonymous label (e.g. "Applicant 47"), all RESPONSE fields, rubric always visible alongside. No name, per §6.
 - Score inputs per rubric category, plus a free-text note
 - Autosave on every change. A dropped connection mid-review must not lose work.
 - "Return to pool" on any applicant, with a required reason (conflict of interest / other)
-- "Claim from pool," showing unassigned applicants that still need coverage
+- "Claim from pool," showing open assignment slots on applicants who are short a reviewer
 
 **FR-10 Written results dashboard.** Applicants ranked by average score descending, then by variance ascending. Each row shows: rank, name, average, variance, review count (2/3, 3/3), and demographic fields inline. Filters for "high variance" and "incomplete." Admin can open any applicant to read the full profile and all three reviewers' scores and notes.
 
@@ -236,7 +239,7 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
-**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's interview scores (with interviewer names) and notes. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
+**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the four category scores collapsed by default and expandable, plus the interview notes. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
 
 **FR-15 First-round results.** Applicants ranked by yes percentage descending, where `yes% = yes / (yes + no)`, skips excluded from both numerator and denominator. Show raw counts alongside the percentage; 2/2 and 14/14 are not the same signal. Selection and demographic-breakdown behavior mirrors FR-11.
 
@@ -265,14 +268,16 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 | Pass created with zero ACTIVE applicants | Block creation, tell the admin the pool is resolved. |
 | A reviewer is added mid-round | They vote only in passes created after they are added. Existing open pass treats them as SKIP. |
 | Admin reopens a closed pass | Not supported in v1. Corrections happen via manual override on the applicant. |
+| Passes end with an applicant still unresolved | Admin must decide explicitly. The applicant is neither SPARKLET nor REJECTED, and FR-19 lists them in a third "Unresolved" group rather than defaulting them either way. |
 
-**Open decision:** should reviewers see live vote counts during an open pass? Recommendation is no, to prevent anchoring, with counts revealed to everyone at pass close. This is a values call for the club, not a technical one.
+**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, with counts revealed to everyone at pass close. Reviewers should not have knowledge of other reviewers' votes.
 
-**FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained.
+**FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained. This is only accessible by admin.
 
 ### 7.5 Final and export
 
-**FR-19 Final dashboard.** All second-round applicants sorted into New Sparklet and Rejected, with full profiles accessible. Demographic breakdown of the Sparklet class against each preceding stage, replacing the manual `Overall Stats` sheet.
+**FR-19 Final dashboard.** All second-round applicants sorted into New Sparklet, Rejected, and Unresolved, with full profiles accessible. Unresolved means passes ended before a unanimous result; those applicants require an explicit admin decision and must not be silently dropped.
+Demographic breakdown of the Sparklet class against each preceding stage, replacing the manual `Overall Stats` sheet.
 
 **FR-20 Export.** One-click export of the entire instance as JSON, plus per-stage CSVs (all applicants with scores, decisions by stage, final class with emails). Non-negotiable for succession: the club must never be locked into this tool.
 
@@ -298,19 +303,17 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 | Time from written round close to first-round list published | Estimate | < 1 hour |
 | New admin able to run a cycle from docs alone | No | Yes, validated by a dry run with a board member |
 
-Capture the baselines from the S26 cycle before you start building. A before/after number is what makes this a portfolio project rather than a description of a tool.
-
 ## 10. Open decisions
 
 These need answers before or during the relevant build phase. They are the places where an unstated assumption would produce the wrong system.
 
-1. **Unassigned pool definition.** 5% of applicants held with zero reviewers, or 5% of assignment slots left open across many applicants? Recommendation: 5% of applicants fully unassigned, since reviewers "pick up additional applicants," which implies whole applicants. Consequence: the pool must be drained before the round closes, so the results dashboard needs an incomplete-coverage warning.
-2. **Sparklet-heavy roster handling.** When the feasibility check fails, does the club prefer uneven Sparklet load or relaxing the one-Sparklet rule?
-3. **Live vote visibility in passes.** See FR-17.
-4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later.
-5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking.
-6. **Interview score scale.** ~~Confirm which the imported sheet will actually carry.~~ **Resolved on the facts:** the S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 assumes. `InterviewResult` as modeled above holds one `score` per interviewer and is deliberately left that way for now; Phase 5 will need to add a category dimension to it (either four columns, or a child `InterviewCategoryScore` row set keyed by `interviewResultId`). What remains open is a product question, not a data question: does the first-round reviewer dashboard (FR-14) show all four categories, or only the average? Showing four is more information; showing one is faster to read on a phone. Decide before Phase 5 designs the import contract.
-7. **Multi-select demographic counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. Count them once in each category (totals exceed 100%), count them in a separate "Multiracial" bucket, or report both views. Club decision, not technical. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable.
+1. **Unassigned pool definition. RESOLVED: 5% of assignment slots.** ~22 slots of 450 left open, spread across ~22 distinct applicants who each start with 2 of 3 reviewers rather than concentrating the gap on a few applicants with zero. The pool exists as a conflict-of-interest buffer: a reviewer who recuses returns their slot to the pool, and any reviewer can claim an open slot. Chosen over holding whole applicants unassigned because a pooled applicant under that model needs three separate claims to be reviewed at all, and if the pool moves slowly they receive zero reviews. Under this model a slow-moving pool costs an applicant one opinion, not all three. Consequence: returns add slots to the pool over the course of the round, so FR-10 must warn on total applicants with fewer than 3 completed reviews, not just the initial 22.
+2. **Sparklet-heavy roster handling.** When the feasibility check fails, does the club prefer uneven Sparklet load or relaxing the one-Sparklet rule? Answer: uneven Sparklet load.
+3. **Live vote visibility in passes.** RESOLVED: See FR-17.
+4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later. Answer: Written reviewers should not see applicant names.
+5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking. Answer: Agree with the v1 recommendation.
+6. **Interview score scale.** ~~Confirm which the imported sheet will actually carry.~~ **Resolved on the facts:** the S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 assumes. `InterviewResult` as modeled above holds one `score` per interviewer and is deliberately left that way for now; Phase 5 will need to add a category dimension to it (either four columns, or a child `InterviewCategoryScore` row set keyed by `interviewResultId`). What remains open is a product question, not a data question: does the first-round reviewer dashboard (FR-14) show all four categories, or only the average? Showing four is more information; showing one is faster to read on a phone. Decide before Phase 5 designs the import contract. Answer: show the average prominently, with the four category scores available but collapsed by default, for both interviewers. Ten numbers on a phone screen works against FR-14's friction goal if all are shown at once. This makes the category dimension on `InterviewResult` required rather than optional in Phase 5.
+7. **Multi-select demographic counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. Count them once in each category (totals exceed 100%), count them in a separate "Multiracial" bucket, or report both views. Club decision, not technical. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable. Answer: fractional counting. An applicant checking n categories contributes 1/n to each, so two boxes gives 0.5 each and three gives 0.33 each. Category totals then sum to the headcount rather than exceeding it. Display: show one decimal place alongside a raw headcount, e.g. "East Asian: 12.5 weighted / 18 checked," since a panel showing fractional people with no explanation will read as a bug to a successor.
 
 ## 11. Out of scope for v1, worth noting for v2
 
