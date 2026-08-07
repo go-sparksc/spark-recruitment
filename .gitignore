@@ -158,6 +158,7 @@ next-env.d.ts
 # and immigration status, self-reported ethnicity, and first-generation status.
 # Development runs on prisma/seed.ts synthetic data instead.
 *.csv
+!prisma/fixtures/*.csv
 *.xlsx
 *.xls
 /data
