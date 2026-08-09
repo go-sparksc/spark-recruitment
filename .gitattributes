@@ -1,0 +1,13 @@
+# The CSV fixtures are byte fixtures. Their line endings are part of what they
+# test, not an artifact of whoever last saved them.
+#
+# Without this, core.autocrlf=true stores them LF-normalized, so the CRLF that
+# prisma/fixtures/README.md documents as a deliberate hazard survives only in a
+# Windows working copy. A fresh clone on Linux — CI, or a Vercel build — gets
+# LF, and the parser is then verified against a file shaped differently from the
+# one the README describes.
+#
+# `-text` means no conversion in either direction: the bytes committed are the
+# bytes checked out, everywhere.
+prisma/fixtures/*.csv -text
+fixtures/sample-headers.csv -text

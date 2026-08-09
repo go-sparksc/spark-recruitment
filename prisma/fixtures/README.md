@@ -23,7 +23,7 @@ against realistic structure without real data ever entering the repo. The
 hazards below are all deliberate: they are the things that actually break a
 naive importer, reproduced on purpose so the parser has to handle them.
 
-Shape: **29 columns, 27 data rows.** Line endings are CRLF and quoting follows
+Shape: **29 columns, 28 data rows.** Line endings are CRLF and quoting follows
 RFC 4180 throughout. Note that the file has more physical lines than records,
 because two fields contain embedded newlines — a line-per-record reader will
 mis-parse this file, which is one of the things it is here to catch.
@@ -78,8 +78,10 @@ Each is present exactly once unless noted. Verify against the file:
       `Black` (column 5) and `Black or African American` (column 6). Any
       matching built on `startsWith`, `includes`, or a loose `LIKE` will map
       one to the other. Only exact comparison works. The file exercises all
-      three cases: `Black` alone (Fen Dummy, Zeph Placeholder), `Black or
-      African American` alone (Gale Synthetic), and both at once (Harper Lorem).
+      three cases, and these lists are exhaustive: `Black` without the longer
+      column (Rowan Fixture, Fen Dummy, Zeph Placeholder), `Black or African
+      American` without `Black` (Avery Sampleton, Gale Synthetic), and both at
+      once (Harper Lorem).
 
 Column 14's header also contains a comma and is quoted — worth confirming your
 parser handles, though it is ordinary RFC 4180 rather than a hazard.
@@ -93,6 +95,14 @@ newlines make physical line numbers unreliable:
       Duplicate, both `avery.fixture@example.com`. Different last names, so
       this is not a pure duplicate row. Import must not silently collapse them,
       and must not key anything on the address.
+- [ ] **Two rows sharing an email only after normalizing** — Bex Placeholder,
+      `bex.placeholder@example.com`, and Bex Casedupe,
+      `Bex.Placeholder@Example.com`. Byte-different, so a verbatim comparison
+      sees two distinct addresses; identical once trimmed and lowercased.
+      Duplicate detection that runs on the raw value passes this pair at
+      preview and then fails `UNIQUE (instanceId, email)` at commit, after the
+      admin has already approved the import. Deliberately placed far from its
+      partner — adjacent duplicates are the easy case.
 - [ ] **One row with a blank email** — Emory Noemail. No address at all.
 - [ ] **One row with a blank last name** — Indigo,
       `indigo.nolastname@example.com`. First name only.
@@ -120,10 +130,13 @@ noted here so the checklists above stay exact:
 - One **data** cell contains an embedded newline (Gale Synthetic, column 21).
 - One **data** cell contains double quotes, escaped as `""` (Devi Stubbs,
   column 20).
-- Columns 24 (`Other Major:`) and 27 (`Tags`) are entirely empty across all 27
+- Columns 24 (`Other Major:`) and 27 (`Tags`) are entirely empty across all 28
   rows. Columns 25 (`Minor:`) and 26 (`Anything else…`) hold two and one
   non-empty values respectively — near-empty, so a column that looks droppable
   in the first twenty rows is not actually droppable.
+- A column that is entirely empty has **no** value signature, and group
+  detection must not treat "every non-empty value is the same literal" as
+  satisfied over zero values. Columns 24 and 27 are the trap.
 
 ### Regenerating
 
