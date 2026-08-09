@@ -158,7 +158,11 @@ next-env.d.ts
 # and immigration status, self-reported ethnicity, and first-generation status.
 # Development runs on prisma/seed.ts synthetic data instead.
 *.csv
-!prisma/fixtures/*.csv
+# Named exactly, not globbed. `!prisma/fixtures/*.csv` would re-include every
+# csv in that directory, so a real export saved there would be committable —
+# which is the failure this whole block exists to prevent. Adding a legitimate
+# fixture should cost one deliberate line here.
+!prisma/fixtures/s26-shape.csv
 *.xlsx
 *.xls
 /data
