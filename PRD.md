@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai
-**Status:** v1.1, Phase 0 complete
+**Status:** v1.2, Phase 0 complete, Phase 1 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -52,10 +52,26 @@ The single most important design decision: **applicants are identified by a syst
 Instance
   id, name, passwordHash, createdAt, archivedAt
   currentStage: WRITTEN | FIRST_ROUND | SECOND_ROUND | COMPLETE
+  importCommittedAt            // null until FR-3 commit. Non-null is what
+                               //   refuses a second CSV. See FR-3.
+  importProposals: jsonb       // detected group proposals awaiting the admin's
+                               //   name-or-dismiss. Null once committed.
+  CHECK (importCommittedAt IS NULL OR importProposals IS NULL)
+                               // clearing proposals at commit is a line of code
+                               //   that a refactor can drop; this makes it a
+                               //   database guarantee. Stale proposals on a
+                               //   committed instance would read as meaningful
+                               //   and could contradict the FieldGroup rows.
 
 FieldGroup                     // several CSV columns forming one logical question
   id, instanceId
-  key                          // stable slug, e.g. "ethnicity"
+  key                          // stable slug, e.g. "ethnicity". IMMUTABLE:
+                               //   slugged once from the name given at creation
+                               //   and never re-slugged on rename. FR-19 and
+                               //   FR-20 reference it, and a key that moves when
+                               //   someone fixes a typo is the name-keying
+                               //   defect this system exists to remove.
+                               //   displayName is what a rename changes.
   displayName                  // admin-editable; the heading FR-19 renders
   category: DEMOGRAPHIC | RESPONSE | OTHER
   isMultiSelect                // bool; true when members can be checked together
@@ -82,6 +98,22 @@ Field                          // one per CSV column
   visibleToFirstRoundReviewer  // nullable bool; null = the §6 default for this category.
                                //   The group's value wins when groupId is set.
   UNIQUE (instanceId, ordinal)
+  CHECK ((groupId IS NULL) = (groupRole IS NULL))
+                               // "set only when groupId is set", enforced.
+                               //   Prisma cannot express a CHECK, so this lives
+                               //   in raw migration SQL and is asserted by
+                               //   prisma/checks/field-groups.ts.
+
+ImportRow                      // FR-2/FR-3 staging. Exists only between upload
+  id, instanceId               //   and commit, and is deleted at commit.
+  rowIndex                     // 1-based position in the source file. Becomes
+                               //   Applicant.sourceRowIndex, never renumbered,
+                               //   so discarding a duplicate leaves a gap and
+                               //   "Applicant 47" still means record 47.
+  cells: jsonb                 // { columnIndex: verbatim value }. Verbatim so
+                               //   the preview can report Quinn Spacey's padded
+                               //   email rather than silently fixing it.
+  UNIQUE (instanceId, rowIndex)
 
 Applicant
   id, instanceId
@@ -174,7 +206,15 @@ RoundAccessCode                // the per-round reviewer code from §8
   UNIQUE (instanceId, round)
 
 AuditLog                       // admin overrides, per §8
-  id, instanceId
+  id
+  instanceId?                  // NULLABLE, ON DELETE SET NULL — not CASCADE.
+                               //   Deleting an instance is the one irreversible
+                               //   action in the product, and under CASCADE the
+                               //   row recording that deletion is destroyed by
+                               //   the cascade it exists to describe. The
+                               //   deletion record survives as an orphan
+                               //   carrying the instance's identity in its own
+                               //   columns. See §8.
   actor, action
   entityType, entityId
   previousValue: jsonb
@@ -221,19 +261,45 @@ Names are hidden from written reviewers for the same reason (open decision 4). W
 - Detected header (read-only)
 - Editable display name (defaults to a cleaned version of the header)
 - Include/exclude checkbox (default on)
-- Category selector: Demographics / Responses / Other
+- Category selector: Demographics / Responses / Other. **Every column defaults to Other**; the importer never guesses a category from header text, because a wrong silent guess is worse than an unset one.
+- Per-round visibility, shown for Other only: hidden in both reviewer rounds by default, with a toggle for the written round and one for the first round. §6 makes Other "configurable" and this is where it is configured; Demographics and Responses show their §6 default read-only.
 
-Some questions arrive as several columns. The ten one-hot ethnicity columns are one question, not ten. The mapping table detects likely groups by their value signature (every non-empty value in the column is the same literal) and presents them pre-filled for confirmation. The admin can rename a group, split it, merge two, or drag an ungrouped column into one. The free-text write-in will not be detected, since its values vary by definition, so attaching it to its group is a manual step the mapping table must support. Include/exclude and category are set on the group and apply to every member; individual members of a group cannot be excluded or categorized separately.
+Some questions arrive as several columns. The ten one-hot ethnicity columns are one question, not ten. The mapping table detects likely groups by their value signature — every non-empty value in the column is the same literal, and that literal is the column's own header — and presents them for confirmation. Three guards keep the heuristic honest: a column with no non-empty values has no signature and is never a candidate, a run of one column is not a group, and comparison is exact, since `Black` is a strict prefix of `Black or African American`.
+
+**A detected group is a proposal, not a result.** It is not stored as a FieldGroup until the admin names it, which is also when its immutable `key` is assigned. Dismissing it discards it. Doing neither is a third state, and FR-3 warns about it before commit rather than silently importing the columns ungrouped — which would leave the §10.7 demographic breakdown with no group to read and nobody the wiser until FR-11.
+
+The admin can rename a group, split it, merge two, or assign an ungrouped column to a group. The free-text write-in will not be detected, since its values vary by definition, so attaching it to its group is a manual step the mapping table must support. Include/exclude and category are set on the group and apply to every member; individual members of a group cannot be excluded or categorized separately.
 
 Two columns require explicit designation and cannot be excluded: **email** (used as the join key for later imports) and **display name** (first + last, or a single name column).
 
 **FR-3 Import preview and commit.** Show row count, detected duplicates by email, and rows with a blank email or name. Admin resolves or discards these before commit. On commit, create one Applicant per row.
+
+**Duplicates are compared on the normalized email — trimmed, NFC, lowercased — not the verbatim one.** USC addresses are case-insensitive, and two rows differing only in case would otherwise pass the preview and then violate `UNIQUE (instanceId, email)` at commit, after the admin has approved the import. The verbatim value is what the preview displays, so a normalization that changes anything is visible rather than silent; an address that is whitespace-only normalizes to empty and counts as blank, not as a duplicate.
+
+The preview also carries two warnings that do not block, because each describes a plausible instance the system should not overrule:
+
+- **A detected group that has been neither named nor dismissed.** Committing past it imports the columns as independent questions, and no demographic breakdown will ever find them.
+- **No included field resolving to RESPONSE.** Under §6 that is the only category a written reviewer sees, so every profile in the written round would be empty — a failure that otherwise surfaces in front of thirty reviewers rather than here.
 
 An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. Corrections after commit happen by editing an applicant's fields directly, or by deleting the instance and importing again. This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
 **FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
 
 **FR-5 Instance save.** Admin sets an instance name and password. Password is hashed (argon2id or bcrypt, cost ≥ 12). Never stored or logged in plaintext. Never recoverable; recovery means an admin with app-level access resets it.
+
+Name and password are collected when the instance is created, at the start of the FR-2 import, because §5 makes `passwordHash` non-null and §8 forbids an ungated instance existing even as a draft. What FR-5 governs is therefore unlock and rotation, not creation.
+
+**Which gate protects which action:**
+
+| Action | Gate |
+|---|---|
+| Open an instance and work in it | Instance password |
+| Reset or rotate an instance password | App-level password only |
+| Delete an instance | App-level password only, plus typing the instance name |
+
+Putting reset behind the instance password would mean the recovery path named above does not exist. Putting deletion there too would complete the trap: an admin who typos a password at creation could not open the instance, reset it, or remove it, leaving a permanently unreachable row holding real applicant data.
+
+The consequence is worth stating plainly rather than leaving to be discovered: **the instance password is not a boundary against anyone holding the app-level password.** It scopes routine access between cycles. §8's app-level gate is the actual admin boundary.
 
 ### 7.2 Written round
 
@@ -349,6 +415,7 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 - **Repository:** real applicant data never enters the repo. `.gitignore` covers `*.csv`, `*.xlsx`, `/data`, `/uploads`. Development uses synthetic seed data.
 - **Retention:** an admin-triggered "archive and purge" that keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold. Recommend two cycles.
 - **Audit:** log admin overrides (manual assignment, manual rejection, decision reversal) with actor, timestamp, and previous value.
+- **Instance deletion is audited, and its audit row outlives the instance.** Deleting an instance runs in one transaction: purge that instance's existing `AuditLog` rows, since they describe entities about to stop existing and their `previousValue` payloads can carry applicant data that retention says should not survive the cycle; write the deletion record with the instance's name, applicant count, and stage, and no applicant data; then delete the instance, which `ON DELETE SET NULL` leaves the record orphaned by design. What remains is exactly one row per deleted instance. Archive-and-purge must age these out on the same threshold as everything else, or they accumulate forever.
 
 ## 9. Success metrics
 
@@ -380,7 +447,27 @@ These need answers before or during the relevant build phase. They are the place
 
    **Applicants who check nothing go in a "Not specified" bucket**, counted as a whole person there. `1/n` is undefined at `n = 0`, and without the bucket those applicants vanish from the breakdown entirely and the weighted column silently sums to the responder count rather than the headcount. With it, the invariant holds as stated: **weighted totals sum to the headcount.** Note that an applicant who checks no box but writes into the free-text `Specify your ethnicity…` column has given a real answer that the count cannot read; they belong in "Not specified" too, and the free-text values are worth showing beneath the breakdown rather than discarding.
 
-   **What counts as checked:** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text Specify your ethnicity… column is a member of the group with groupRole = FREE_TEXT. It is excluded from the checked predicate and from 1/n, and it is what FR-19 displays beneath the breakdown. Being a member is what lets FR-19 find it; being FREE_TEXT is what keeps it out of the count. Inclusion is set on the group and applies to every member, so n is never counted over a partially excluded set.
+   **What counts as checked (see also decision 12 on how a group comes to exist at all):** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text Specify your ethnicity… column is a member of the group with groupRole = FREE_TEXT. It is excluded from the checked predicate and from 1/n, and it is what FR-19 displays beneath the breakdown. Being a member is what lets FR-19 find it; being FREE_TEXT is what keeps it out of the count. Inclusion is set on the group and applies to every member, so n is never counted over a partially excluded set.
+
+8. **Import draft state. RESOLVED: a staging table.** Parsed rows land in `ImportRow` at upload and are deleted at commit; detected group proposals live in `Instance.importProposals` until named or dismissed, and are cleared at the same moment. A `CHECK` makes that clearing a database guarantee rather than a line of code. Rejected: a client-held payload, which exceeds Next's 1MB server-action body limit on a real 150-applicant export with five essays each; and a temp file, which does not survive a Vercel deploy.
+
+9. **Instance created before the CSV commits. RESOLVED.** Name and password are collected at upload, because `passwordHash` is non-null and §8 forbids an ungated instance existing even as a draft. FR-5 therefore governs unlock and rotation, not creation. Consequence: FR-1 lists draft instances, marked as such.
+
+10. **Email normalization. RESOLVED: trim, NFC, lowercase, and compare normalized.** See FR-3. The staging row keeps the verbatim value and the preview reports any change, so nothing is silent; the pre-normalization form is not retained after commit.
+
+11. **`sourceRowIndex` from parse order. RESOLVED.** Assigned at parse, 1-based, never renumbered. Discarding a row at preview leaves a gap, which is correct: the label points at a record in the source file, and renumbering would break that correspondence for the one audience — written reviewers — who see nothing else.
+
+12. **Group detection scope. RESOLVED.** Exact equality with the column's own header, runs of two or more, empty columns never grouped. Detection produces a proposal that the admin names or dismisses; it never writes a `FieldGroup` on its own. A form tool that exports `Y`/`TRUE`/`1` rather than the option label detects nothing and the admin groups by hand — the safe failure, since no detection costs a minute and a wrong silent detection costs a cycle.
+
+13. **`FieldGroup.key` immutability. RESOLVED: assigned at creation, never re-slugged.** See §5. This is why detection defers materialization: a key stamped before anyone named the group would read `group-1` forever, in every export FR-20 produces.
+
+14. **Auditing instance deletion. RESOLVED: the audit row outlives the instance.** See §8. Rejected alternative: declaring deletion unaudited in v1, which is only defensible if nothing is audited, and §8 already requires overrides be logged.
+
+15. **What gates password reset and instance deletion. RESOLVED: the app-level password.** See FR-5.
+
+16. **Admin identity behind the app gate. OPEN — decide in Phase 8.** §8 specifies one app-level password shared by 2–6 admins, so `AuditLog.actor` has no real identity behind it: every override, and now every password reset and instance deletion, is attributable to "an admin" and nothing finer. Acceptable among co-presidents who trust each other; not acceptable as the permanent answer for a log whose entire purpose is attribution. Options: per-admin accounts, or a name prompt at sign-in recorded on the session and copied into `actor` — weaker, but honest and cheap. Decide before hardening rather than during it.
+
+17. **Two fixture directories. OPEN — no phase assigned.** `fixtures/sample-headers.csv` sits at the repo root while `prisma/fixtures/` holds the synthetic export and its README. Two directories for one purpose invites saving a file in the wrong one, and the wrong one may hold real applicant data. The `.gitignore` now names both exempt files exactly rather than globbing a directory, so neither location is currently a hole, but the duplication is the underlying problem and the ignore rules are only a guard against it. Consolidating means moving the file, updating `prisma/seed/headers.ts`, `.gitattributes`, `.gitignore`, and the phase-0 record — small, but it touches the seed, so it wants its own change rather than riding along with feature work.
 
 ## 11. Out of scope for v1, worth noting for v2
 
