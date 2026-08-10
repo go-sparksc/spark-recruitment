@@ -244,9 +244,16 @@ model ImportRow {
   /// reports Quinn Spacey's padded email rather than silently fixing it.
   cells    Json
 
+  /// FR-3's discard, reversible until commit. A flag rather than a delete so
+  /// rowIndex never moves — it becomes the anonymous label a written reviewer
+  /// sees, and renumbering would make "Applicant 47" point at a different
+  /// record than line 47 of the file the admin uploaded.
+  discarded Boolean @default(false)
+
   createdAt DateTime @default(now())
 
   @@unique([instanceId, rowIndex])
+  @@index([instanceId, discarded])
 }
 
 /// One per CSV column. Carries the human-facing metadata that `Applicant.data`

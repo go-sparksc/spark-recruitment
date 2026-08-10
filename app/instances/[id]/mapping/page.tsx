@@ -8,6 +8,8 @@ import {
   type ColumnView,
   type GroupView,
 } from "./mapping-controls";
+import { ImportCommitted } from "../import-committed";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -44,6 +46,26 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
   });
 
   if (!instance) notFound();
+
+  // FR-3: an instance accepts exactly one CSV and commit is final, so the
+  // mapping is no longer editable. Rendered as a page state that explains
+  // itself, not a screen full of disabled controls.
+  if (instance.importCommittedAt !== null) {
+    const applicantCount = await prisma.applicant.count({ where: { instanceId: id } });
+    return (
+      <main className="mx-auto w-full max-w-2xl px-6 py-16">
+        <Link href="/" className="text-muted-foreground text-sm hover:underline">
+          ← Instances
+        </Link>
+        <ImportCommitted
+          instanceId={id}
+          instanceName={instance.name}
+          applicantCount={applicantCount}
+          committedAt={instance.importCommittedAt}
+        />
+      </main>
+    );
+  }
 
   const proposals = ((instance.importProposals as { proposals?: GroupProposal[] } | null)
     ?.proposals ?? []) as GroupProposal[];
@@ -109,11 +131,18 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
         ← Instances
       </Link>
 
-      <h1 className="mt-4 text-2xl font-semibold tracking-tight">{instance.name}</h1>
-      <p className="text-muted-foreground mt-2 text-sm">
-        {instance.fields.length} columns and {instance._count.importRows} applicants read from the
-        file. Nothing is created until you commit.
-      </p>
+      <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{instance.name}</h1>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {instance.fields.length} columns and {instance._count.importRows} applicants read from
+            the file. Nothing is created until you commit.
+          </p>
+        </div>
+        <Link href={`/instances/${id}/preview`} className={buttonVariants({ size: "sm" })}>
+          Preview and commit →
+        </Link>
+      </div>
 
       {outstanding.length > 0 ? (
         <Card className="mt-8 border-amber-500/40">
