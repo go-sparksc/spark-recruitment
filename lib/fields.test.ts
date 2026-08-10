@@ -6,6 +6,8 @@ import {
   projectApplicantData,
   resolveField,
   resolvePromoted,
+  slugify,
+  uniqueSlug,
   visibleFieldIds,
   type FieldGroupLike,
   type FieldLike,
@@ -310,6 +312,44 @@ describe("resolvePromoted", () => {
     for (const viewer of VIEWERS.filter((v) => v !== "WRITTEN_REVIEWER")) {
       expect(resolvePromoted(viewer)).toEqual({ name: true, email: true, anonymousLabel: false });
     }
+  });
+});
+
+describe("slugify and uniqueSlug", () => {
+  it("makes a key safe for an export column heading", () => {
+    expect(slugify("Ethnicity")).toBe("ethnicity");
+    expect(slugify("First-generation status?")).toBe("first-generation-status");
+    expect(slugify("  Spaces   collapse  ")).toBe("spaces-collapse");
+  });
+
+  it("folds accents rather than dropping them", () => {
+    // "Café" must not become "caf".
+    expect(slugify("Café Group")).toBe("cafe-group");
+    expect(slugify("Tomás Sørensen")).toBe("tomas-s-rensen");
+  });
+
+  it("never returns an empty slug", () => {
+    // A name of only punctuation would otherwise produce "", which collides
+    // with the next such group and reads as a bug in an export.
+    expect(slugify("!!!")).toBe("group");
+    expect(slugify("")).toBe("group");
+    expect(slugify("日本語")).toBe("group");
+  });
+
+  it("suffixes numerically past taken keys", () => {
+    const taken = new Set(["ethnicity", "ethnicity-2"]);
+    expect(uniqueSlug("Ethnicity", taken)).toBe("ethnicity-3");
+    expect(uniqueSlug("Ethnicity", new Set())).toBe("ethnicity");
+  });
+
+  it("keeps two differently-named groups apart even when they slug the same", () => {
+    const taken = new Set<string>();
+    const first = uniqueSlug("Ethnicity!", taken);
+    taken.add(first);
+    const second = uniqueSlug("Ethnicity?", taken);
+
+    expect(first).toBe("ethnicity");
+    expect(second).toBe("ethnicity-2");
   });
 });
 

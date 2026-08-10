@@ -26,6 +26,8 @@ const prisma = createSeedClient();
 const GROUP_KEY_INDEX = "FieldGroup_instanceId_key_key";
 const GROUP_ROLE_CHECK = "Field_groupRole_iff_groupId";
 const PROPOSALS_CHECK = "Instance_importProposals_cleared_at_commit";
+const EMAIL_PROMOTION_INDEX = "Field_instanceId_emailPromotion_key";
+const PROMOTED_CHECK = "Field_promoted_is_included_and_ungrouped";
 
 const PROBE_GROUP_A = "check_fieldgroup_original";
 const PROBE_GROUP_B = "check_fieldgroup_duplicate";
@@ -160,7 +162,86 @@ async function main() {
     },
   );
 
-  // --- 3. Instance CHECK (committed XOR proposals) --------------------------
+  // --- 3. Field partial unique index on the EMAIL designation ---------------
+  // At most one email column per instance: two would make the FR-12 join key
+  // ambiguous and FR-3's duplicate detection would not know which to compare.
+  // A PARTIAL index, so the many NULLs must NOT collide — both halves are
+  // probed, since an index that rejects the second null would be just as wrong.
+  const PROBE_EMAIL_A = "check_field_email_a";
+  const PROBE_EMAIL_B = "check_field_email_b";
+  const PROBE_PLAIN = "check_field_plain";
+
+  const insertField = (id: string, ordinal: number, promoted: string | null) =>
+    promoted === null
+      ? prisma.$executeRaw`
+          INSERT INTO "Field"
+            ("id", "instanceId", "sourceHeader", "displayName", "category", "ordinal", "updatedAt")
+          VALUES (${id}, ${SEED_INSTANCE_ID}, 'Probe', 'Probe',
+                  'OTHER'::"FieldCategory", ${ordinal}, NOW())`
+      : prisma.$executeRaw`
+          INSERT INTO "Field"
+            ("id", "instanceId", "sourceHeader", "displayName", "category", "ordinal",
+             "promotedRole", "updatedAt")
+          VALUES (${id}, ${SEED_INSTANCE_ID}, 'Probe', 'Probe',
+                  'OTHER'::"FieldCategory", ${ordinal}, ${promoted}::"PromotedRole", NOW())`;
+
+  await insertField(PROBE_EMAIL_A, 9101, "EMAIL");
+  createdFieldIds.push(PROBE_EMAIL_A);
+
+  await expectRejection(
+    "Field partial unique — a second EMAIL column",
+    "23505",
+    EMAIL_PROMOTION_INDEX,
+    async () => {
+      await insertField(PROBE_EMAIL_B, 9102, "EMAIL");
+      createdFieldIds.push(PROBE_EMAIL_B);
+    },
+  );
+
+  // The complement: ordinary columns all have promotedRole NULL, and a partial
+  // index must let any number of them coexist.
+  try {
+    await insertField(PROBE_PLAIN, 9103, null);
+    createdFieldIds.push(PROBE_PLAIN);
+    pass(
+      "Field partial unique — many undesignated columns are fine",
+      "the index is partial, so NULL promotedRole does not collide",
+    );
+  } catch (error) {
+    fail(
+      "Field partial unique — many undesignated columns are fine",
+      `an ordinary column was REJECTED: ${(error as Error).message}`,
+    );
+  }
+
+  // --- 4. Field CHECK — a promoted column is included and ungrouped ---------
+  // FR-2 says the email and name columns cannot be excluded. Enforced rather
+  // than remembered, since forgetting it silently drops the join key.
+  await expectRejection(
+    "Field CHECK — promoted column excluded",
+    "23514",
+    PROMOTED_CHECK,
+    async () => {
+      await prisma.$executeRaw`
+        UPDATE "Field" SET "isIncluded" = false WHERE "id" = ${PROBE_EMAIL_A}
+      `;
+    },
+  );
+
+  await expectRejection(
+    "Field CHECK — promoted column put in a group",
+    "23514",
+    PROMOTED_CHECK,
+    async () => {
+      await prisma.$executeRaw`
+        UPDATE "Field"
+        SET "groupId" = ${PROBE_GROUP_A}, "groupRole" = 'OPTION'::"FieldGroupRole"
+        WHERE "id" = ${PROBE_EMAIL_A}
+      `;
+    },
+  );
+
+  // --- 5. Instance CHECK (committed XOR proposals) --------------------------
   // Proposals are cleared at commit. A committed instance still holding them
   // would read as meaningful to a successor and could contradict the FieldGroup
   // rows beside it, with no rule for which one wins.
@@ -231,7 +312,15 @@ async function cleanup() {
 }
 
 async function confirmRestored() {
-  const probeIds = [PROBE_GROUP_A, PROBE_GROUP_B, PROBE_FIELD, PROBE_INSTANCE];
+  const probeIds = [
+    PROBE_GROUP_A,
+    PROBE_GROUP_B,
+    PROBE_FIELD,
+    PROBE_INSTANCE,
+    "check_field_email_a",
+    "check_field_email_b",
+    "check_field_plain",
+  ];
   const leftover =
     (await prisma.fieldGroup.count({ where: { id: { in: probeIds } } })) +
     (await prisma.field.count({ where: { id: { in: probeIds } } })) +

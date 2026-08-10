@@ -58,6 +58,21 @@ enum FieldGroupRole {
   FREE_TEXT
 }
 
+/// FR-2's two required designations. These columns are promoted out of
+/// `Applicant.data` at commit — email because it is the join key for the FR-12
+/// and FR-13 imports, display name because §6 needs it as a first-class value
+/// it can hide from written reviewers.
+///
+/// NAME may be one column or two ("First Name" + "Last Name"), joined in
+/// `ordinal` order. EMAIL is at most one per instance, enforced by a partial
+/// unique index in the migration.
+///
+/// Neither may be excluded or grouped; a raw-SQL CHECK enforces both.
+enum PromotedRole {
+  EMAIL
+  NAME
+}
+
 /// There is deliberately no UNRESOLVED here. An applicant left undecided when the
 /// second round closes is identified by `PassApplicant.resolution = NEEDS_ADMIN` on
 /// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
@@ -261,6 +276,11 @@ model Field {
   /// raw-SQL CHECK, since Prisma cannot express one; asserted by
   /// prisma/checks/field-groups.ts.
   groupRole FieldGroupRole?
+
+  /// FR-2's designation. Null for an ordinary column. These rows are removed at
+  /// FR-3 commit, when their values become Applicant.email and displayName —
+  /// §6 is explicit that the promoted values are not Field rows.
+  promotedRole PromotedRole?
 
   ordinal Int
 

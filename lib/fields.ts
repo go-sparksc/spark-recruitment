@@ -212,3 +212,36 @@ export function resolvePromoted(viewer: Viewer): ResolvedPromoted {
 export function cleanHeader(header: string): string {
   return header.replace(/\s+/g, " ").trim().replace(/\s*:$/, "");
 }
+
+/// Slug for FieldGroup.key, which is assigned once and never re-slugged. FR-19
+/// and FR-20 reference it, so it has to survive a rename of the display name and
+/// be safe in a CSV column heading and a JSON key.
+///
+/// Accents are folded rather than dropped, so "Café" becomes "cafe" and not "caf".
+export function slugify(value: string): string {
+  const slug = value
+    .normalize("NFD")
+    // Escapes, not the literal combining marks: raw ones are invisible in an
+    // editor and easy to destroy on save.
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  // A name of only punctuation or non-Latin script slugs to nothing. Better a
+  // dull key than an empty one, which would collide with the next such group and
+  // read as a bug in an export.
+  return slug === "" ? "group" : slug;
+}
+
+/// First slug not already taken, suffixed numerically. The caller supplies the
+/// keys already in use for the instance.
+export function uniqueSlug(value: string, taken: ReadonlySet<string>): string {
+  const base = slugify(value);
+  if (!taken.has(base)) return base;
+
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
