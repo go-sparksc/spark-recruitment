@@ -1,7 +1,21 @@
-import { FieldCategory } from "../../generated/prisma/enums";
+import { FieldCategory, FieldGroupRole } from "../../generated/prisma/enums";
 import { readSourceHeaders } from "./headers";
 
 export const ETHNICITY_GROUP_KEY = "ethnicity";
+
+/// The group's own row. PRD v1.2 moved category, inclusion and the section 6
+/// visibility toggles off the members and onto the group, so a group cannot end
+/// up half hidden and half visible and the 10.7 counting can never run over a
+/// partially excluded set.
+///
+/// `key` is immutable once assigned; `displayName` is what a rename changes.
+export const ETHNICITY_GROUP = {
+  key: ETHNICITY_GROUP_KEY,
+  displayName: "Ethnicity",
+  category: FieldCategory.DEMOGRAPHIC,
+  isMultiSelect: true,
+  isIncluded: true,
+} as const;
 
 /// Column indexes promoted out of `data` into first-class Applicant columns.
 /// FR-2: email and display name require explicit designation and cannot be
@@ -57,8 +71,12 @@ export interface FieldSpec {
   sourceHeader: string;
   displayName: string;
   category: FieldCategory;
+  /// The group's `key`, resolved to a FieldGroup id by the seed. Null when the
+  /// column stands alone.
   groupKey: string | null;
-  isMultiSelect: boolean;
+  /// Set together with groupKey and null together with it — a raw-SQL CHECK
+  /// enforces that pairing at the database.
+  groupRole: FieldGroupRole | null;
   isIncluded: boolean;
   ordinal: number;
   /// Set only on the ten one-hot ethnicity columns: the value written when checked.
@@ -81,7 +99,7 @@ interface CatalogEntry {
   /// rename them anyway.
   displayName?: string;
   groupKey?: string;
-  isMultiSelect?: boolean;
+  groupRole?: FieldGroupRole;
   isIncluded?: boolean;
 }
 
@@ -131,27 +149,36 @@ const CATALOG: readonly CatalogEntry[] = [
 
   { key: "pronouns", column: 17, category: FieldCategory.DEMOGRAPHIC, displayName: "Pronouns" },
 
-  // The ten one-hot ethnicity columns. Any number may be checked, so they share a
-  // groupKey and carry isMultiSelect: the UI and the demographic breakdowns treat
-  // them as one logical question rather than ten independent yes/no fields.
+  // The ten one-hot ethnicity columns. Any number may be checked, so they belong
+  // to one group that the UI and the demographic breakdowns treat as a single
+  // logical question rather than ten independent yes/no fields.
   ...([18, 19, 20, 21, 22, 23, 24, 25, 26, 27] as const).map(
     (column): CatalogEntry => ({
       key: "ethnicityOneHot",
       column,
       category: FieldCategory.DEMOGRAPHIC,
       groupKey: ETHNICITY_GROUP_KEY,
-      isMultiSelect: true,
+      groupRole: FieldGroupRole.OPTION,
     }),
   ),
 
-  // Free text, and deliberately NOT part of the one-hot group. Putting it in the
-  // group would make isMultiSelect inconsistent within the group and would break
-  // any aggregation that assumes group members are checkbox columns.
+  // The free-text write-in, and it IS a member of the group — reversing the
+  // Phase 0 decision to keep it out, per PRD v1.2 section 5 and 10.7.
+  //
+  // Membership is what lets FR-19 find it to display beneath the breakdown;
+  // groupRole FREE_TEXT is what keeps it out of the checked predicate and out of
+  // 1/n. The Phase 0 worry — that it would make the group's members
+  // inconsistent — is answered by the role, which is exactly the distinction the
+  // aggregations branch on. Pax Writein in the fixture is the case this exists
+  // for: zero boxes checked, a real answer written in, and still counted under
+  // "Not specified" because the write-in cannot be read as a category.
   {
     key: "ethnicitySelfDescribed",
     column: 28,
     category: FieldCategory.DEMOGRAPHIC,
     displayName: "Ethnicity (self-described)",
+    groupKey: ETHNICITY_GROUP_KEY,
+    groupRole: FieldGroupRole.FREE_TEXT,
   },
   {
     key: "firstGeneration",
@@ -186,10 +213,12 @@ export function buildFieldSpecs(): FieldSpec[] {
       displayName: entry.displayName ?? cleanHeader(sourceHeader),
       category: entry.category,
       groupKey: entry.groupKey ?? null,
-      isMultiSelect: entry.isMultiSelect ?? false,
+      groupRole: entry.groupRole ?? null,
       isIncluded: entry.isIncluded ?? true,
       ordinal,
-      ...(entry.groupKey === ETHNICITY_GROUP_KEY
+      // Only the OPTION members carry a label to write when checked. The
+      // FREE_TEXT member holds whatever the applicant typed.
+      ...(entry.groupRole === FieldGroupRole.OPTION
         ? { optionLabel: cleanHeader(sourceHeader) }
         : {}),
     };

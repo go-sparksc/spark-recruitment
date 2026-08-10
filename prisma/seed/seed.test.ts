@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { FieldGroupRole } from "../../generated/prisma/enums";
 import { buildApplicantProfiles } from "./applicants";
 import {
+  ETHNICITY_GROUP,
   ETHNICITY_GROUP_KEY,
   buildFieldSpecs,
   cleanHeader,
@@ -75,19 +77,36 @@ describe("buildFieldSpecs", () => {
     expect(Math.max(...specs.map((spec) => spec.sourceHeader.length))).toBeGreaterThan(200);
   });
 
-  it("groups the ten ethnicity columns as one multi-select question", () => {
-    const group = specs.filter((spec) => spec.groupKey === ETHNICITY_GROUP_KEY);
+  it("groups the ten one-hot ethnicity columns as OPTION members", () => {
+    const options = specs.filter(
+      (spec) => spec.groupKey === ETHNICITY_GROUP_KEY && spec.groupRole === FieldGroupRole.OPTION,
+    );
 
-    expect(group).toHaveLength(10);
-    expect(group.every((spec) => spec.isMultiSelect)).toBe(true);
-    expect(group.every((spec) => spec.optionLabel)).toBe(true);
+    expect(options).toHaveLength(10);
+    // Only the one-hot columns carry the label written when checked; the
+    // write-in holds whatever the applicant typed.
+    expect(options.every((spec) => spec.optionLabel)).toBe(true);
+    // isMultiSelect moved to the group in PRD v1.2 and is asserted there.
+    expect(ETHNICITY_GROUP.isMultiSelect).toBe(true);
   });
 
-  it("keeps the free-text ethnicity column out of the one-hot group", () => {
+  it("makes the free-text write-in a FREE_TEXT member of the group, not a standalone column", () => {
+    // Reverses the Phase 0 decision, per PRD v1.2 section 5 and 10.7. Being a
+    // member is what lets FR-19 find it to display beneath the breakdown; the
+    // FREE_TEXT role is what keeps it out of the checked predicate and 1/n.
     const selfDescribed = specs.find((spec) => spec.key === "ethnicitySelfDescribed");
 
-    expect(selfDescribed?.groupKey).toBeNull();
-    expect(selfDescribed?.isMultiSelect).toBe(false);
+    expect(selfDescribed?.groupKey).toBe(ETHNICITY_GROUP_KEY);
+    expect(selfDescribed?.groupRole).toBe(FieldGroupRole.FREE_TEXT);
+    expect(selfDescribed?.optionLabel).toBeUndefined();
+  });
+
+  it("sets groupKey and groupRole together or not at all", () => {
+    // The Field_groupRole_iff_groupId CHECK rejects a half-set row, so a spec
+    // that violates this would fail at the database rather than in the seed.
+    for (const spec of specs) {
+      expect(spec.groupKey === null).toBe(spec.groupRole === null);
+    }
   });
 
   it("excludes exactly the junk columns by default", () => {

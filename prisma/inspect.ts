@@ -32,6 +32,11 @@ async function main() {
     orderBy: { ordinal: "asc" },
   });
 
+  const fieldGroups = await prisma.fieldGroup.findMany({
+    where: { instanceId: instance.id },
+    orderBy: { ordinal: "asc" },
+  });
+
   const applicants = await prisma.applicant.findMany({
     where: { instanceId: instance.id },
     orderBy: { sourceRowIndex: "asc" },
@@ -109,28 +114,38 @@ async function main() {
     console.log(`  ${String(field.sourceHeader.length).padStart(3)}  ${truncate(field.sourceHeader, 68)}`);
   }
 
-  // --- Multi-select grouping -------------------------------------------------
-  const groups = new Map<string, typeof fields>();
-  for (const field of fields) {
-    if (!field.groupKey) continue;
-    const existing = groups.get(field.groupKey) ?? [];
-    existing.push(field);
-    groups.set(field.groupKey, existing);
-  }
-
+  // --- Field groups ----------------------------------------------------------
+  // Membership now comes from FieldGroup rather than a groupKey string repeated
+  // across members, and category/inclusion/visibility live on the group so it
+  // cannot end up half hidden and half visible (PRD section 5).
   console.log(RULE);
   console.log("Field groups — one logical question spread across several columns");
-  for (const [groupKey, members] of groups) {
+  for (const group of fieldGroups) {
+    const members = fields.filter((field) => field.groupId === group.id);
+    // Only OPTION members are counted. The FREE_TEXT write-in is a member for
+    // display and reconciliation, and section 10.7 keeps it out of 1/n — being
+    // a member is what lets FR-19 find it, being FREE_TEXT is what excludes it.
+    const options = members.filter((member) => member.groupRole === "OPTION");
+    const freeText = members.filter((member) => member.groupRole === "FREE_TEXT");
+
     console.log(
-      `  "${groupKey}": ${members.length} columns, isMultiSelect ${members.every((m) => m.isMultiSelect)}`,
+      `  "${group.key}" (${group.displayName}): ${members.length} columns — ` +
+        `${options.length} OPTION, ${freeText.length} FREE_TEXT`,
     );
+    console.log(
+      `    category ${group.category} · isMultiSelect ${group.isMultiSelect} · ` +
+        `isIncluded ${group.isIncluded}`,
+    );
+    for (const member of freeText) {
+      console.log(`    write-in column, not counted: ${truncate(member.displayName, 46)}`);
+    }
 
     const counts = new Map<number, number>();
     const perOption = new Map<string, number>();
 
     for (const row of rows) {
       let checked = 0;
-      for (const member of members) {
+      for (const member of options) {
         if ((row[member.id] ?? "") !== "") {
           checked += 1;
           perOption.set(member.displayName, (perOption.get(member.displayName) ?? 0) + 1);
@@ -154,7 +169,11 @@ async function main() {
       `    ${multi} of ${rows.length} applicants (${Math.round((multi / rows.length) * 100)}%) ` +
         `checked more than one — PRD open decision 7 applies to these`,
     );
-    for (const member of members) {
+    console.log(
+      `    ${counts.get(0) ?? 0} checked none — the "Not specified" bucket, ` +
+        `counted as whole people (decision 7)`,
+    );
+    for (const member of options) {
       console.log(
         `      ${String(perOption.get(member.displayName) ?? 0).padStart(3)}  ${member.displayName}`,
       );

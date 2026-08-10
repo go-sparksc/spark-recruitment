@@ -45,6 +45,19 @@ enum FieldCategory {
   OTHER
 }
 
+/// What a column contributes to its group. OPTION members are the one-hot
+/// checkboxes the §10.7 predicate counts. A FREE_TEXT member is displayed and
+/// reconciled but never counted: being a member is what lets FR-19 find the
+/// write-in, and being FREE_TEXT is what keeps it out of 1/n.
+///
+/// Null when the field is ungrouped. A raw-SQL CHECK enforces that groupId and
+/// groupRole are set or null together; see the migration and
+/// prisma/checks/field-groups.ts.
+enum FieldGroupRole {
+  OPTION
+  FREE_TEXT
+}
+
 /// There is deliberately no UNRESOLVED here. An applicant left undecided when the
 /// second round closes is identified by `PassApplicant.resolution = NEEDS_ADMIN` on
 /// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
@@ -130,14 +143,95 @@ model Instance {
   updatedAt    DateTime      @updatedAt
   archivedAt   DateTime?
 
+  /// Null until the FR-3 commit. Non-null is what refuses a second CSV: an
+  /// instance accepts exactly one file and commit is final.
+  importCommittedAt DateTime?
+  /// Detected group proposals awaiting the admin's name-or-dismiss, per FR-2.
+  /// Deliberately not FieldGroup rows — a group's `key` is immutable and
+  /// materializing one before anyone named it would stamp "group-1" forever.
+  ///
+  /// Cleared at commit, and a raw-SQL CHECK holds importCommittedAt and this
+  /// column mutually exclusive so that clearing cannot be lost in a refactor.
+  /// Stale proposals on a committed instance would read as meaningful to a
+  /// successor and could contradict the FieldGroup rows beside them.
+  importProposals   Json?
+
   applicants       Applicant[]
   assignments      Assignment[]
   auditLogs        AuditLog[]
+  fieldGroups      FieldGroup[]
   fields           Field[]
+  importRows       ImportRow[]
   passes           Pass[]
   reviewers        Reviewer[]
   roundAccessCodes RoundAccessCode[]
   rubricCategories RubricCategory[]
+}
+
+/// Several CSV columns forming one logical question — the ten one-hot ethnicity
+/// columns are one question, not ten.
+///
+/// Category, inclusion and the §6 visibility toggles live here rather than on
+/// the members, so a group cannot end up half hidden and half visible, and the
+/// §10.7 1/n counting can never run over a partially excluded set. The member's
+/// own values are never read when it is grouped.
+model FieldGroup {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  /// Stable slug. IMMUTABLE: assigned once from the name given at creation and
+  /// never re-slugged on rename — `displayName` is what a rename changes.
+  /// FR-19 and FR-20 reference this, and a key that moves when someone fixes a
+  /// typo is the name-keying defect this whole system exists to remove. Same
+  /// split as Field.id versus Field.displayName.
+  key         String
+  /// Admin-editable. The heading FR-19 renders.
+  displayName String
+  category    FieldCategory
+
+  /// True when members can be checked together, which is what tells the UI and
+  /// the demographic aggregations to treat the group as one question.
+  isMultiSelect Boolean @default(false)
+  isIncluded    Boolean @default(true)
+  ordinal       Int
+
+  /// Null means "use the §6 category default for that round". Resolved by the
+  /// one shared helper in lib/fields.ts, never re-derived per surface.
+  visibleToWrittenReviewer    Boolean?
+  visibleToFirstRoundReviewer Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fields Field[]
+
+  @@unique([instanceId, key])
+  @@index([instanceId, ordinal])
+}
+
+/// FR-2/FR-3 staging. Exists only between upload and commit.
+///
+/// The parsed CSV lives here rather than in the browser because a real
+/// 150-applicant export with five essays each exceeds Next's 1MB server-action
+/// body limit, and rather than in a temp file because that does not survive a
+/// deploy. Deleted at commit; see PRD open decision 8.
+model ImportRow {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  /// 1-based position in the source file. Becomes Applicant.sourceRowIndex and
+  /// is never renumbered, so discarding a duplicate at preview leaves a gap and
+  /// "Applicant 47" keeps pointing at record 47 of the file the admin uploaded.
+  rowIndex Int
+  /// { columnIndex: verbatim value }. Verbatim is load-bearing: the preview
+  /// reports Quinn Spacey's padded email rather than silently fixing it.
+  cells    Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([instanceId, rowIndex])
 }
 
 /// One per CSV column. Carries the human-facing metadata that `Applicant.data`
@@ -155,13 +249,20 @@ model Field {
   displayName  String
   category     FieldCategory
 
-  /// Several columns sharing one logical question, e.g. the ten one-hot ethnicity
-  /// columns all carry groupKey "ethnicity". Null for standalone columns.
-  groupKey      String?
-  /// True when more than one column in the group can be set at once. Tells the UI
-  /// and the demographic aggregations to treat the group as one field, not ten.
-  isMultiSelect Boolean @default(false)
-  ordinal       Int
+  /// The FieldGroup this column belongs to. Null for standalone columns.
+  ///
+  /// When set, the GROUP's category, isIncluded and visibility win over the
+  /// columns below — they are kept on this row only so that ungrouping restores
+  /// a sensible standalone state, and lib/fields.ts never reads them while
+  /// groupId is set.
+  groupId   String?
+  group     FieldGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  /// Set only when groupId is set, and cleared together with it. Enforced by a
+  /// raw-SQL CHECK, since Prisma cannot express one; asserted by
+  /// prisma/checks/field-groups.ts.
+  groupRole FieldGroupRole?
+
+  ordinal Int
 
   /// False keeps the value but excludes the column from every review surface.
   /// Junk columns like "Response Type" and "Network ID" land here. Exclusion is a
@@ -179,7 +280,7 @@ model Field {
 
   @@unique([instanceId, ordinal])
   @@index([instanceId, category])
-  @@index([instanceId, groupKey])
+  @@index([groupId])
 }
 
 model RubricCategory {
@@ -507,11 +608,23 @@ model Decision {
 }
 
 /// Admin overrides, per PRD section 8: manual assignment, manual rejection,
-/// decision reversal. Records actor, timestamp, and previous value.
+/// decision reversal, password reset, instance deletion. Records actor,
+/// timestamp, and previous value.
 model AuditLog {
-  id            String   @id @default(cuid())
-  instanceId    String
-  instance      Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+
+  /// NULLABLE, and SetNull rather than Cascade. Deleting an instance is the one
+  /// irreversible action in the product; under Cascade the row recording that
+  /// deletion is destroyed by the cascade it exists to describe, leaving the
+  /// most destructive operation as the only one with no trace.
+  ///
+  /// deleteInstance purges the instance's other audit rows first — they
+  /// describe entities about to stop existing and their previousValue can carry
+  /// applicant data that retention says must not outlive the cycle — then
+  /// writes the deletion record, which this FK orphans by design. Its identity
+  /// lives in entityId and previousValue, not in the dead reference.
+  instanceId    String?
+  instance      Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
   actor         String
   action        String
   entityType    String

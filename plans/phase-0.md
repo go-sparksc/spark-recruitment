@@ -8,6 +8,12 @@
 > - **Judgment call 12** says `InterviewResult` is "deliberately left single-score" with the category dimension optional. Decision 6 is now fully resolved: the interview rubric is an instance-scoped `InterviewCategory` model with `InterviewCategoryScore` children, and `InterviewResult.score` is the imported average, never recomputed. Still Phase 5 work, but no longer an open shape.
 > - **`sourceRowIndex` gained a unique constraint** (`20260807000000_applicant_source_row_index_unique`). Decision 4 hides names from written reviewers, who now see "Applicant 47" instead — which makes this column user-facing identity rather than provenance.
 > - **The one-hot encoding note** below ("stores the column's own label when checked and `""` when not") is now load-bearing rather than incidental: decision 7's fractional counting depends on it, so PRD §10.7 states the checked/unchecked predicate explicitly.
+>
+> **Superseded again by PRD v1.2** (Phase 1, migration `20260809120000_field_groups`):
+>
+> - **`Field.groupKey` and `Field.isMultiSelect` are gone.** Grouping is now a `FieldGroup` table with `Field.groupId` + `Field.groupRole`, and category, inclusion and the §6 visibility toggles are properties of the *group* — so a group cannot end up half hidden and half visible, and §10.7's `1/n` can never run over a partially excluded set. The migration backfills from `groupKey` before dropping it.
+> - **Judgment call: the free-text write-in is now IN the group.** The field catalog below records keeping it out as deliberate, on the grounds that including it would make `isMultiSelect` inconsistent within the group. v1.2 answers that with `groupRole`: the write-in is a `FREE_TEXT` member, which is exactly the distinction the aggregations branch on. Membership is what lets FR-19 find it; the role is what keeps it out of the count.
+> - **Measured correction.** The table below says 5 headers in `sample-headers.csv` contain embedded newlines. Re-measured against the file, it is **4**. The other figures — 159-char longest, 5 curly apostrophes, 5 trailing-whitespace headers, 37 columns — all hold.
 
 ## What this phase built
 
