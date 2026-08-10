@@ -475,6 +475,16 @@ These need answers before or during the relevant build phase. They are the place
 
     The cost is that the columns are wider than their meaning: a DEMOGRAPHIC row can hold a value that nothing reads. Accepted rather than splitting the columns per category, which would complicate the resolver to prevent a state the UI cannot produce. If a future cycle genuinely needs one response hidden from written reviewers, that is a §6 change first.
 
+19. **Rate limiting on the password endpoints. PARTIAL — a stopgap shipped in Phase 1; Phase 8 owns the real answer.** `lib/rate-limit.ts` allows 10 failures per key in 15 minutes and then locks that key for 15 minutes, where a key is the scope plus the client IP. It is consulted before the argon2 verify, so a locked-out caller costs nothing to refuse and learns nothing.
+
+    **What it does not cover, so Phase 8 does not mistake it for the answer:**
+
+    - **State lives in the process.** It resets on every deploy, and on a serverless host each instance keeps its own map — an attacker whose requests land on different instances gets the full allowance from each. A shared store (the database, or Redis) is what makes the limit real.
+    - **The key is the client IP,** read from `x-forwarded-for`. Anyone with a pool of addresses sidesteps it, and a request with no such header falls into one shared `unknown` bucket. That fallback is deliberate — stripping the header must not escape the limiter entirely — but it means several admins behind one NAT share an allowance.
+    - **It does not extend a lock when a locked-out key keeps trying.** That is on purpose: a locked attempt is refused before any password check, so counting it slows nobody, while extending would let anything retrying in a loop hold the lock open against the real admin. The consequence is that the ceiling really is 40 guesses an hour per address, not less.
+    - **It is not a substitute for a strong password.** It raises a brute-force attempt from free to slow. `npm run hash-secret` says so where the password is chosen.
+    - **Nothing is logged.** A sustained attack is invisible. Phase 8's audit work should record lockouts.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.

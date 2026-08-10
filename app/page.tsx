@@ -1,3 +1,7 @@
+import Link from "next/link";
+
+import { signOut } from "./actions";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -7,13 +11,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-// Phase 0 placeholder. This is NOT FR-1: the instance list is gated behind an
-// app-level password in Phase 1, and PRD section 8 requires that it not be
-// publicly enumerable. What this page proves is that the whole stack is wired —
-// server component reads Postgres through Prisma, Tailwind and shadcn render it.
+export const metadata = { title: "Instances — Spark SC Recruitment" };
+
+// FR-1. Behind the app-level gate, per PRD section 8: the instance list must not
+// be publicly enumerable. requireAdmin() is called here rather than relying on
+// proxy.ts, which is a redirect for signed-out visitors and not a boundary.
 export default async function Home() {
+  await requireAdmin("/");
+
   const instances = await prisma.instance.findMany({
     orderBy: { createdAt: "desc" },
     select: {
@@ -21,63 +29,92 @@ export default async function Home() {
       name: true,
       currentStage: true,
       createdAt: true,
-      _count: {
-        select: { applicants: true, reviewers: true, fields: true, rubricCategories: true },
-      },
+      importCommittedAt: true,
+      _count: { select: { applicants: true, reviewers: true } },
     },
   });
 
+  const dateFormat = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">Spark SC Recruitment</h1>
-      <p className="text-muted-foreground mt-2 text-sm">
-        Phase 0 — foundation. Schema, migration, and synthetic seed data.
-      </p>
+    <main className="mx-auto w-full max-w-4xl px-6 py-16">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Spark SC Recruitment</h1>
+          <p className="text-muted-foreground mt-2 text-sm">
+            One instance per recruitment cycle.
+          </p>
+        </div>
+        <form action={signOut}>
+          <Button type="submit" variant="ghost" size="sm">
+            Sign out
+          </Button>
+        </form>
+      </div>
 
       <Card className="mt-8">
-        <CardHeader>
-          <CardTitle>Instances</CardTitle>
-          <CardDescription>
-            Read from Postgres through Prisma in a server component. The password gate this page
-            needs arrives in Phase 1 (FR-1); do not deploy it as is.
-          </CardDescription>
+        <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Instances</CardTitle>
+            <CardDescription>
+              {instances.length === 0
+                ? "Nothing yet."
+                : `${instances.length} cycle${instances.length === 1 ? "" : "s"}.`}
+            </CardDescription>
+          </div>
+          {/* buttonVariants on the Link rather than a Button wrapping it: this
+              is Base UI's Button, which has no asChild. */}
+          <Link href="/instances/new" className={buttonVariants({ size: "sm" })}>
+            New instance from CSV
+          </Link>
         </CardHeader>
         <CardContent>
           {instances.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              No instances yet. Run{" "}
-              <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">npm run seed</code>.
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              Start a cycle by importing the application export.
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Created</TableHead>
                   <TableHead>Stage</TableHead>
-                  <TableHead className="text-right">Fields</TableHead>
                   <TableHead className="text-right">Applicants</TableHead>
                   <TableHead className="text-right">Reviewers</TableHead>
-                  <TableHead className="text-right">Rubric</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {instances.map((instance) => (
                   <TableRow key={instance.id}>
-                    <TableCell className="font-medium">{instance.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {instance.currentStage.replace("_", " ").toLowerCase()}
+                    <TableCell className="font-medium">
+                      <Link href={`/instances/${instance.id}`} className="hover:underline">
+                        {instance.name}
+                      </Link>
+                      {/* An instance whose CSV has not committed is mid-import,
+                          not a running cycle. Saying so keeps a half-built row
+                          from being mistaken for a finished one. */}
+                      {instance.importCommittedAt === null ? (
+                        <span className="bg-muted text-muted-foreground ml-2 rounded px-1.5 py-0.5 text-xs">
+                          Draft
+                        </span>
+                      ) : null}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {instance._count.fields}
+                    <TableCell className="text-muted-foreground">
+                      {dateFormat.format(instance.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {instance.currentStage.replace(/_/g, " ").toLowerCase()}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {instance._count.applicants}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {instance._count.reviewers}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {instance._count.rubricCategories}
                     </TableCell>
                   </TableRow>
                 ))}
