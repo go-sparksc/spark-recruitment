@@ -469,6 +469,12 @@ These need answers before or during the relevant build phase. They are the place
 
 17. **Two fixture directories. OPEN — no phase assigned.** `fixtures/sample-headers.csv` sits at the repo root while `prisma/fixtures/` holds the synthetic export and its README. Two directories for one purpose invites saving a file in the wrong one, and the wrong one may hold real applicant data. The `.gitignore` now names both exempt files exactly rather than globbing a directory, so neither location is currently a hole, but the duplication is the underlying problem and the ignore rules are only a guard against it. Consolidating means moving the file, updating `prisma/seed/headers.ts`, `.gitattributes`, `.gitignore`, and the phase-0 record — small, but it touches the seed, so it wants its own change rather than riding along with feature work.
 
+18. **Which categories the per-round visibility toggles apply to. RESOLVED: OTHER only.** §6 spells DEMOGRAPHIC and RESPONSE as flat Hidden/Visible and marks only OTHER "configurable, default hidden", but the schema carries the nullable override columns on every `Field` and `FieldGroup`, so the question of what happens to an override stored on a DEMOGRAPHIC row had no stated answer.
+
+    Honouring it would create a route to showing ethnicity to written reviewers that no requirement asks for, against goal 3's premise that the bias controls are enforced by the system rather than by an admin remembering. So `lib/fields.ts` reads an override only where the resolved category is `OTHER`, and the FR-2 mapping table only offers the toggles there — an override on another category is unreachable through the UI and inert if it arrives some other way.
+
+    The cost is that the columns are wider than their meaning: a DEMOGRAPHIC row can hold a value that nothing reads. Accepted rather than splitting the columns per category, which would complicate the resolver to prevent a state the UI cannot produce. If a future cycle genuinely needs one response hidden from written reviewers, that is a §6 change first.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.

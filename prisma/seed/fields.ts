@@ -1,4 +1,5 @@
 import { FieldCategory, FieldGroupRole } from "../../generated/prisma/enums";
+import { cleanHeader } from "../../lib/fields";
 import { readSourceHeaders } from "./headers";
 
 export const ETHNICITY_GROUP_KEY = "ethnicity";
@@ -83,11 +84,10 @@ export interface FieldSpec {
   optionLabel?: string;
 }
 
-/// FR-2's default display name: a cleaned version of the header. Collapses the
-/// newlines and trailing spaces and drops the trailing colon.
-export function cleanHeader(header: string): string {
-  return header.replace(/\s+/g, " ").trim().replace(/\s*:$/, "");
-}
+/// Re-exported so the seed's callers keep one import, but the implementation
+/// lives in lib/fields.ts: the importer and the seed have to produce identical
+/// display names from identical headers, and two copies would drift.
+export { cleanHeader };
 
 interface CatalogEntry {
   key: FieldKey;
