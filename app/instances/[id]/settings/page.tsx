@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { DeleteInstanceForm } from "./delete-form";
+import { ResetPasswordForm } from "./reset-password-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -35,6 +36,20 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">{instance.name}</h1>
       <p className="text-muted-foreground mt-2 text-sm">Instance settings</p>
+
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle className="text-base">Instance password</CardTitle>
+          <CardDescription>
+            The password reviewers-turned-admins use to open this cycle. It cannot be recovered —
+            resetting replaces it. Anyone already signed in keeps access until their session
+            expires.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ResetPasswordForm instanceId={instance.id} />
+        </CardContent>
+      </Card>
 
       <Card className="border-destructive/40 mt-8">
         <CardHeader>

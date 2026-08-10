@@ -139,9 +139,17 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
             the file. Nothing is created until you commit.
           </p>
         </div>
-        <Link href={`/instances/${id}/preview`} className={buttonVariants({ size: "sm" })}>
-          Preview and commit →
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/instances/${id}/rubric`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Rubric
+          </Link>
+          <Link href={`/instances/${id}/preview`} className={buttonVariants({ size: "sm" })}>
+            Preview and commit →
+          </Link>
+        </div>
       </div>
 
       {outstanding.length > 0 ? (

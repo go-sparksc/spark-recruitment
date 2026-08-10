@@ -48,7 +48,13 @@ export function ImportCommitted({
         <p className="text-muted-foreground">
           Editing individual applicants in place is not available yet.
         </p>
-        <div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/instances/${instanceId}/rubric`}
+            className={buttonVariants({ size: "sm" })}
+          >
+            Set up the rubric →
+          </Link>
           <Link
             href={`/instances/${instanceId}/settings`}
             className={buttonVariants({ variant: "outline", size: "sm" })}

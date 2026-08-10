@@ -1,6 +1,6 @@
 # Phase 1 — CSV import and field mapping (FR-1 … FR-5)
 
-**Status:** approved, in progress
+**Status:** complete. All five slices shipped; BUILD_PLAN's Phase 1 gate passed by hand in a browser.
 **Gate (BUILD_PLAN):** upload the synthetic CSV, map fields, set a rubric, save the instance with a password, reopen it with that password. Password stored as a hash. A CSV with two identical emails is caught at preview.
 
 ---

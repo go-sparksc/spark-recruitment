@@ -4,10 +4,67 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireAdmin } from "@/lib/auth";
+import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 
 export interface DeleteState {
   error?: string;
+}
+
+export interface ResetPasswordState {
+  error?: string;
+  saved?: boolean;
+}
+
+/// FR-5: "Never recoverable; recovery means an admin with app-level access
+/// resets it."
+///
+/// requireAdmin ALONE. Putting this behind the instance password would mean the
+/// recovery path FR-5 names does not exist — the password you cannot remember
+/// would be the password required to replace it.
+///
+/// The consequence, stated in the PRD rather than left to be discovered: the
+/// instance password is not a boundary against anyone holding the app password.
+/// It scopes routine access between cycles; §8's app-level gate is the real one.
+export async function resetInstancePassword(
+  _prev: ResetPasswordState,
+  formData: FormData,
+): Promise<ResetPasswordState> {
+  await requireAdmin();
+
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirmPassword") ?? "");
+
+  if (password.length < 8) return { error: "The new password must be at least 8 characters." };
+  if (password !== confirm) return { error: "The two passwords do not match." };
+
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { id: true },
+  });
+  if (!instance) return { error: "No such instance." };
+
+  const passwordHash = await hashSecret(password);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.instance.update({ where: { id: instanceId }, data: { passwordHash } });
+    // Audited per §8. previousValue deliberately records only that a reset
+    // happened — never the old hash, and obviously never either plaintext.
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: "RESET_INSTANCE_PASSWORD",
+        entityType: "Instance",
+        entityId: instanceId,
+        previousValue: { reset: true },
+      },
+    });
+  });
+
+  revalidatePath(`/instances/${instanceId}/settings`);
+  return { saved: true };
 }
 
 /// Delete an instance and everything under it.
