@@ -17,12 +17,25 @@ export interface ReviewerSpec {
 }
 
 /// 30 reviewers with 8 Sparklets is the exact roster from BUILD_PLAN phase 2's
-/// first assignment test case (150 applicants, 143 assigned, 429 slots, load 14
-/// or 15). Phase 2's fixture is therefore already sitting in the database.
+/// first assignment test case, so that fixture is already sitting in the
+/// database. Against 150 applicants at a target of 3: 450 total slots, a pool of
+/// floor(0.05 x 450) = 22, and 428 assigned across 128 applicants holding three
+/// reviewers and 22 holding two. No reviewer exceeds ceil(450 / 30) = 15.
 ///
-/// Note that 8 of 30 is comfortably under the one-third ceiling the feasibility
-/// check enforces: with 3 slots per applicant and at most 1 Sparklet each,
-/// non-Sparklets must fill 2 of every 3 slots.
+/// These numbers are PRD v1.4's. An earlier draft of this comment carried the
+/// superseded model — whole applicants held back with zero reviewers, giving 143
+/// assigned and 429 slots — which BUILD_PLAN phase 2 now retires by name. Any
+/// figure derived from it is wrong.
+///
+/// 8 of 30 clears the feasibility check comfortably, but note what that check
+/// actually computes. With at most 1 Sparklet per applicant, non-Sparklets must
+/// fill at least 2 of every 3-slot applicant and 1 of every 2-slot one, which is
+/// 2 x 128 + 1 x 22 = 278 of the 428 assignable slots. Against that, 22
+/// non-Sparklets at a ceiling of 15 carry 330. PRD section 7.2 is explicit that
+/// the precheck works from those slot counts rather than from the "Sparklets
+/// under a third of the roster" rule of thumb, which is deliberately
+/// conservative: the thumb rule turns away an 11-Sparklet roster that the real
+/// constraint accepts at 19 x 15 = 285 against the same 278.
 export function buildReviewerSpecs(rng: Rng): ReviewerSpec[] {
   const used = new Set<string>();
   const names: { firstName: string; lastName: string }[] = [];

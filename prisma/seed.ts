@@ -80,6 +80,14 @@ async function main() {
       name: SEED_INSTANCE_NAME,
       passwordHash: instancePasswordHash,
       currentStage: InstanceStage.WRITTEN,
+      // The seed's applicants are committed applicants, not staged rows, so the
+      // flag that says so has to be set. FR-3 makes importCommittedAt the record
+      // that an import is final: it is what refuses a second CSV, and what any
+      // later surface checks before assuming there are applicants to work with.
+      // Left null, the seeded instance would claim to be a draft while holding
+      // 150 committed Applicant rows and no ImportRow rows to have staged them —
+      // a state the real import flow cannot produce.
+      importCommittedAt: new Date(),
       // Groups are created with the instance so the fields below can point at
       // them. Nested creates run parent-first, so the group row exists by the
       // time a member references its id.
