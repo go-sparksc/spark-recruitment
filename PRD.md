@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.4, Phase 0-1 complete, Phase 2 in progress
+**Status:** v1.5, Phase 0-2 complete, Phase 3 next
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
