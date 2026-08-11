@@ -6,6 +6,7 @@ import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
+  checkReviewerName,
   checkReviewerRemoval,
   parseRoster,
   type ParsedRoster,
@@ -32,7 +33,11 @@ function path(instanceId: string) {
 /// Every reviewer on the INSTANCE, with round membership flattened for the round
 /// being staffed. Instance-scoped per PRD decision 22: a reviewer serving
 /// another round is the same person, not a new one.
-async function existingReviewers(instanceId: string, round: Round) {
+///
+/// `round` is null for callers that do not belong to a round at all — renaming
+/// is the one — and `servesThisRound` is then false throughout and unread. Only
+/// the paste queue consumes it, to say whether adding the round would be a no-op.
+async function existingReviewers(instanceId: string, round: Round | null) {
   const reviewers = await prisma.reviewer.findMany({
     where: { instanceId },
     select: { id: true, firstName: true, lastName: true, rounds: true },
@@ -43,7 +48,7 @@ async function existingReviewers(instanceId: string, round: Round) {
     id: reviewer.id,
     firstName: reviewer.firstName,
     lastName: reviewer.lastName,
-    servesThisRound: reviewer.rounds.includes(round),
+    servesThisRound: round !== null && reviewer.rounds.includes(round),
   }));
 }
 
@@ -80,27 +85,31 @@ export async function commitPaste(
   const creates = resolutions.filter((r) => r.kind === "CREATE");
   const addRounds = resolutions.filter((r) => r.kind === "ADD_ROUND");
 
-  // The client is not trusted to have cleared the queue. Re-parsing what it
-  // submitted is what enforces FR-6 here rather than in the browser: a CREATE
-  // whose name still cannot be split is refused, whatever the UI allowed.
-  const reparsed = parseRoster(
-    creates.map((r) => `${r.firstName} ${r.lastName}`).join("\n"),
-    [],
-  );
-  const unsplittable = reparsed.needsConfirmation.filter((entry) =>
-    entry.flags.includes("UNSPLITTABLE"),
-  );
-  if (unsplittable.length > 0) {
-    return {
-      error:
-        `${unsplittable.length} reviewer${unsplittable.length === 1 ? "" : "s"} still ` +
-        `${unsplittable.length === 1 ? "has" : "have"} no last name. Give each one a last ` +
-        `name or drop the line.`,
-    };
-  }
-
   if (creates.length === 0 && addRounds.length === 0) {
     return { error: "Nothing to import — every line was dropped." };
+  }
+
+  // The client is not trusted to have cleared the queue, and the queue's two
+  // free-text inputs never went through parseRoster at all. Every proposed name
+  // goes through the shared gate here.
+  //
+  // This used to join the two fields back into one line and re-split it, which
+  // validated a string it then did not store: "Ann" + "Marie Smith" was checked
+  // as ("Ann Marie", "Smith") and written as ("Ann", "Marie Smith"). It happened
+  // to catch the blank-name case it was aimed at, and would have gone on being
+  // subtly wrong about everything else.
+  const existing = await existingReviewers(instanceId, round);
+  const checked: { firstName: string; lastName: string }[] = [];
+
+  for (const create of creates) {
+    // Matches are NOT refused here: choosing CREATE in the queue is the admin
+    // saying these are two different people, which FR-6 allows.
+    const verdict = checkReviewerName(create, existing);
+    if (!verdict.ok) {
+      const shown = `${create.firstName} ${create.lastName}`.trim();
+      return { error: `${shown === "" ? "One entry" : `“${shown}”`}: ${verdict.reason}` };
+    }
+    checked.push({ firstName: verdict.firstName, lastName: verdict.lastName });
   }
 
   // Guard the ids rather than trusting them: an ADD_ROUND naming a reviewer on
@@ -114,14 +123,21 @@ export async function commitPaste(
   }
 
   await prisma.$transaction(async (tx) => {
-    if (creates.length > 0) {
+    if (checked.length > 0) {
       await tx.reviewer.createMany({
         // FR-6: pasted reviewers arrive as non-Sparklets, in the round being
-        // staffed and no other. Both are set in the grid afterwards.
-        data: creates.map((r) => ({
+        // staffed and no other, and the flag and any further rounds are set in
+        // the grid afterwards. That is a constraint on the PASTE — it keeps one
+        // paste box being one paste box, rather than a box with a column of
+        // checkboxes beside it. Manual add has its own Sparklet checkbox, which
+        // FR-6 describes and which nothing here contradicts.
+        //
+        // Names come from `checked`, never from the raw resolutions: the values
+        // the gate returned are the values that get stored.
+        data: checked.map((r) => ({
           instanceId,
-          firstName: r.firstName.trim(),
-          lastName: r.lastName.trim(),
+          firstName: r.firstName,
+          lastName: r.lastName,
           isSparklet: false,
           rounds: [round],
         })),
@@ -148,6 +164,107 @@ export async function commitPaste(
       (added > 0 ? `, and put ${added} existing one${added === 1 ? "" : "s"} in this round` : "") +
       `.`,
   };
+}
+
+/// A name that already exists on the roster, handed back for the admin to
+/// confirm rather than refused. FR-6 allows two reviewers to share a name, so
+/// the answer has to come from a person; `matchNames` is what the prompt shows.
+export interface NameState extends ActionState {
+  needsConfirmation?: { firstName: string; lastName: string; matchCount: number };
+}
+
+/// FR-6's first sentence: "Admin adds reviewers by first and last name with a
+/// Sparklet checkbox." This is that path; bulk paste is the addition beside it.
+///
+/// The Sparklet checkbox is here because FR-6 puts one here. It is not an
+/// exemption from the rule that pasted reviewers arrive as non-Sparklets — that
+/// rule is about keeping one paste box being one paste box, and says nothing
+/// about a form with two fields already on it.
+export async function addReviewer(
+  instanceId: string,
+  round: Round,
+  input: { firstName: string; lastName: string; isSparklet: boolean },
+  confirmDuplicate = false,
+): Promise<NameState> {
+  await requireInstance(instanceId, path(instanceId));
+
+  const verdict = checkReviewerName(input, await existingReviewers(instanceId, round));
+  if (!verdict.ok) return { error: verdict.reason };
+
+  if (verdict.matches.length > 0 && !confirmDuplicate) {
+    return {
+      needsConfirmation: {
+        firstName: verdict.firstName,
+        lastName: verdict.lastName,
+        matchCount: verdict.matches.length,
+      },
+    };
+  }
+
+  await prisma.reviewer.create({
+    data: {
+      instanceId,
+      firstName: verdict.firstName,
+      lastName: verdict.lastName,
+      isSparklet: input.isSparklet,
+      rounds: [round],
+    },
+  });
+
+  revalidatePath(path(instanceId));
+  return { message: `Added ${verdict.firstName} ${verdict.lastName}.` };
+}
+
+/// Correct a name — a typo in a pasted line, or a rename.
+///
+/// **Takes no round, and touches no round.** The update below writes `firstName`
+/// and `lastName` and nothing else, so a reviewer serving all three rounds keeps
+/// all three. A name is a property of the person, not of their membership in the
+/// round whose page the edit happened to be opened from.
+///
+/// Deliberately unguarded, unlike removal: renaming destroys nothing. Every
+/// score, assignment, and vote references `reviewerId`, which is the whole point
+/// of §5's rule against keying by name — so a rename cannot orphan anything, and
+/// adding a removal-style block here by analogy would be wrong.
+export async function renameReviewer(
+  instanceId: string,
+  reviewerId: string,
+  input: { firstName: string; lastName: string },
+  confirmDuplicate = false,
+): Promise<NameState> {
+  await requireInstance(instanceId, path(instanceId));
+
+  const reviewer = await prisma.reviewer.findFirst({
+    where: { id: reviewerId, instanceId },
+    select: { id: true },
+  });
+  if (!reviewer) return { error: "That reviewer no longer exists." };
+
+  const verdict = checkReviewerName(input, await existingReviewers(instanceId, null), {
+    // Without this, every rename collides with the row being renamed — including
+    // one that only fixes capitalisation.
+    ignoreReviewerId: reviewerId,
+  });
+  if (!verdict.ok) return { error: verdict.reason };
+
+  if (verdict.matches.length > 0 && !confirmDuplicate) {
+    return {
+      needsConfirmation: {
+        firstName: verdict.firstName,
+        lastName: verdict.lastName,
+        matchCount: verdict.matches.length,
+      },
+    };
+  }
+
+  await prisma.reviewer.update({
+    where: { id: reviewerId },
+    // Two fields. Not rounds, not isSparklet, not assignments.
+    data: { firstName: verdict.firstName, lastName: verdict.lastName },
+  });
+
+  revalidatePath(path(instanceId));
+  return { message: `Renamed to ${verdict.firstName} ${verdict.lastName}.` };
 }
 
 export async function setSparklet(

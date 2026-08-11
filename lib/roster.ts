@@ -86,17 +86,34 @@ export interface ParsedRoster {
 /// its own; a run of any of them collapses to one ordinary space before the split.
 const WHITESPACE = /\s+/g;
 
-/// Trimmed, whitespace-collapsed, case-folded. Used only for comparison, never
-/// stored — the name is written as the admin typed it.
+/// NFC, whitespace runs collapsed to one space, trimmed. **Case is preserved.**
 ///
-/// The separator is U+001F, the ASCII unit separator, which the parser can
+/// This is what gets stored. `checkReviewerName` returns these values and every
+/// write path persists exactly them, so a normalizer that folded case would put
+/// the whole roster — and FR-20's export of it — in lower case. Folding belongs
+/// in `nameKey` below, which is compared and never stored.
+function normalizeNamePart(value: string): string {
+  return value.normalize("NFC").replace(WHITESPACE, " ").trim();
+}
+
+/// The comparison key. Case-folded, and never stored.
+///
+/// The separator is U+001F, the ASCII unit separator, which normalization can
 /// never produce inside a name: every run of whitespace collapses to a plain
 /// space and nothing else is stripped. A space would instead make the key
 /// ambiguous — ("Ann Marie", "Smith") and ("Ann", "Marie Smith") both fold to
-/// "ann marie smith", and two different people would be reported as the same
-/// one. A paste alone cannot produce that pair, since every line splits on its
-/// last space, but the existing roster can: nothing stops an admin typing
-/// "Marie Smith" as a surname in the grid.
+/// "ann marie smith", and two different people would be reported as the same one.
+///
+/// That pair is reachable, on three of the four ways a name enters the roster:
+/// manual add, a rename in the grid, and the two free-text inputs the paste queue
+/// offers for a line it could not split. Only a paste itself cannot produce it,
+/// because every line splits on its LAST space, so a pasted "Ann Marie Smith" is
+/// always ("Ann Marie", "Smith"). All four paths go through `checkReviewerName`,
+/// which is why one key is enough to keep them agreeing.
+///
+/// A multi-word surname is not the problem and is rejected nowhere — "de la Cruz"
+/// and "van der Berg" are names. The rule is only that two different splits of
+/// the same words must not be mistaken for each other.
 ///
 /// Deliberately not U+0000. It behaves identically at runtime, but a literal NUL
 /// in the first 8000 bytes trips git's binary heuristic, and this file was
@@ -105,6 +122,67 @@ const WHITESPACE = /\s+/g;
 /// wrong if someone later replaces the escape with the character itself.
 function nameKey(firstName: string, lastName: string): string {
   return `${firstName}\u001F${lastName}`.normalize("NFC").toLowerCase();
+}
+
+/// Reviewers on the instance whose name matches, ignoring one id so a rename
+/// does not collide with the row being renamed.
+///
+/// Shared by `parseRoster` and `checkReviewerName`, so every entry path compares
+/// names the same way. Existing names are normalized before comparison too: they
+/// were stored normalized, but a row that predates this function, or one written
+/// by the seed, should not silently fail to match.
+function findMatches(
+  firstName: string,
+  lastName: string,
+  existing: readonly ExistingReviewer[],
+  ignoreReviewerId?: string,
+): ExistingReviewer[] {
+  const key = nameKey(firstName, lastName);
+  return existing.filter(
+    (reviewer) =>
+      reviewer.id !== ignoreReviewerId &&
+      nameKey(normalizeNamePart(reviewer.firstName), normalizeNamePart(reviewer.lastName)) === key,
+  );
+}
+
+export type NameCheck =
+  | { ok: false; reason: string }
+  /// The values to store. Callers write THESE, never their own input — that is
+  /// what makes it impossible to validate one string and persist another.
+  | { ok: true; firstName: string; lastName: string; matches: ExistingReviewer[] };
+
+/// The one gate every reviewer name passes through before it is written.
+///
+/// Four paths create or change a name: a pasted line, the paste queue's two
+/// free-text inputs for an unsplittable line, manual add, and a rename in the
+/// grid. Only the first goes through `parseRoster`, and `parseRoster` is the
+/// wrong home for this anyway — it is line-oriented and three of the four never
+/// see a line. So the shared part lives here and they all call it.
+///
+/// **Matches are reported, not refused.** FR-6 is explicit that two reviewers
+/// sharing a name is not an error, and §5 puts no unique constraint on it. The
+/// caller decides whether to ask for confirmation; blocking here would invent a
+/// rule the PRD does not have.
+export function checkReviewerName(
+  proposed: { firstName: string; lastName: string },
+  existing: readonly ExistingReviewer[] = [],
+  options: { ignoreReviewerId?: string } = {},
+): NameCheck {
+  const firstName = normalizeNamePart(proposed.firstName ?? "");
+  const lastName = normalizeNamePart(proposed.lastName ?? "");
+
+  // Both halves are required. `Reviewer.lastName` is non-null, and a blank first
+  // name makes the roster dropdown in FR-9 unreadable.
+  if (firstName === "" && lastName === "") return { ok: false, reason: "Enter a name." };
+  if (firstName === "") return { ok: false, reason: "This reviewer needs a first name." };
+  if (lastName === "") return { ok: false, reason: "This reviewer needs a last name." };
+
+  return {
+    ok: true,
+    firstName,
+    lastName,
+    matches: findMatches(firstName, lastName, existing, options.ignoreReviewerId),
+  };
 }
 
 /// FR-6: "blank and whitespace-only lines are dropped silently. A line is split
@@ -120,9 +198,11 @@ export function parseRoster(
   let droppedLineCount = 0;
 
   lines.forEach((raw, index) => {
-    // NFC before anything else, so a decomposed accent does not survive as a
-    // separate code point into the split, the comparison, or the database.
-    const collapsed = raw.normalize("NFC").replace(WHITESPACE, " ").trim();
+    // The same normalization every other entry path gets, so a pasted name and
+    // a typed one that look alike are alike. NFC first matters: a decomposed
+    // accent must not survive as a separate code point into the split, the
+    // comparison, or the database.
+    const collapsed = normalizeNamePart(raw);
 
     if (collapsed === "") {
       droppedLineCount += 1;
@@ -153,15 +233,6 @@ export function parseRoster(
     countsInPaste.set(key, (countsInPaste.get(key) ?? 0) + 1);
   }
 
-  const existingByKey = new Map<string, ExistingReviewer>();
-  for (const reviewer of existing) {
-    // First writer wins. Two existing rows already sharing a name is a state the
-    // schema permits; either is an equally correct thing to offer the round to,
-    // and the admin can see both in the roster grid.
-    const key = nameKey(reviewer.firstName, reviewer.lastName);
-    if (!existingByKey.has(key)) existingByKey.set(key, reviewer);
-  }
-
   for (const entry of entries) {
     // An unsplittable line has no last name to compare, so it is not compared.
     // "Cher" against an existing Cher Bono is not a match, and claiming it was
@@ -174,7 +245,11 @@ export function parseRoster(
       entry.flags.push("DUPLICATE_IN_PASTE");
     }
 
-    const match = existingByKey.get(key);
+    // Through the shared finder, so a pasted line and a typed one reach the
+    // same verdict about the same roster. First match wins: two existing rows
+    // already sharing a name is a state the schema permits, either is an equally
+    // correct thing to offer the round to, and both are visible in the grid.
+    const [match] = findMatches(entry.firstName, entry.lastName, existing);
     if (match) {
       entry.flags.push("MATCHES_EXISTING_REVIEWER");
       entry.match = {

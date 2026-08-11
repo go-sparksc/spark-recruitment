@@ -3,13 +3,16 @@
 import { useState, useTransition } from "react";
 
 import {
+  addReviewer,
   addRound,
   commitPaste,
   previewPaste,
   previewRemoval,
   removeReviewer,
+  renameReviewer,
   setSparklet,
   type ActionState,
+  type NameState,
   type PasteResolution,
 } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -125,9 +128,11 @@ export function RosterControls({
 
   return (
     <div className="space-y-10">
+      <AddReviewerForm instanceId={instanceId} round={round} roundLabel={roundLabel(round)} />
+
       <section className="space-y-3">
         <div className="space-y-1.5">
-          <Label htmlFor="paste">Paste names, one per line</Label>
+          <Label htmlFor="paste">Or paste names, one per line</Label>
           <p className="text-muted-foreground text-sm">
             Everyone pasted joins the {roundLabel(round).toLowerCase()} as a non-Sparklet. Set the
             Sparklet flag and any other rounds in the grid below.
@@ -280,6 +285,217 @@ export function RosterControls({
   );
 }
 
+/// FR-6's primary path: first name, last name, Sparklet checkbox.
+function AddReviewerForm({
+  instanceId,
+  round,
+  roundLabel,
+}: {
+  instanceId: string;
+  round: Round;
+  roundLabel: string;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [isSparklet, setIsSparklet] = useState(false);
+  const [state, setState] = useState<NameState>({});
+  const [pending, start] = useTransition();
+
+  const submit = (confirmDuplicate: boolean) =>
+    start(async () => {
+      const result = await addReviewer(
+        instanceId,
+        round,
+        { firstName, lastName, isSparklet },
+        confirmDuplicate,
+      );
+      setState(result);
+      if (result.message) {
+        setFirstName("");
+        setLastName("");
+        setIsSparklet(false);
+      }
+    });
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-medium">Add a reviewer</h2>
+        <p className="text-muted-foreground text-sm">
+          Joins the {roundLabel.toLowerCase()}. Add them to other rounds in the grid below.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="add-first" className="text-xs">
+            First name
+          </Label>
+          <Input
+            id="add-first"
+            value={firstName}
+            disabled={pending}
+            className="h-9 w-48"
+            onChange={(e) => setFirstName(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="add-last" className="text-xs">
+            Last name
+          </Label>
+          <Input
+            id="add-last"
+            value={lastName}
+            disabled={pending}
+            className="h-9 w-48"
+            onChange={(e) => setLastName(e.target.value)}
+          />
+        </div>
+        <label className="flex h-9 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={isSparklet}
+            disabled={pending}
+            onChange={(e) => setIsSparklet(e.target.checked)}
+          />
+          Sparklet
+        </label>
+        <Button
+          size="sm"
+          disabled={pending || (firstName.trim() === "" && lastName.trim() === "")}
+          onClick={() => submit(false)}
+        >
+          {pending ? "Adding…" : "Add"}
+        </Button>
+      </div>
+
+      {state.needsConfirmation ? (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-sm">
+            {state.needsConfirmation.matchCount === 1 ? "Someone" : "More than one reviewer"} on
+            this instance is already called {state.needsConfirmation.firstName}{" "}
+            {state.needsConfirmation.lastName}. Two reviewers can share a name — add anyway?
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={pending} onClick={() => submit(true)}>
+              Add anyway
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setState({})}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {state.error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {state.error}
+        </p>
+      ) : null}
+      {state.message ? <p className="text-sm text-emerald-600">{state.message}</p> : null}
+    </section>
+  );
+}
+
+/// Inline rename. A pasted typo has to be fixable, and before this the only
+/// remedy was Remove and paste again.
+function NameCell({
+  instanceId,
+  reviewer,
+  onResult,
+}: {
+  instanceId: string;
+  reviewer: ReviewerRow;
+  onResult: (state: ActionState) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [firstName, setFirstName] = useState(reviewer.firstName);
+  const [lastName, setLastName] = useState(reviewer.lastName);
+  const [state, setState] = useState<NameState>({});
+  const [pending, start] = useTransition();
+
+  const save = (confirmDuplicate: boolean) =>
+    start(async () => {
+      const result = await renameReviewer(
+        instanceId,
+        reviewer.id,
+        { firstName, lastName },
+        confirmDuplicate,
+      );
+      setState(result);
+      if (result.message) {
+        setEditing(false);
+        setState({});
+        onResult(result);
+      }
+    });
+
+  const cancel = () => {
+    setFirstName(reviewer.firstName);
+    setLastName(reviewer.lastName);
+    setState({});
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <span>
+          {reviewer.firstName} {reviewer.lastName}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+          Edit
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 py-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          aria-label="First name"
+          value={firstName}
+          disabled={pending}
+          className="h-8 w-36"
+          onChange={(e) => setFirstName(e.target.value)}
+        />
+        <Input
+          aria-label="Last name"
+          value={lastName}
+          disabled={pending}
+          className="h-8 w-36"
+          onChange={(e) => setLastName(e.target.value)}
+        />
+        <Button size="sm" disabled={pending} onClick={() => save(false)}>
+          Save
+        </Button>
+        <Button size="sm" variant="ghost" onClick={cancel}>
+          Cancel
+        </Button>
+      </div>
+
+      {state.needsConfirmation ? (
+        <div className="space-y-2">
+          <p className="text-sm">
+            Another reviewer is already called {state.needsConfirmation.firstName}{" "}
+            {state.needsConfirmation.lastName}. Rename anyway?
+          </p>
+          <Button size="sm" disabled={pending} onClick={() => save(true)}>
+            Rename anyway
+          </Button>
+        </div>
+      ) : null}
+
+      {state.error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {state.error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function RosterGrid({
   instanceId,
   reviewers,
@@ -352,7 +568,7 @@ function RosterGrid({
             {reviewers.map((reviewer) => (
               <tr key={reviewer.id} className="border-b last:border-0">
                 <td className="py-2 pr-4">
-                  {reviewer.firstName} {reviewer.lastName}
+                  <NameCell instanceId={instanceId} reviewer={reviewer} onResult={onResult} />
                 </td>
                 <td className="py-2 pr-4">
                   <input

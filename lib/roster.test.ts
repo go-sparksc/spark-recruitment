@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  checkReviewerName,
   checkReviewerRemoval,
   parseRoster,
   type ExistingReviewer,
@@ -369,6 +370,161 @@ describe("paste hazards", () => {
     expect(parseRoster(decomposed).ready[0].firstName).toBe(
       parseRoster(composed).ready[0].firstName,
     );
+  });
+});
+
+describe("checkReviewerName — the one gate every write path uses", () => {
+  // Four paths create or change a reviewer name: a pasted line, the paste
+  // queue's two free-text inputs, manual add, and a rename in the grid. Only the
+  // first goes through parseRoster. These tests cover the gate the other three
+  // rely on entirely, and the last one pins it to parseRoster so the two cannot
+  // drift apart.
+
+  const ok = (result: ReturnType<typeof checkReviewerName>) => {
+    if (!result.ok) throw new Error(`expected ok, got: ${result.reason}`);
+    return result;
+  };
+
+  describe("requires both halves", () => {
+    it("rejects a blank first name", () => {
+      expect(checkReviewerName({ firstName: "", lastName: "Smith" }).ok).toBe(false);
+      expect(checkReviewerName({ firstName: "   ", lastName: "Smith" }).ok).toBe(false);
+    });
+
+    it("rejects a blank last name", () => {
+      // Reviewer.lastName is non-null. This is the same rule the paste queue's
+      // UNSPLITTABLE flag enforces, now reached from every other path too.
+      expect(checkReviewerName({ firstName: "Cher", lastName: "" }).ok).toBe(false);
+      expect(checkReviewerName({ firstName: "Cher", lastName: "  " }).ok).toBe(false);
+    });
+
+    it("names which half is missing", () => {
+      const first = checkReviewerName({ firstName: "", lastName: "Smith" });
+      const last = checkReviewerName({ firstName: "Ann", lastName: "" });
+
+      expect(first.ok || first.reason).toContain("first name");
+      expect(last.ok || last.reason).toContain("last name");
+    });
+  });
+
+  describe("returns the values to store", () => {
+    it("trims and collapses without touching case", () => {
+      // The property that makes it safe for callers to persist what they get
+      // back. A normalizer that folded case would put the whole roster, and
+      // FR-20's export of it, in lower case.
+      const result = ok(checkReviewerName({ firstName: "  Ann   Marie  ", lastName: " Smith " }));
+
+      expect(result.firstName).toBe("Ann Marie");
+      expect(result.lastName).toBe("Smith");
+    });
+
+    it("preserves capitalisation exactly as typed", () => {
+      const result = ok(checkReviewerName({ firstName: "de la", lastName: "CRUZ" }));
+
+      expect(result.firstName).toBe("de la");
+      expect(result.lastName).toBe("CRUZ");
+    });
+
+    it("is idempotent, so a stored name checks clean a second time", () => {
+      // A rename that changes nothing must not keep "normalizing" the value.
+      const once = ok(checkReviewerName({ firstName: "  Ann  Marie ", lastName: " Smith" }));
+      const twice = ok(checkReviewerName(once));
+
+      expect(twice.firstName).toBe(once.firstName);
+      expect(twice.lastName).toBe(once.lastName);
+    });
+
+    it("accepts a multi-word surname", () => {
+      // "de la Cruz" and "van der Berg" are names. Nothing here rejects a space
+      // in a last name; the key only has to tell two splits apart.
+      expect(ok(checkReviewerName({ firstName: "Ana", lastName: "de la Cruz" })).lastName).toBe(
+        "de la Cruz",
+      );
+    });
+  });
+
+  describe("reports matches without refusing them", () => {
+    const existing = [
+      { id: "rev_1", firstName: "Ann Marie", lastName: "Smith", servesThisRound: false },
+    ];
+
+    it("matches an existing reviewer regardless of case and spacing", () => {
+      const result = ok(checkReviewerName({ firstName: " ann   MARIE ", lastName: "smith" }, existing));
+
+      expect(result.matches.map((m) => m.id)).toEqual(["rev_1"]);
+    });
+
+    it("still returns ok — a shared name is not an error", () => {
+      // FR-6: two reviewers may share a name, and §5 puts no unique constraint
+      // on it. The caller asks for confirmation; the gate does not decide.
+      expect(checkReviewerName({ firstName: "Ann Marie", lastName: "Smith" }, existing).ok).toBe(
+        true,
+      );
+    });
+
+    it('does not match "Ann" + "Marie Smith" against "Ann Marie" + "Smith"', () => {
+      // The collision the U+001F separator exists to prevent, on the paths that
+      // can actually reach it — manual add, rename, and the paste queue inputs.
+      const result = ok(checkReviewerName({ firstName: "Ann", lastName: "Marie Smith" }, existing));
+
+      expect(result.matches).toEqual([]);
+    });
+
+    it("ignores the reviewer being renamed, so a rename cannot collide with itself", () => {
+      const result = ok(
+        checkReviewerName({ firstName: "Ann Marie", lastName: "Smith" }, existing, {
+          ignoreReviewerId: "rev_1",
+        }),
+      );
+
+      expect(result.matches).toEqual([]);
+    });
+
+    it("still catches a rename onto someone else's name", () => {
+      const roster = [
+        ...existing,
+        { id: "rev_2", firstName: "Alex", lastName: "Kim", servesThisRound: true },
+      ];
+      const result = ok(
+        checkReviewerName({ firstName: "Alex", lastName: "Kim" }, roster, {
+          ignoreReviewerId: "rev_1",
+        }),
+      );
+
+      expect(result.matches.map((m) => m.id)).toEqual(["rev_2"]);
+    });
+
+    it("reports every match when the roster already holds a shared name", () => {
+      const roster = [
+        { id: "rev_1", firstName: "Alex", lastName: "Kim", servesThisRound: false },
+        { id: "rev_2", firstName: "Alex", lastName: "Kim", servesThisRound: true },
+      ];
+
+      expect(
+        ok(checkReviewerName({ firstName: "Alex", lastName: "Kim" }, roster)).matches,
+      ).toHaveLength(2);
+    });
+  });
+
+  it("agrees with parseRoster, so the two paths cannot drift", () => {
+    // A name parseRoster is willing to import must pass the gate unchanged. If
+    // this fails, a pasted reviewer and a typed one no longer mean the same
+    // thing, which is the whole failure this gate exists to prevent.
+    const parsed = parseRoster("Mary Anne Chen\nAna de la Cruz\nJosé Ramos");
+
+    expect(parsed.ready).toHaveLength(3);
+    for (const entry of parsed.ready) {
+      const result = ok(checkReviewerName(entry));
+      expect(result.firstName).toBe(entry.firstName);
+      expect(result.lastName).toBe(entry.lastName);
+    }
+  });
+
+  it("rejects what parseRoster routes to the queue as unsplittable", () => {
+    const [cher] = parseRoster("Cher").needsConfirmation;
+
+    expect(cher.flags).toContain("UNSPLITTABLE");
+    expect(checkReviewerName(cher).ok).toBe(false);
   });
 });
 

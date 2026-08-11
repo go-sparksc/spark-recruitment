@@ -146,9 +146,30 @@ Comparison for both duplicate kinds is on the trimmed, whitespace-collapsed, cas
 The page is **round-scoped** — FR-6 says pasted reviewers are "members of the round being staffed" — with a round selector defaulting to `WRITTEN`. Two server actions rather than one, so the queue exists:
 
 - `previewPaste(instanceId, round, text)` — reads **every** reviewer in the instance, resolves `servesThisRound` per row, calls `parseRoster`, returns `ParsedRoster`. Writes nothing.
-- `commitPaste(instanceId, round, resolutions)` — one transaction. New rows get `isSparklet: false`, `rounds: [round]`; an "add the round" resolution appends `round` to that reviewer's existing array instead. Re-runs `parseRoster` server-side and refuses any entry still carrying `UNSPLITTABLE` or an unresolved `MATCHES_EXISTING_REVIEWER`; the client is not trusted to have cleared the queue.
+- `commitPaste(instanceId, round, resolutions)` — one transaction. New rows get `isSparklet: false`, `rounds: [round]`; an "add the round" resolution appends `round` to that reviewer's existing array instead. Every proposed name goes through `checkReviewerName` server-side and the returned values are what get stored; the client is not trusted to have cleared the queue.
 
 Below the paste box, the roster grid: first name, last name, Sparklet checkbox, a checkbox per round, remove. This is where the Sparklet flag and additional rounds are set, per FR-6 — one paste box stays one paste box.
+
+> **Correction, made after Slice 2 shipped: manual add was missing, and the gap entered here, in this plan.**
+>
+> FR-6 opens *"Admin adds reviewers by first and last name with a Sparklet checkbox"* and then adds that bulk paste is **also** supported. Manual entry is the primary path; paste is the addition. This slice specified only the paste flow and a grid whose name column was read-only, so Slice 2 shipped the addition and omitted the requirement it hangs off — and left a pasted typo with no remedy but Remove and paste again.
+>
+> **It was found by the owner in the by-hand walkthrough, not by review.** Nothing caught it earlier: the tests asserted the paste behaviour that was specified, `npm run verify` was clean, and both the plan and the implementation were internally consistent with each other and wrong about FR-6 together. That is the exact failure BUILD_PLAN §2 names — "Claude writing plausible code for a subtly wrong spec" — and the thing that caught it was clicking through the screen, which is why the gate is written that way.
+>
+> The lesson for the remaining slices: a plan that paraphrases a requirement can drop half of it silently, and re-reading the FR sentence against the slice before building is cheaper than finding it in the walkthrough. Slices 3 and 4 quote FR-7 and FR-8 rather than paraphrasing them, which is now a deliberate choice rather than a stylistic one.
+>
+> Fixed in the follow-up commit to Slice 2, together with two things found while fixing it: `commitPaste` validated a reconstructed string it then did not store, and the four name-entry paths needed one shared gate rather than four copies of the same check. See *The name gate* below.
+
+**The name gate.** Four paths create or change a reviewer name — a pasted line, the paste queue's two free-text inputs for an unsplittable line, manual add, and a rename in the grid — and only the first goes through `parseRoster`. `lib/roster.ts` therefore exports `checkReviewerName(proposed, existing, { ignoreReviewerId })`, which every write path calls:
+
+- It **returns the values to store**, so it is structurally impossible to validate one string and persist another. That was a real defect: `commitPaste` joined the queue's two fields into one line and re-split it, checking `("Ann Marie", "Smith")` while writing `("Ann", "Marie Smith")`.
+- It **normalizes without folding case** — NFC, whitespace collapsed, trimmed. Case-folding lives only in `nameKey`, which is compared and never stored; a gate that lowercased would put the whole roster, and FR-20's export of it, in lower case.
+- It **reports matches rather than refusing them**, since FR-6 allows two reviewers to share a name. Manual add and rename surface an "add anyway" confirmation, the same confirm-to-keep the paste queue uses.
+- `ignoreReviewerId` exists so a rename does not collide with the row being renamed.
+
+`parseRoster` and `checkReviewerName` share `normalizeNamePart`, `nameKey`, and `findMatches`, and a test asserts that any name `parseRoster` will import passes the gate unchanged — which is what stops the two drifting.
+
+**Rename takes no round and touches no round.** It writes `firstName` and `lastName` and nothing else, so a reviewer serving all three rounds keeps all three; a name belongs to the person, not to the round whose page the edit was opened from. It is also deliberately unguarded, unlike removal: renaming destroys nothing, because every score, assignment and vote references `reviewerId` — which is precisely what §5's rule against keying by name buys.
 
 **Removal, per decision 5.** `Assignment.reviewerId` is `onDelete: Cascade`, so removing a reviewer takes their assignments and — from Phase 3 — the scores hanging off them. So `removeReviewer` counts the reviewer's `Score` and `ReviewNote` rows first and **refuses** when either is non-zero:
 
