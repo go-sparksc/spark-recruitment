@@ -1,6 +1,6 @@
 import { Round } from "../../generated/prisma/enums";
 import { FIRST_NAMES, LAST_NAMES } from "./corpus";
-import type { Rng } from "./rng";
+import type { Rng } from "../../lib/rng";
 
 export const REVIEWER_COUNT = 30;
 export const SPARKLET_COUNT = 8;

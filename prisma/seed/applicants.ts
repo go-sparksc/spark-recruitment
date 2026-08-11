@@ -15,7 +15,7 @@ import {
   type EssayKey,
 } from "./corpus";
 import type { FieldSpec } from "./fields";
-import type { Rng } from "./rng";
+import type { Rng } from "../../lib/rng";
 
 const MAJORS_WITHOUT_OTHER = MAJORS.filter((major) => major !== "Other");
 

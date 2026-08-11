@@ -3,7 +3,7 @@ import { InstanceStage, Round } from "../generated/prisma/enums";
 import { buildApplicantData, buildApplicantProfiles } from "./seed/applicants";
 import { SEED_INSTANCE_ID, createSeedClient } from "./seed/client";
 import { ETHNICITY_GROUP, buildFieldSpecs } from "./seed/fields";
-import { createRng } from "./seed/rng";
+import { createRng } from "../lib/rng";
 import { RUBRIC_CATEGORIES, SPARKLET_COUNT, buildReviewerSpecs } from "./seed/roster";
 
 const RNG_SEED = 20260805;

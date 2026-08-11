@@ -9,7 +9,7 @@ import {
   cleanHeader,
 } from "./fields";
 import { EXPECTED_COLUMN_COUNT, readSourceHeaders } from "./headers";
-import { createRng } from "./rng";
+import { createRng } from "../../lib/rng";
 import { SPARKLET_COUNT, buildReviewerSpecs } from "./roster";
 
 // Light smoke coverage. The two pieces with real logic — lib/assignment.ts and
