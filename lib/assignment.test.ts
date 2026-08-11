@@ -6,6 +6,7 @@ import {
   planShape,
   type AssignmentInput,
   type AssignmentPlan,
+  type FeasibilityReport,
   type Pair,
   type ReviewerInput,
 } from "@/lib/assignment";
@@ -141,6 +142,23 @@ function assertEvenSplit(plan: AssignmentPlan, reviewerCount: number) {
   expect(loads.filter((n) => n === base)).toHaveLength(reviewerCount - remainder);
 }
 
+/// The failure message must render the same fields the report carries.
+///
+/// Derived from the report rather than compared against literals, so it holds on
+/// any roster and cannot pass by naming two numbers that happen to be right
+/// while the two that matter are wrong. The earlier version of this check
+/// asserted only the two load ceilings, which are the same on every roster of
+/// this size — the capacity and the minimum are the ones that move.
+function expectMessageMatchesReport(report: FeasibilityReport) {
+  expect(report.message).not.toBeNull();
+  expect(report.message).toContain(String(report.nonSparkletMinimum));
+  expect(report.message).toContain(String(report.nonSparkletCapacity));
+  expect(report.message).toContain(String(report.loadCeiling));
+  if (report.relaxedNonSparkletCeiling !== null) {
+    expect(report.message).toContain(String(report.relaxedNonSparkletCeiling));
+  }
+}
+
 /// FR-7's exemption, evaluated. True means the plan left load on the table.
 function improvingSwapExists(
   plan: AssignmentPlan,
@@ -266,10 +284,19 @@ describe("30 reviewers, 15 Sparklets, 150 applicants", () => {
       expect(report.relaxedNonSparkletAverage).toBeCloseTo(18.53, 1);
     });
 
-    it("both numbers appear in the message, before anything is confirmed", () => {
+    it("both load numbers appear in the message, before anything is confirmed", () => {
       expect(report.message).toContain("15");
       expect(report.message).toContain("19");
       expect(report.message).toContain("18.5");
+    });
+
+    it("and so do the capacity and the minimum the decision rests on", () => {
+      // 15 and 19 were the only numbers checked here, and both are load
+      // ceilings — they read the same on any roster this size. The two that
+      // actually explain the refusal are the ones that move.
+      expect(report.message).toContain("278");
+      expect(report.message).toContain("225");
+      expectMessageMatchesReport(report);
     });
 
     it("the message is one a non-technical successor could act on", () => {
@@ -336,6 +363,59 @@ describe("30 reviewers, 15 Sparklets, 150 applicants", () => {
     it("holds every other invariant", () => {
       assertPlanInvariants(plan, relaxedArgs);
     });
+  });
+});
+
+describe("the failure message tracks preserved rows", () => {
+  // Why the walkthrough shows 277 and 224 where the case above asserts 278 and
+  // 225. It is not a second computation drifting from the first — the message is
+  // handed the same variables the report returns. It is a different state: by
+  // step 5 the walkthrough has already swapped a reviewer at step 3, so one
+  // MANUAL row exists, and FR-8 makes a preserved row consumed capacity.
+  //
+  // Both numbers move by exactly one, for two different reasons, and asserting
+  // them together is what makes the message trustworthy on a live instance
+  // rather than only on a clean one.
+  const reviewers = roster(30, 15);
+  const nonSparklet = reviewers[20];
+  const preserved: Pair[] = [{ applicantId: "app_0", reviewerId: nonSparklet.id }];
+  const report = checkFeasibility(
+    input({ applicantIds: applicants(150), reviewers, preserved }),
+  );
+
+  it("drops the non-Sparklet minimum by one: that applicant now needs one fewer", () => {
+    // app_0 needs 2 more rather than 3, and can still take a Sparklet, so it
+    // contributes 1 to the minimum instead of 2.
+    expect(report.nonSparkletMinimum).toBe(277);
+  });
+
+  it("drops the capacity by one: that reviewer has one slot less to give", () => {
+    // 14 non-Sparklets at the full ceiling of 15, plus one at 14.
+    expect(report.nonSparkletCapacity).toBe(224);
+  });
+
+  it("still fails, and the message reports the live numbers rather than the clean ones", () => {
+    expect(report.feasible).toBe(false);
+    expect(report.message).toContain("277");
+    expect(report.message).toContain("224");
+    expectMessageMatchesReport(report);
+  });
+
+  it("a preserved SPARKLET moves neither, which is why the pair has to be tested together", () => {
+    // The applicant's Sparklet headroom goes to zero at the same time as its
+    // need drops, so the minimum is unchanged; and a Sparklet's load never
+    // counts against non-Sparklet capacity. A test that only watched one number
+    // would call this case a regression or miss the non-Sparklet case entirely.
+    const sparkletPreserved = checkFeasibility(
+      input({
+        applicantIds: applicants(150),
+        reviewers,
+        preserved: [{ applicantId: "app_0", reviewerId: reviewers[0].id }],
+      }),
+    );
+
+    expect(sparkletPreserved.nonSparkletMinimum).toBe(278);
+    expect(sparkletPreserved.nonSparkletCapacity).toBe(225);
   });
 });
 
