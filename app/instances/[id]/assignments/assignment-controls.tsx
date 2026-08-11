@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import {
   assignReviewer,
   generate,
+  swapReviewer,
   unassignReviewer,
   type ActionState,
   type GenerateResult,
@@ -15,8 +16,23 @@ import { Round } from "@/generated/prisma/enums";
 
 export interface ApplicantRow {
   id: string;
+  /// "Applicant 47" — the anonymous label a written reviewer sees.
   label: string;
+  /// The real name. Admin-only by §6, and the only way to find one person.
+  name: string;
   reviewers: { assignmentId: string; id: string; name: string; isSparklet: boolean; origin: string }[];
+}
+
+export interface PagingView {
+  basePath: string;
+  query: string;
+  shortOnly: boolean;
+  page: number;
+  pageCount: number;
+  /// Applicants matching the current search and filter.
+  matchCount: number;
+  /// Applicants in the instance, so the header can say what is being hidden.
+  totalCount: number;
 }
 
 export interface ReviewerOption {
@@ -163,24 +179,36 @@ export function GeneratePanel({
 
       {result?.message ? <p className="text-sm text-emerald-600">{result.message}</p> : null}
 
-      {result?.violations?.length ? (
-        <div className="border-destructive/40 space-y-2 rounded-md border p-4">
-          <p className="text-sm font-medium">
-            {result.violations.length} existing assignment
-            {result.violations.length === 1 ? "" : "s"} already broke a rule.
-          </p>
-          <ul className="space-y-1 text-sm">
-            {result.violations.map((v, i) => (
-              <li key={i}>· {v.detail}</li>
-            ))}
-          </ul>
-          <p className="text-muted-foreground text-sm">
-            Left exactly as they were. Generation reports these rather than fixing them by deleting
-            an override somebody made on purpose.
-          </p>
-        </div>
+      {/* Violations the preserved set already carries, shown on load rather than
+          only after a generate. An admin landing on a page whose overrides put
+          two Sparklets on one applicant needs to know before deciding what to
+          do, not as a consequence of pressing a button. */}
+      {result === null && report.preexistingViolations.length > 0 ? (
+        <ViolationList violations={report.preexistingViolations} />
       ) : null}
+
+      {result?.violations?.length ? <ViolationList violations={result.violations} /> : null}
     </section>
+  );
+}
+
+function ViolationList({ violations }: { violations: { detail: string }[] }) {
+  return (
+    <div className="border-destructive/40 space-y-2 rounded-md border p-4">
+      <p className="text-sm font-medium">
+        {violations.length} existing assignment{violations.length === 1 ? "" : "s"} already{" "}
+        {violations.length === 1 ? "breaks" : "break"} a rule.
+      </p>
+      <ul className="space-y-1 text-sm">
+        {violations.map((v, i) => (
+          <li key={i}>· {v.detail}</li>
+        ))}
+      </ul>
+      <p className="text-muted-foreground text-sm">
+        Left exactly as they are. Generation reports these rather than fixing them by deleting an
+        override somebody made on purpose.
+      </p>
+    </div>
   );
 }
 
@@ -193,40 +221,92 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-/// FR-8. Assign, unassign, and swap — a swap being an unassign then an assign,
-/// which keeps both halves audited separately rather than as one opaque action.
+/// FR-8, all three verbs: assign, unassign, and swap.
+///
+/// Swap is one server action rather than an unassign followed by an assign from
+/// here — two round trips can half-fail and leave the applicant short with
+/// nothing in the log saying a swap was meant.
 export function OverridePanel({
   instanceId,
   round,
   applicants,
   reviewers,
+  paging,
 }: {
   instanceId: string;
   round: Round;
   applicants: ApplicantRow[];
   reviewers: ReviewerOption[];
+  paging: PagingView;
 }) {
   const [state, setState] = useState<ActionState>({});
-  const [openFor, setOpenFor] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  /// Which picker is open: assigning to an applicant, or swapping out one of its
+  /// reviewers. Null when none is.
+  const [picker, setPicker] = useState<{ applicantId: string; swapOut?: string } | null>(null);
+  const [find, setFind] = useState("");
   const [pending, start] = useTransition();
 
   const act = (fn: () => Promise<ActionState>) =>
     start(async () => {
       setState(await fn());
-      setOpenFor(null);
-      setQuery("");
+      setPicker(null);
+      setFind("");
     });
 
-  const shown = applicants.slice(0, 60);
+  const href = (over: Partial<{ page: number; q: string; only: string }>) => {
+    const p = new URLSearchParams();
+    const q = over.q ?? paging.query;
+    const only = over.only ?? (paging.shortOnly ? "short" : "");
+    const page = over.page ?? 1;
+    if (q !== "") p.set("q", q);
+    if (only !== "") p.set("only", only);
+    if (page > 1) p.set("page", String(page));
+    const qs = p.toString();
+    return qs === "" ? paging.basePath : `${paging.basePath}?${qs}`;
+  };
 
   return (
     <section className="space-y-3">
-      <div>
+      <div className="space-y-2">
         <h2 className="text-sm font-medium">Assignments</h2>
+
+        {/* A plain GET form, so a search survives the revalidate that follows
+            every override and can be linked or bookmarked. */}
+        <form method="get" action={paging.basePath} className="flex flex-wrap items-center gap-2">
+          <input
+            name="q"
+            defaultValue={paging.query}
+            placeholder="Name or applicant number"
+            aria-label="Search applicants by name or number"
+            className="border-input h-9 w-64 rounded-md border px-3 text-sm"
+          />
+          {paging.shortOnly ? <input type="hidden" name="only" value="short" /> : null}
+          <Button size="sm" variant="outline" type="submit">
+            Search
+          </Button>
+          {paging.query !== "" ? (
+            <a href={href({ q: "" })} className="text-muted-foreground text-sm hover:underline">
+              Clear
+            </a>
+          ) : null}
+          <a
+            href={href({ only: paging.shortOnly ? "" : "short", page: 1 })}
+            className={
+              paging.shortOnly
+                ? "bg-foreground text-background rounded-md px-3 py-1.5 text-sm"
+                : "hover:bg-muted rounded-md border px-3 py-1.5 text-sm"
+            }
+          >
+            Only short a reviewer
+          </a>
+        </form>
+
         <p className="text-muted-foreground text-sm">
-          Showing {shown.length} of {applicants.length} applicants. Applicants short a reviewer are
-          listed first — those are the open pool slots.
+          {paging.matchCount === paging.totalCount
+            ? `${paging.totalCount} applicants`
+            : `${paging.matchCount} of ${paging.totalCount} applicants`}
+          {paging.pageCount > 1 ? ` · page ${paging.page} of ${paging.pageCount}` : ""}
+          {paging.shortOnly ? " · short a reviewer, which is the open pool" : ""}
         </p>
       </div>
 
@@ -237,88 +317,150 @@ export function OverridePanel({
       ) : null}
       {state.message ? <p className="text-sm text-emerald-600">{state.message}</p> : null}
 
+      {applicants.length === 0 ? (
+        <p className="text-muted-foreground rounded-md border p-4 text-sm">
+          No applicant matches. {paging.shortOnly ? "Every applicant has a full set of reviewers." : "Try a different name or number."}
+        </p>
+      ) : null}
+
       <ul className="divide-y">
-        {shown.map((applicant) => (
-          <li key={applicant.id} className="space-y-2 py-3">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-sm font-medium">{applicant.label}</span>
-              <span className="text-muted-foreground text-xs">
-                {applicant.reviewers.length} reviewer{applicant.reviewers.length === 1 ? "" : "s"}
-              </span>
-            </div>
+        {applicants.map((applicant) => {
+          const open = picker?.applicantId === applicant.id;
+          return (
+            <li key={applicant.id} className="space-y-2 py-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-sm font-medium">{applicant.label}</span>
+                <span className="text-muted-foreground text-sm">{applicant.name}</span>
+                <span className="text-muted-foreground text-xs">
+                  {applicant.reviewers.length} reviewer{applicant.reviewers.length === 1 ? "" : "s"}
+                </span>
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {applicant.reviewers.map((reviewer) => (
-                <span
-                  key={reviewer.assignmentId}
-                  className="bg-muted inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
-                >
-                  {reviewer.name}
-                  {reviewer.isSparklet ? <em className="not-italic opacity-70">· Sparklet</em> : null}
-                  {reviewer.origin !== "AUTO" ? (
-                    <em className="not-italic opacity-70">· {reviewer.origin.toLowerCase()}</em>
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-label={`Unassign ${reviewer.name} from ${applicant.label}`}
-                    disabled={pending}
-                    className="hover:text-destructive ml-1 opacity-60"
-                    onClick={() =>
-                      act(() => unassignReviewer(instanceId, round, applicant.id, reviewer.id))
-                    }
+              <div className="flex flex-wrap items-center gap-2">
+                {applicant.reviewers.map((reviewer) => (
+                  <span
+                    key={reviewer.assignmentId}
+                    className="bg-muted inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    {reviewer.name}
+                    {reviewer.isSparklet ? (
+                      <em className="not-italic opacity-70">· Sparklet</em>
+                    ) : null}
+                    {reviewer.origin !== "AUTO" ? (
+                      <em className="not-italic opacity-70">· {reviewer.origin.toLowerCase()}</em>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label={`Swap ${reviewer.name} on ${applicant.label}`}
+                      disabled={pending}
+                      className="ml-1 underline opacity-60 hover:opacity-100"
+                      onClick={() => {
+                        setPicker({ applicantId: applicant.id, swapOut: reviewer.id });
+                        setFind("");
+                      }}
+                    >
+                      swap
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Unassign ${reviewer.name} from ${applicant.label}`}
+                      disabled={pending}
+                      className="hover:text-destructive opacity-60"
+                      onClick={() =>
+                        act(() => unassignReviewer(instanceId, round, applicant.id, reviewer.id))
+                      }
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
 
-              {openFor === applicant.id ? (
-                <span className="flex flex-wrap items-center gap-2">
-                  <input
-                    autoFocus
-                    value={query}
-                    placeholder="Type a name"
-                    aria-label="Find a reviewer"
-                    className="border-input h-8 w-44 rounded-md border px-2 text-sm"
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  {reviewers
-                    .filter((r) => r.name.toLowerCase().includes(query.trim().toLowerCase()))
-                    .filter((r) => !applicant.reviewers.some((a) => a.id === r.id))
-                    .slice(0, 5)
-                    .map((r) => (
-                      <Button
-                        key={r.id}
-                        size="sm"
-                        variant="outline"
-                        disabled={pending}
-                        onClick={() => act(() => assignReviewer(instanceId, round, applicant.id, r.id))}
-                      >
-                        {r.name}
-                        <span className="ml-1 opacity-60">
-                          {r.load}
-                          {r.isSparklet ? " · S" : ""}
-                        </span>
-                      </Button>
-                    ))}
-                  <Button size="sm" variant="ghost" onClick={() => setOpenFor(null)}>
-                    Cancel
+                {open ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground text-xs">
+                      {picker?.swapOut
+                        ? `Replace ${applicant.reviewers.find((r) => r.id === picker.swapOut)?.name} with:`
+                        : "Add:"}
+                    </span>
+                    <input
+                      autoFocus
+                      value={find}
+                      placeholder="Type a name"
+                      aria-label="Find a reviewer"
+                      className="border-input h-8 w-44 rounded-md border px-2 text-sm"
+                      onChange={(e) => setFind(e.target.value)}
+                    />
+                    {reviewers
+                      .filter((r) => r.name.toLowerCase().includes(find.trim().toLowerCase()))
+                      .filter((r) => !applicant.reviewers.some((a) => a.id === r.id))
+                      .slice(0, 5)
+                      .map((r) => (
+                        <Button
+                          key={r.id}
+                          size="sm"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            act(() =>
+                              picker?.swapOut
+                                ? swapReviewer(
+                                    instanceId,
+                                    round,
+                                    applicant.id,
+                                    picker.swapOut,
+                                    r.id,
+                                  )
+                                : assignReviewer(instanceId, round, applicant.id, r.id),
+                            )
+                          }
+                        >
+                          {r.name}
+                          <span className="ml-1 opacity-60">
+                            {r.load}
+                            {r.isSparklet ? " · S" : ""}
+                          </span>
+                        </Button>
+                      ))}
+                    <Button size="sm" variant="ghost" onClick={() => setPicker(null)}>
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => {
+                      setPicker({ applicantId: applicant.id });
+                      setFind("");
+                    }}
+                  >
+                    Assign
                   </Button>
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => setOpenFor(applicant.id)}
-                >
-                  Assign
-                </Button>
-              )}
-            </div>
-          </li>
-        ))}
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
+
+      {paging.pageCount > 1 ? (
+        <nav className="flex items-center gap-3 text-sm" aria-label="Applicant pages">
+          {paging.page > 1 ? (
+            <a href={href({ page: paging.page - 1 })} className="rounded-md border px-3 py-1.5 hover:bg-muted">
+              ← Previous
+            </a>
+          ) : null}
+          <span className="text-muted-foreground">
+            Page {paging.page} of {paging.pageCount}
+          </span>
+          {paging.page < paging.pageCount ? (
+            <a href={href({ page: paging.page + 1 })} className="rounded-md border px-3 py-1.5 hover:bg-muted">
+              Next →
+            </a>
+          ) : null}
+        </nav>
+      ) : null}
     </section>
   );
 }

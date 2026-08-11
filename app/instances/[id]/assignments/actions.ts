@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { Prisma } from "@/generated/prisma/client";
 import { AssignmentOrigin, AssignmentStatus, Round } from "@/generated/prisma/enums";
 import {
   checkFeasibility,
@@ -24,29 +25,39 @@ function path(instanceId: string) {
 
 /// Everything `lib/assignment.ts` needs, read from the database.
 ///
-/// Read inside the action that uses it rather than passed from the client: the
-/// preserved set decides what survives a regeneration, and trusting the browser
-/// for that would let a stale page silently discard an override an admin added
-/// in another tab. §10.5 settles concurrent admins as last-write-wins, which is
+/// Takes the client so that `generate` can call it **inside** its transaction.
+/// Two reasons, and the second is why the parameter exists at all:
+///
+/// The preserved set decides what survives a regeneration, so trusting the
+/// browser for it would let a stale page discard an override an admin added in
+/// another tab. §10.5 settles concurrent admins as last-write-wins, which is
 /// fine for an edit and not for a bulk delete.
+///
+/// Reading it from the database but *outside* the transaction only narrows that
+/// window rather than closing it. An override written between the read and the
+/// delete survives — the delete is scoped to AUTO — but was never counted as
+/// consumed capacity, so its reviewer can end up over the ceiling with nothing
+/// reporting it. Inside the transaction, the set the plan was built from is the
+/// set the delete runs against.
 async function loadInput(
+  db: Prisma.TransactionClient,
   instanceId: string,
   round: Round,
   relaxSparkletLoad: boolean,
 ): Promise<AssignmentInput & { preserved: Pair[] }> {
   const [applicants, reviewers, existing] = await Promise.all([
-    prisma.applicant.findMany({
+    db.applicant.findMany({
       where: { instanceId },
       orderBy: { sourceRowIndex: "asc" },
       select: { id: true },
     }),
     // FR-7: reviewer_count means the roster of the round being assigned.
-    prisma.reviewer.findMany({
+    db.reviewer.findMany({
       where: { instanceId, rounds: { has: round } },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       select: { id: true, isSparklet: true },
     }),
-    prisma.assignment.findMany({
+    db.assignment.findMany({
       where: { instanceId, round },
       select: { applicantId: true, reviewerId: true, origin: true, status: true },
     }),
@@ -85,7 +96,7 @@ export interface PrecheckView {
 export async function precheck(instanceId: string, round: Round): Promise<PrecheckView> {
   await requireInstance(instanceId, path(instanceId));
 
-  const input = await loadInput(instanceId, round, false);
+  const input = await loadInput(prisma, instanceId, round, false);
   const counts = await prisma.assignment.groupBy({
     by: ["origin"],
     where: { instanceId, round, status: AssignmentStatus.ACTIVE },
@@ -125,69 +136,90 @@ export async function generate(
 ): Promise<GenerateResult> {
   await requireInstance(instanceId, path(instanceId));
 
-  const loaded = await loadInput(instanceId, round, options.relaxSparkletLoad === true);
-  const input: AssignmentInput = options.discardPreserved ? { ...loaded, preserved: [] } : loaded;
+  // Read, plan and write in one transaction, so the preserved set the plan was
+  // built from is the set the delete runs against. See `loadInput`.
+  let plan: ReturnType<typeof generateAssignments> | null = null;
+  let discarded = 0;
 
-  const plan = generateAssignments(input);
+  await prisma.$transaction(
+    async (tx) => {
+      const loaded = await loadInput(tx, instanceId, round, options.relaxSparkletLoad === true);
+      const input: AssignmentInput = options.discardPreserved
+        ? { ...loaded, preserved: [] }
+        : loaded;
 
-  if (!plan.report.feasible && options.relaxSparkletLoad !== true) {
-    // FR-7: "the system must not silently violate a constraint." Nothing is
-    // written; the page renders the message and the two actions.
-    return { report: plan.report, error: plan.report.message ?? undefined };
-  }
+      plan = generateAssignments(input);
 
-  const discarded = options.discardPreserved ? loaded.preserved.length : 0;
+      if (!plan.report.feasible && options.relaxSparkletLoad !== true) {
+        // FR-7: "the system must not silently violate a constraint." Returning
+        // early leaves the transaction read-only, so nothing is written and the
+        // page renders the message and the two actions.
+        return;
+      }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.assignment.deleteMany({
-      where: {
-        instanceId,
-        round,
-        // AUTO rows are the generator's own output and are replaced. Returned
-        // rows survive whatever their origin: they are the record of a recusal,
-        // and deleting one would let the same pair be generated next time.
-        status: AssignmentStatus.ACTIVE,
-        ...(options.discardPreserved ? {} : { origin: AssignmentOrigin.AUTO }),
-      },
-    });
+      discarded = options.discardPreserved ? loaded.preserved.length : 0;
 
-    await tx.assignment.createMany({
-      data: plan.assignments.map((pair) => ({
-        instanceId,
-        round,
-        applicantId: pair.applicantId,
-        reviewerId: pair.reviewerId,
-        origin: AssignmentOrigin.AUTO,
-      })),
-    });
-
-    await tx.auditLog.create({
-      data: {
-        instanceId,
-        actor: "admin",
-        action: "GENERATE_ASSIGNMENTS",
-        entityType: "Instance",
-        entityId: instanceId,
-        previousValue: {
+      await tx.assignment.deleteMany({
+        where: {
+          instanceId,
           round,
-          generated: plan.assignments.length,
-          relaxSparkletLoad: options.relaxSparkletLoad === true,
-          preservedKept: options.discardPreserved ? 0 : loaded.preserved.length,
-          discardedOverrides: discarded,
+          // AUTO rows are the generator's own output and are replaced. Returned
+          // rows survive whatever their origin: they are the record of a
+          // recusal, and deleting one would let the pair be generated again.
+          status: AssignmentStatus.ACTIVE,
+          ...(options.discardPreserved ? {} : { origin: AssignmentOrigin.AUTO }),
         },
-      },
-    });
-  });
+      });
+
+      await tx.assignment.createMany({
+        data: plan.assignments.map((pair) => ({
+          instanceId,
+          round,
+          applicantId: pair.applicantId,
+          reviewerId: pair.reviewerId,
+          origin: AssignmentOrigin.AUTO,
+        })),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          instanceId,
+          actor: "admin",
+          action: "GENERATE_ASSIGNMENTS",
+          entityType: "Instance",
+          entityId: instanceId,
+          previousValue: {
+            round,
+            generated: plan.assignments.length,
+            relaxSparkletLoad: options.relaxSparkletLoad === true,
+            preservedKept: options.discardPreserved ? 0 : loaded.preserved.length,
+            discardedOverrides: discarded,
+          },
+        },
+      });
+    },
+    // The default interactive-transaction timeout is 5s. Planning 450 slots is
+    // in-memory and fast, but the reads and the createMany now sit inside it,
+    // and a slow connection should not roll back a correct plan.
+    { timeout: 20_000 },
+  );
+
+  if (plan === null) throw new Error("generate produced no plan");
+  const settled: ReturnType<typeof generateAssignments> = plan;
+
+  if (!settled.report.feasible && options.relaxSparkletLoad !== true) {
+    return { report: settled.report, error: settled.report.message ?? undefined };
+  }
 
   // The BUILD_PLAN gate asks for the distribution on the console. Sorted, so an
   // uneven tail is visible at a glance rather than buried in insertion order.
-  const loads = Object.entries(plan.loadByReviewerId).sort((a, b) => a[1] - b[1]);
+  const loads = Object.entries(settled.loadByReviewerId).sort((a, b) => a[1] - b[1]);
   const histogram = new Map<number, number>();
   for (const [, load] of loads) histogram.set(load, (histogram.get(load) ?? 0) + 1);
   console.log(
-    `[assignments] ${round}: ${plan.assignments.length} placed, ` +
-      `${plan.report.poolSize} pooled, ceiling ${plan.report.loadCeiling}, ` +
-      `floor ${plan.report.loadFloor}`,
+    `[assignments] ${round}: ${settled.assignments.length} placed, ` +
+      `${settled.report.poolSize} pooled, ceiling ${settled.report.loadCeiling}, ` +
+      `floor ${settled.report.loadFloor}`,
   );
   console.log(
     `[assignments] load distribution: ` +
@@ -200,16 +232,16 @@ export async function generate(
   revalidatePath(path(instanceId));
 
   return {
-    report: plan.report,
-    loadByReviewerId: plan.loadByReviewerId,
-    violations: plan.preexistingViolations.map((v) => ({
+    report: settled.report,
+    loadByReviewerId: settled.loadByReviewerId,
+    violations: settled.preexistingViolations.map((v) => ({
       detail: v.detail,
       reviewerId: v.reviewerId,
       applicantId: v.applicantId,
     })),
     message:
-      `Placed ${plan.assignments.length} assignments. ` +
-      `${plan.report.shortApplicantCount} applicants are one reviewer short, by design.` +
+      `Placed ${settled.assignments.length} assignments. ` +
+      `${settled.report.shortApplicantCount} applicants are one reviewer short, by design.` +
       (discarded > 0 ? ` Discarded ${discarded} override${discarded === 1 ? "" : "s"}.` : ""),
   };
 }
@@ -275,6 +307,103 @@ export async function assignReviewer(
 
   revalidatePath(path(instanceId));
   return { message: `Assigned ${reviewer.firstName} ${reviewer.lastName}.` };
+}
+
+/// FR-8's third verb. One transaction, not an unassign followed by an assign.
+///
+/// Two round trips from the browser can half-fail — the network drops after the
+/// delete — and leave the applicant a reviewer short with nothing in the log
+/// saying a swap was intended. One action also gives §8 a single row answering
+/// "who replaced whom", which two rows only imply.
+///
+/// The outgoing assignment is excluded from the one-Sparklet check: swapping one
+/// Sparklet for another is legal, and comparing against a row that is about to
+/// disappear would refuse it.
+export async function swapReviewer(
+  instanceId: string,
+  round: Round,
+  applicantId: string,
+  outReviewerId: string,
+  inReviewerId: string,
+): Promise<ActionState> {
+  await requireInstance(instanceId, path(instanceId));
+
+  if (outReviewerId === inReviewerId) return { error: "That is the same reviewer." };
+
+  const [incoming, existing] = await Promise.all([
+    prisma.reviewer.findFirst({
+      where: { id: inReviewerId, instanceId },
+      select: { id: true, firstName: true, lastName: true, isSparklet: true, rounds: true },
+    }),
+    prisma.assignment.findMany({
+      where: { instanceId, round, applicantId, status: AssignmentStatus.ACTIVE },
+      select: {
+        id: true,
+        reviewerId: true,
+        origin: true,
+        _count: { select: { scores: true } },
+        reviewer: { select: { firstName: true, lastName: true, isSparklet: true } },
+      },
+    }),
+  ]);
+
+  const outgoing = existing.find((a) => a.reviewerId === outReviewerId);
+
+  if (!incoming) return { error: "That reviewer no longer exists." };
+  if (!outgoing) return { error: "That assignment no longer exists. Reload and try again." };
+  if (!incoming.rounds.includes(round)) {
+    return { error: `${incoming.firstName} ${incoming.lastName} does not serve this round.` };
+  }
+  if (existing.some((a) => a.reviewerId === inReviewerId)) {
+    return { error: `${incoming.firstName} ${incoming.lastName} is already on this applicant.` };
+  }
+  if (
+    incoming.isSparklet &&
+    existing.some((a) => a.reviewerId !== outReviewerId && a.reviewer.isSparklet)
+  ) {
+    return {
+      error:
+        `This applicant already has a different Sparklet reviewer, and at most one Sparklet may ` +
+        `review any applicant. Swap that one instead, or pick a non-Sparklet.`,
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: "SWAP_REVIEWER",
+        entityType: "Applicant",
+        entityId: applicantId,
+        // Both halves in one row, so the log answers who replaced whom without
+        // needing two rows correlated by timestamp.
+        previousValue: {
+          round,
+          outReviewerId,
+          outReviewerName: `${outgoing.reviewer.firstName} ${outgoing.reviewer.lastName}`,
+          outOrigin: outgoing.origin,
+          deletedScoreCount: outgoing._count.scores,
+          inReviewerId,
+          inReviewerName: `${incoming.firstName} ${incoming.lastName}`,
+        },
+      },
+    });
+    await tx.assignment.delete({ where: { id: outgoing.id } });
+    await tx.assignment.create({
+      data: { instanceId, round, applicantId, reviewerId: inReviewerId, origin: AssignmentOrigin.MANUAL },
+    });
+  });
+
+  revalidatePath(path(instanceId));
+  return {
+    message:
+      `Swapped ${outgoing.reviewer.firstName} ${outgoing.reviewer.lastName} for ` +
+      `${incoming.firstName} ${incoming.lastName}.` +
+      (outgoing._count.scores > 0
+        ? ` ${outgoing._count.scores} score${outgoing._count.scores === 1 ? "" : "s"} went with the old assignment.`
+        : ""),
+  };
 }
 
 /// Remove one reviewer from one applicant. Audited with what it removed, per §8.

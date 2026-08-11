@@ -271,6 +271,22 @@ Below that, the load distribution table — per reviewer, count and Sparklet fla
 
 **FR-8 manual override.** An applicant list with each applicant's current reviewers; assign, unassign, and swap. Each writes `origin: MANUAL` and an `AuditLog` row with the previous value, per §8. Assign refuses a second Sparklet and refuses a reviewer already on that applicant, naming the rule rather than failing on the unique index.
 
+> **Correction, made after Slice 4 shipped: five things in this section did not land.** Found by the owner reading the page, not by review — the same route as the FR-6 gap above.
+>
+> 1. **90 of 150 applicants were unreachable.** The list was capped at 60 with no paging, search, or "show all". FR-8 is "any reviewer on **any** applicant"; the label said "showing 60 of 150", which made it honest and not correct.
+> 2. **Swap was missing.** FR-8 says "assign, unassign, or swap" and this section says "assign, unassign, and swap". Two of three shipped — and a doc comment above the panel claimed all three, which is worse than silence.
+> 3. **The preserved set was read outside the transaction.** This section says "re-read inside the transaction rather than trusted from the client"; the client half was done and the transaction half was not. An override written between the read and the delete survived, because the delete is scoped to `AUTO`, but was never counted as consumed capacity — so its reviewer could exceed the ceiling with nothing reporting it.
+> 4. **`preexistingViolations` appeared only after a generate.** The precheck computed them and the page rendered only the post-generate copy, so an admin landing on a page whose overrides already put two Sparklets on one applicant saw nothing until they pressed a button.
+> 5. **Two of this section's own seven verification steps were unexecutable.** Step 3 is "manually swap a reviewer" and step 4 depends on the override step 3 creates. The list was handed over without being walked, which is the check that would have caught 1, 2 and 4 in minutes.
+>
+> **The pattern, since this is the second instance and one instance is an anecdote.** Both failures have the same shape: *a requirement written as a list of clauses, of which the first is implemented and the rest are dropped.* FR-6 "adds reviewers by name … bulk paste is also supported" became paste only. FR-8 "assign, unassign, or swap" became assign and unassign. Planning is not where it breaks — both plans stated the requirement correctly and in full.
+>
+> What lets it through is that **every downstream artefact describes what was built rather than what was asked for.** The tests assert the behaviour that exists, the commit message narrates the behaviour that exists, and a self-review re-reads code that already matches both. All three agree with each other and none of them is anchored to the FR. So the gap is invisible from inside the implementation and obvious to the first person who opens the page.
+>
+> The fix is mechanical and now lives in CLAUDE.md's working conventions rather than only here: before committing a slice, re-read the FR sentence and the plan section, enumerate their clauses, and tick each against the diff. Phase 3's FR-9 is a six-bullet list — assigned list with completion state, detail view, score inputs, autosave, return-to-pool with a required reason, claim-from-pool — and is the next place this will happen without it.
+>
+> Fixed in the follow-up commit to Slice 4, whose scope is exactly items 1 through 4.
+
 **Verify, by hand on the seeded instance:**
 
 1. `/instances/<id>/assignments` → precheck passes, 22 pooled slots, ceiling 15.
@@ -280,6 +296,9 @@ Below that, the load distribution table — per reviewer, count and Sparklet fla
 5. On the roster page, flag seven more Sparklets to reach 15. Return to assignments: the precheck now fails with the FR-7 message. Confirm it names 225 against 278 and offers both actions.
 6. Take "Allow uneven Sparklet load". Confirm the confirmation shows 15 and 19, then that the generated plan still has no applicant with two Sparklets.
 7. Unflag them, regenerate clean.
+8. Search `47`; land on Applicant 47. Search a surname from the roster; land on that applicant by name. Both must work — the label is what a reviewer sees, the name is what an admin knows.
+9. Page to the last page and confirm applicant 150 is reachable. Toggle "Only short a reviewer" and confirm the count matches the pool size.
+10. Swap a reviewer. Confirm one `SWAP_REVIEWER` audit row carrying both reviewer ids, that the applicant still has the same number of reviewers, and that swapping one Sparklet for another is allowed while adding a second is refused by name.
 
 ---
 
