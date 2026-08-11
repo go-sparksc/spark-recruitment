@@ -164,6 +164,30 @@ describe("a name already on the instance (PRD decision 22)", () => {
     expect(parseRoster("Alex Kimura", existing).ready).toHaveLength(1);
   });
 
+  it('does not confuse "Ann Marie" + "Smith" with "Ann" + "Marie Smith"', () => {
+    // Two different people. A space separator in the comparison key folds both
+    // onto "ann marie smith" and reports them as one, which is why the key joins
+    // on U+001F. A paste alone cannot produce the pair — every line splits on its
+    // last space, so a pasted "Ann Marie Smith" is always ("Ann Marie","Smith") —
+    // but the existing roster can, since nothing stops an admin typing "Marie
+    // Smith" as a surname in the grid. That is the direction this covers.
+    const result = parseRoster("Ann Marie Smith", [reviewer("rev_9", "Ann", "Marie Smith")]);
+
+    expect(result.ready).toHaveLength(1);
+    expect(result.ready[0].firstName).toBe("Ann Marie");
+    expect(result.ready[0].lastName).toBe("Smith");
+    expect(result.needsConfirmation).toEqual([]);
+  });
+
+  it("still matches when the split is genuinely the same", () => {
+    // The other half of the pair above: the separator must not make the key so
+    // strict that a real duplicate stops matching.
+    const result = parseRoster("Ann Marie Smith", [reviewer("rev_9", "Ann Marie", "Smith")]);
+
+    expect(result.ready).toEqual([]);
+    expect(result.needsConfirmation[0].flags).toContain("MATCHES_EXISTING_REVIEWER");
+  });
+
   it("carries both flags when a line is duplicated in the paste and on the roster", () => {
     const result = parseRoster("Alex Kim\nAlex Kim", existing);
 
@@ -183,6 +207,74 @@ describe("a name already on the instance (PRD decision 22)", () => {
 
   it("does not flag anything when the roster is empty", () => {
     expect(parseRoster("Alex Kim").ready).toHaveLength(1);
+  });
+});
+
+describe("every input line is accounted for", () => {
+  // Every other test in this file checks one bucket in isolation, so a line
+  // dropped between them — parsed, then filtered into neither `ready` nor
+  // `needsConfirmation` — passes the whole suite. These assert the total.
+  const total = (text: string) => {
+    const r = parseRoster(text, [reviewer("rev_1", "Alex", "Kim")]);
+    return r.ready.length + r.needsConfirmation.length + r.droppedLineCount;
+  };
+
+  const lineCount = (text: string) => text.split(/\r\n|\r|\n/).length;
+
+  it("reconciles a paste mixing ready, queued and blank lines", () => {
+    const text = [
+      "Ada Lovelace", // ready
+      "", // dropped
+      "Cher", // queued: unsplittable
+      "   ", // dropped
+      "Alex Kim", // queued: matches the existing reviewer
+      "Grace Hopper", // ready
+      "Mary Anne Chen", // ready
+      "Grace Hopper", // queued: duplicate in paste (and so is the one above)
+      "\t", // dropped
+    ].join("\n");
+
+    expect(lineCount(text)).toBe(9);
+    expect(total(text)).toBe(9);
+
+    // Spelled out, so a future change that moves a line between buckets has to
+    // say which bucket it moved it to rather than quietly losing it.
+    const r = parseRoster(text, [reviewer("rev_1", "Alex", "Kim")]);
+    expect(r.ready.map((e) => e.lineNumber)).toEqual([1, 7]);
+    expect(r.needsConfirmation.map((e) => e.lineNumber)).toEqual([3, 5, 6, 8]);
+    expect(r.droppedLineCount).toBe(3);
+  });
+
+  it("reconciles across the edge cases too", () => {
+    for (const text of [
+      "",
+      "   ",
+      "\n\n\n",
+      "Cher",
+      "Alex Kim\nAlex Kim",
+      "Ada Lovelace\r\nGrace Hopper\r\n",
+      "Chen \n Chen\nChen",
+    ]) {
+      expect(total(text)).toBe(lineCount(text));
+    }
+  });
+
+  it("puts every entry in exactly one bucket", () => {
+    // The counts above would still reconcile if a line appeared in both, so
+    // check the partition directly.
+    const r = parseRoster("Ada Lovelace\nCher\nAlex Kim", [reviewer("rev_1", "Alex", "Kim")]);
+    const readyLines = r.ready.map((e) => e.lineNumber);
+    const queuedLines = r.needsConfirmation.map((e) => e.lineNumber);
+
+    expect(readyLines.filter((n) => queuedLines.includes(n))).toEqual([]);
+    expect([...readyLines, ...queuedLines].sort()).toEqual([1, 2, 3]);
+  });
+
+  it("keeps ready and needsConfirmation consistent with the flags", () => {
+    const r = parseRoster("Ada Lovelace\nCher\nAlex Kim", [reviewer("rev_1", "Alex", "Kim")]);
+
+    for (const entry of r.ready) expect(entry.flags).toEqual([]);
+    for (const entry of r.needsConfirmation) expect(entry.flags.length).toBeGreaterThan(0);
   });
 });
 

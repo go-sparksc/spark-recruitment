@@ -11,3 +11,20 @@
 # bytes checked out, everywhere.
 prisma/fixtures/*.csv -text
 fixtures/sample-headers.csv -text
+
+# Source is always text, whatever git's content heuristic makes of it.
+#
+# lib/roster.ts was once committed as "Bin 0 -> 7884 bytes" because a single
+# stray NUL byte got into it: git treats a NUL in the first 8000 bytes as
+# binary, and a binary file cannot be diffed or reviewed. The byte is gone and
+# nothing in the repo carries another, but the failure was silent — the commit
+# looked normal until someone ran `git show --stat` — and it costs one line to
+# make it impossible rather than merely absent.
+#
+# Two attributes, doing two different jobs. `text` normalizes line endings on
+# checkin. `diff` is the one that forces a textual diff — without it git falls
+# back to sniffing the blob, so the roster.ts diff would render as binary
+# forever on account of its parent blob, which still holds the NUL byte.
+*.ts text diff
+*.tsx text diff
+*.md text diff
