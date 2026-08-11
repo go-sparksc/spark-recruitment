@@ -190,3 +190,121 @@ export function parseRoster(
     droppedLineCount,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Removing a reviewer — PRD §10 decision 24
+// ---------------------------------------------------------------------------
+//
+// `Assignment.reviewerId` is `onDelete: Cascade`, so deleting a reviewer takes
+// every assignment they hold, and `Score` and `ReviewNote` cascade from the
+// assignment in turn. One click can therefore destroy submitted reviewer work
+// with no undo and no trace, which is the single largest data-loss risk in the
+// product outside instance deletion.
+//
+// The decision is pure and lives here rather than in the server action so it can
+// be tested without a database. That matters more than usual: no `Score` row can
+// exist until Phase 3 builds the scoring UI, so there is nothing to demonstrate
+// the guard against by hand. Until then these tests ARE the guarantee — the same
+// posture `saveRubric` takes toward FR-4's lock, and the reason the counts are
+// an input rather than something this function goes and fetches.
+
+/// What a removal would destroy. Counts are over the assignments in scope: every
+/// assignment the reviewer holds when removing them outright, or only that
+/// round's when withdrawing them from one round.
+export interface RemovalImpact {
+  assignmentCount: number;
+  /// Of those, how many carry at least one `Score`.
+  scoredAssignmentCount: number;
+  /// Of those, how many carry a `ReviewNote`. Counted separately from scores: a
+  /// reviewer can leave a note without scoring, and the note is still their work.
+  notedAssignmentCount: number;
+}
+
+export interface RemovalRequest {
+  reviewerName: string;
+  /// Null when removing the reviewer from the instance. A round name — "written
+  /// round", "first round" — when only that round's membership is withdrawn.
+  roundLabel: string | null;
+}
+
+export type RemovalVerdict =
+  /// `reason` names what blocks it AND the way out. A refusal that does not say
+  /// what to do instead is a dead end, and the admin's alternatives here are not
+  /// guessable from the message.
+  | { allowed: false; reason: string }
+  /// `consequence` is shown in the confirmation before the removal happens. It
+  /// is never empty: "are you sure?" with no statement of what is lost is the
+  /// dialog everyone clicks through.
+  | { allowed: true; consequence: string };
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/// Blocked while the reviewer holds scored or noted work; otherwise permitted,
+/// with the cost stated.
+///
+/// **Fails closed.** Any impact that is not a set of consistent, non-negative
+/// integers is refused rather than interpreted. A guard against irreversible
+/// deletion is the wrong place to be forgiving about its own inputs: a count
+/// that arrives as NaN because a query changed shape must not read as zero.
+export function checkReviewerRemoval(
+  request: RemovalRequest,
+  impact: RemovalImpact,
+): RemovalVerdict {
+  const { assignmentCount, scoredAssignmentCount, notedAssignmentCount } = impact;
+  const counts = [assignmentCount, scoredAssignmentCount, notedAssignmentCount];
+
+  if (counts.some((n) => !Number.isInteger(n) || n < 0)) {
+    return {
+      allowed: false,
+      reason:
+        "Could not work out what removing this reviewer would delete, so it has been refused. " +
+        "This is a bug — report it rather than working around it.",
+    };
+  }
+
+  // Either sub-count exceeding the total means the caller counted two different
+  // sets. Refusing is right even though it looks impossible: the alternative is
+  // trusting the smaller number and deleting work the larger one was counting.
+  if (scoredAssignmentCount > assignmentCount || notedAssignmentCount > assignmentCount) {
+    return {
+      allowed: false,
+      reason:
+        "The counts for this reviewer's work disagree with each other, so removal has been " +
+        "refused. This is a bug — report it rather than working around it.",
+    };
+  }
+
+  const scope = request.roundLabel === null ? "Removing them" : `Removing them from the ${request.roundLabel}`;
+
+  if (scoredAssignmentCount > 0 || notedAssignmentCount > 0) {
+    // Both numbers, always, even when one is zero. "4 scored" alone invites the
+    // admin to think the notes are safe.
+    const held = [
+      `${plural(scoredAssignmentCount, "applicant", "applicants")} scored`,
+      `${plural(notedAssignmentCount, "note", "notes")} written`,
+    ].join(" and ");
+
+    return {
+      allowed: false,
+      reason:
+        `${request.reviewerName} has submitted work: ${held}, across ` +
+        `${plural(assignmentCount, "assignment", "assignments")}. ${scope} would delete it, ` +
+        `permanently and with no undo. Unassign them from those applicants first, or ` +
+        `regenerate the assignments.`,
+    };
+  }
+
+  if (assignmentCount === 0) {
+    return {
+      allowed: true,
+      consequence: `${request.reviewerName} has no assignments. Nothing else is affected.`,
+    };
+  }
+
+  return {
+    allowed: true,
+    consequence:
+      `${scope} deletes ${plural(assignmentCount, "assignment", "assignments")}, none of them ` +
+      `scored. Those applicants drop to open slots that any reviewer can claim.`,
+  };
+}

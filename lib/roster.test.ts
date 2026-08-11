@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseRoster, type ExistingReviewer } from "@/lib/roster";
+import {
+  checkReviewerRemoval,
+  parseRoster,
+  type ExistingReviewer,
+  type RemovalImpact,
+} from "@/lib/roster";
 
 // BUILD_PLAN phase 2's roster block is the spec. Its five cases are the first
 // five describes below, worded as it words them; CLAUDE.md is explicit that if a
@@ -364,5 +369,175 @@ describe("paste hazards", () => {
     expect(parseRoster(decomposed).ready[0].firstName).toBe(
       parseRoster(composed).ready[0].firstName,
     );
+  });
+});
+
+describe("checkReviewerRemoval — PRD decision 24", () => {
+  // This guard is the only thing in Phase 2 standing between a click and
+  // irreversible loss of reviewer work, and no Score row can exist until Phase 3
+  // builds the scoring UI. There is therefore nothing to demonstrate it against
+  // by hand, and these tests are the whole guarantee. They are written to fail
+  // if the guard is ever loosened, not merely to describe what it does today.
+
+  const priya = { reviewerName: "Priya Raman", roundLabel: null };
+  const priyaRound = { reviewerName: "Priya Raman", roundLabel: "written round" };
+  const impact = (over: Partial<RemovalImpact> = {}): RemovalImpact => ({
+    assignmentCount: 15,
+    scoredAssignmentCount: 0,
+    notedAssignmentCount: 0,
+    ...over,
+  });
+
+  describe("blocks whenever any submitted work would be destroyed", () => {
+    it("blocks on a single scored assignment", () => {
+      // The boundary is 1, not "several". One reviewer's one score is still work
+      // somebody did, and a threshold above 1 is a threshold at which the tool
+      // silently discards it.
+      const verdict = checkReviewerRemoval(priya, impact({ scoredAssignmentCount: 1 }));
+
+      expect(verdict.allowed).toBe(false);
+    });
+
+    it("blocks on a single note, with no scores at all", () => {
+      // Notes cascade the same way and are counted separately, because a
+      // reviewer can write a note without scoring. A guard that only looked at
+      // scores would delete those notes and report nothing.
+      const verdict = checkReviewerRemoval(priya, impact({ notedAssignmentCount: 1 }));
+
+      expect(verdict.allowed).toBe(false);
+    });
+
+    it("blocks when every assignment is scored", () => {
+      const verdict = checkReviewerRemoval(
+        priya,
+        impact({ assignmentCount: 15, scoredAssignmentCount: 15, notedAssignmentCount: 15 }),
+      );
+
+      expect(verdict.allowed).toBe(false);
+    });
+
+    it("blocks a round withdrawal on the same terms as a full removal", () => {
+      // Unchecking a round cascades that round's assignments. Same loss, same
+      // rule — the checkbox must not be the cheap way around the block.
+      const verdict = checkReviewerRemoval(priyaRound, impact({ scoredAssignmentCount: 1 }));
+
+      expect(verdict.allowed).toBe(false);
+    });
+  });
+
+  describe("the refusal names the loss and the way out", () => {
+    const verdict = checkReviewerRemoval(
+      priya,
+      impact({ assignmentCount: 15, scoredAssignmentCount: 4, notedAssignmentCount: 2 }),
+    );
+    const reason = verdict.allowed ? "" : verdict.reason;
+
+    it("names the reviewer", () => {
+      expect(reason).toContain("Priya Raman");
+    });
+
+    it("reports scores and notes separately, so neither reads as safe", () => {
+      expect(reason).toContain("4 applicants scored");
+      expect(reason).toContain("2 notes written");
+      expect(reason).toContain("15 assignments");
+    });
+
+    it("says the loss is permanent", () => {
+      expect(reason).toContain("no undo");
+    });
+
+    it("names both ways forward", () => {
+      // A refusal that does not say what to do instead is a dead end, and
+      // neither alternative is guessable from the roster grid.
+      expect(reason).toContain("Unassign");
+      expect(reason).toContain("regenerate");
+    });
+
+    it("states both counts even when one is zero", () => {
+      const only = checkReviewerRemoval(priya, impact({ scoredAssignmentCount: 4 }));
+
+      expect(only.allowed).toBe(false);
+      if (!only.allowed) expect(only.reason).toContain("0 notes written");
+    });
+
+    it("says which round a round withdrawal would empty", () => {
+      const round = checkReviewerRemoval(priyaRound, impact({ scoredAssignmentCount: 1 }));
+
+      expect(round.allowed).toBe(false);
+      if (!round.allowed) expect(round.reason).toContain("written round");
+    });
+  });
+
+  describe("permits removal only when nothing was submitted", () => {
+    it("allows an unscored reviewer and states the cost", () => {
+      const verdict = checkReviewerRemoval(priya, impact());
+
+      expect(verdict.allowed).toBe(true);
+      if (verdict.allowed) {
+        expect(verdict.consequence).toContain("15 assignments");
+        expect(verdict.consequence).toContain("claim");
+      }
+    });
+
+    it("allows a reviewer holding nothing", () => {
+      const verdict = checkReviewerRemoval(priya, impact({ assignmentCount: 0 }));
+
+      expect(verdict.allowed).toBe(true);
+      if (verdict.allowed) expect(verdict.consequence).toContain("no assignments");
+    });
+
+    it("never returns an empty consequence", () => {
+      // "Are you sure?" with nothing after it is the dialog everyone clicks
+      // through without reading.
+      for (const n of [0, 1, 15]) {
+        const verdict = checkReviewerRemoval(priya, impact({ assignmentCount: n }));
+        expect(verdict.allowed).toBe(true);
+        if (verdict.allowed) expect(verdict.consequence.length).toBeGreaterThan(20);
+      }
+    });
+  });
+
+  describe("fails closed on impossible input", () => {
+    // A guard against irreversible deletion is the wrong place to be forgiving
+    // about its own inputs. Every one of these would otherwise read as "no work
+    // to lose" and permit the delete.
+    const bad: [string, Partial<RemovalImpact>][] = [
+      ["NaN score count, as a changed query might produce", { scoredAssignmentCount: Number.NaN }],
+      ["NaN assignment count", { assignmentCount: Number.NaN }],
+      ["a negative count", { scoredAssignmentCount: -1 }],
+      ["a fractional count", { scoredAssignmentCount: 1.5 }],
+      ["Infinity", { assignmentCount: Number.POSITIVE_INFINITY }],
+      ["more scored than assigned", { assignmentCount: 2, scoredAssignmentCount: 3 }],
+      ["more noted than assigned", { assignmentCount: 2, notedAssignmentCount: 3 }],
+    ];
+
+    for (const [name, over] of bad) {
+      it(`refuses ${name}`, () => {
+        expect(checkReviewerRemoval(priya, impact(over)).allowed).toBe(false);
+      });
+    }
+
+    it("tells the admin it is a bug rather than something they did wrong", () => {
+      const verdict = checkReviewerRemoval(priya, impact({ scoredAssignmentCount: Number.NaN }));
+
+      expect(verdict.allowed).toBe(false);
+      if (!verdict.allowed) expect(verdict.reason).toContain("bug");
+    });
+  });
+
+  it("permits removal only when both work counts are exactly zero", () => {
+    // The property the three describes above are made of, asserted directly so
+    // that a future branch cannot satisfy every example above and still let some
+    // combination through.
+    for (const scored of [0, 1, 2]) {
+      for (const noted of [0, 1, 2]) {
+        const verdict = checkReviewerRemoval(
+          priya,
+          impact({ assignmentCount: 5, scoredAssignmentCount: scored, notedAssignmentCount: noted }),
+        );
+
+        expect(verdict.allowed).toBe(scored === 0 && noted === 0);
+      }
+    }
   });
 });
