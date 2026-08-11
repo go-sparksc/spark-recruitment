@@ -45,9 +45,23 @@ export default async function UnlockPage({
 
       <UnlockForm instanceId={id} next={destination} />
 
+      {/* A link, not prose naming a page. This sentence described the FR-5
+          recovery path for a whole phase without providing it, and the settings
+          page was the only route to a password reset — so the only link to the
+          recovery was behind the password being recovered.
+
+          It has to be here specifically. This page renders exactly when the
+          session does NOT hold this instance (see the redirect above), which is
+          the state an admin who has lost the password is in. Both this page and
+          the settings page gate on requireAdmin alone, so following it works
+          without the instance password; that is FR-5's whole point and is why
+          the link must not be conditional on anything. */}
       <p className="text-muted-foreground mt-6 text-xs">
-        Forgotten it? It cannot be recovered, but an admin with the app password can reset it from
-        the instance settings — no need for this one.
+        Forgotten it? It cannot be recovered, but an admin with the app password can{" "}
+        <Link href={`/instances/${id}/settings`} className="underline">
+          reset it from the instance settings
+        </Link>{" "}
+        — no need for this one.
       </p>
     </main>
   );
