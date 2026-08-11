@@ -26,7 +26,7 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 - Postgres via Prisma. **PRD §5 is the source of truth for the data model**; `prisma/schema.prisma` is its implementation. If the schema needs to diverge, change §5 first and say why — a schema that has drifted ahead of the PRD is how the next maintainer ends up trusting the wrong document
 - Prisma 7: connection URLs live in `prisma.config.ts`, not in the schema. The client is generated to `generated/prisma` (gitignored) and imported from `@/generated/prisma/client`
 - Server actions for mutations, server components for data fetching
-- `lib/assignment.ts` and `lib/passes.ts` contain pure functions with no database access. Keep them that way; they are the two pieces with real logic and they are tested in isolation.
+- `lib/assignment.ts`, `lib/passes.ts`, and `lib/roster.ts` contain pure functions with no database access. Keep them that way. The first two are the pieces with real logic; `lib/roster.ts` is the FR-6 paste parser, smaller but equally worth testing away from the database.
 
 ## Domain vocabulary
 
@@ -47,12 +47,13 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
 ## Testing
 
-Two things carry real logic and get real tests:
+Three things get real tests:
 
 - **`lib/assignment.ts`** — 3 reviewers per applicant, at most 1 Sparklet each, even load, 5% pool, and a feasibility precheck that fails loudly when the Sparklet ratio makes the constraints unsatisfiable.
 - **`lib/passes.ts`** — the resolution state machine, including the COI-as-skip rule and the all-COI case, which must flag for admin rather than auto-resolve.
+- **`lib/roster.ts`** — FR-6 paste parsing: last-space split, blank lines dropped, unsplittable and duplicate lines routed to confirmation rather than imported.
 
-Test cases for both are enumerated in `BUILD_PLAN.md` phases 2 and 6. Those cases are the spec. If a test contradicts them, the test is wrong.
+Test cases for all three are enumerated in `BUILD_PLAN.md` phases 2 and 6. Those cases are the spec. If a test contradicts them, the test is wrong.
 
 Everything else gets light smoke coverage. Do not chase coverage percentage.
 

@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.3, Phase 0-1 complete, Phase 2 in progress
+**Status:** v1.4, Phase 0-1 complete, Phase 2 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -321,11 +321,13 @@ The consequence is worth stating plainly rather than leaving to be discovered: *
 
 **FR-6 Reviewer roster.** Admin adds reviewers by first and last name with a Sparklet checkbox. Bulk paste from a newline-separated list is supported, since the current process starts from a Slack message.
 
+Paste parsing: blank and whitespace-only lines are dropped silently. A line is split on its last space, everything before becoming the first name and everything after the last. A line with no space cannot be split and lands in a confirmation queue rather than importing with a blank last name. Two lines producing the same first and last name are not an error, since two reviewers may share a name, but both are flagged for the admin to confirm before commit. All pasted reviewers arrive as non-Sparklets and as members of the round being staffed; the Sparklet flag and any additional rounds are set afterward in the roster grid, so one paste box stays one paste box.
+
 **FR-7 Auto-assignment.** Generate assignments subject to:
 
 - At most 1 Sparklet per applicant
-- Every applicant gets 3 reviewers, except those short one slot to the pool, who get 2. No applicant ever gets fewer than 2 from auto-assignment.
-- Reviewer load as even as possible: no reviewer exceeds `ceil(total_slots / reviewer_count)`, where `total_slots = applicant_count × 3` — the full grid, not the reduced count after the pool is withheld. At 150 applicants and 30 reviewers that is `ceil(450 / 30) = 15`. Using the full grid keeps the bound stable as returns add slots back to the pool mid-round.
+- Every applicant gets 3 reviewers, except those short one slot to the pool, who get 2. No applicant ever gets fewer than 2 from auto-assignment. Where the roster is smaller than the target, the target is min(3, reviewer_count) and the pool rule applies against that reduced target: with 2 reviewers no applicant can receive 3 distinct ones, and the constraint that no applicant loses two slots still holds.
+- Reviewer load as even as possible: no reviewer exceeds ceil(total_slots / reviewer_count), where total_slots = applicant_count × target and target = min(3, reviewer_count) — the full grid at the applicable target, not the reduced count after the pool is withheld. At 150 applicants and 30 reviewers that is `ceil(450 / 30) = 15`. Using the full grid keeps the bound stable as returns add slots back to the pool mid-round.
 - Pool size is exactly `min(max(floor(0.05 × total_slots), 3), applicant_count)` — the floor first, then the minimum of 3, then the cap, which wins over both. At 150 applicants: `floor(22.5) = 22` slots across 22 distinct applicants. **Floor, not round**: 22, never 23. At 10 applicants: `floor(1.5) = 1`, raised to 3. At 2 applicants: raised to 3, then capped back to 2.
 - Each pooled slot comes off a *different* applicant, so an affected applicant is short exactly one reviewer. This is why the pool cannot exceed `applicant_count`: with 2 applicants, a 3-slot minimum would force someone short two, which defeats the purpose. On instances that small the pool is 2 slots, or fewer.
 
@@ -335,7 +337,8 @@ When the check fails, the system must not silently violate a constraint. It tell
 
 **Per open decision 2, the second option is offered as an action, not just as prose.** Choosing it generates under a relaxed load rule: the one-Sparklet-per-applicant constraint is never broken, Sparklets take whatever the constraint allows, and non-Sparklets absorb the remainder bounded by `ceil(non_sparklet_slots / non_sparklet_count)`. In the example above that is 16 non-Sparklets carrying ≥278 slots, about 17.4 each, against the 15 that the unrelaxed rule would give. The admin sees both numbers before confirming. The one-Sparklet rule is never the thing that gives.
 
-**FR-8 Manual assignment override.** Admin can assign, unassign, or swap any reviewer on any applicant. Overrides are marked `origin: MANUAL` so a later regeneration does not clobber them without warning.
+**FR-8 Manual assignment override.** Admin can assign, unassign, or swap any reviewer on any applicant. Overrides are marked origin: MANUAL so a later regeneration does not clobber them without warning.
+A regeneration that preserves manual overrides treats them as consumed capacity rather than as exclusions. A preserved MANUAL assignment counts against its reviewer's load ceiling and against the one-Sparklet-per-applicant rule when the algorithm fills the remaining slots, and the applicant it belongs to still participates in the rest of generation for its unfilled slots. Excluding the applicant wholesale would let manual overrides quietly degrade load evenness. Where the preserved set already exceeds a ceiling or already puts two Sparklets on one applicant, generation reports the violation and does not correct it by removing a manual assignment.
 
 **FR-9 Reviewer dashboard, written.** Reviewer selects Round → Written, then their name from a dropdown. They see:
 

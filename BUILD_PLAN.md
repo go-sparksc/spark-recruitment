@@ -71,7 +71,7 @@ Each phase lists what to build, the prompt shape that works, and a verification 
 
 **This is the phase to slow down on.** Write your test cases first, in prose, before Claude writes anything:
 
-**These cases assume the PRD v1.1 pool definition — 5% of assignment *slots*, not 5% of applicants.** Every applicant is assigned; ~22 of them are short exactly one reviewer. The older "7 applicants held with zero reviewers" model is gone, and any number derived from it is wrong.
+**These cases assume the PRD v1.4 pool definition — 5% of assignment *slots*, not 5% of applicants.** Every applicant is assigned; ~22 of them are short exactly one reviewer. The older "7 applicants held with zero reviewers" model is gone, and any number derived from it is wrong.
 
 ```
 30 reviewers, 8 Sparklets, 150 applicants
@@ -81,30 +81,64 @@ Each phase lists what to build, the prompt shape that works, and a verification 
   → the 22 short applicants are 22 DISTINCT applicants, never one applicant short two
 
 30 reviewers, 15 Sparklets, 150 applicants
-  → feasibility check FAILS, explains why, does not generate
+  → 15 non-Sparklets × ceil(450/30) = 225 capacity against a 278-slot
+    non-Sparklet minimum. 225 < 278, so the check FAILS and does not generate
   → offers "allow uneven Sparklet load" as an ACTION, not just prose (decision 2)
-  → taking it generates with the one-Sparklet rule still intact and
-    non-Sparklets over the 15 ceiling; both numbers shown before confirming
+  → taking it generates with the one-Sparklet rule still intact and a relaxed
+    ceiling of ceil(278/15) = 19, average 18.5, against the 15 the unrelaxed
+    rule would give. Both numbers shown before confirming
 
 3 reviewers, 0 Sparklets, 10 applicants
   → 30 slots, pool = max(floor(1.5), 3) = 3
-  → 7 applicants get all 3 reviewers, 3 applicants get 2. NOT every reviewer
-    on every applicant — the old case said that and it is now wrong.
+  → 7 applicants get all 3 reviewers, 3 applicants get 2
 
 2 reviewers, 2 applicants
-  → 6 slots, floor(0.3) = 0, minimum 3, but pool caps at applicant_count = 2
+  → target is min(3, 2) = 2, so 4 slots, floor(0.2) = 0, minimum 3,
+    but pool caps at applicant_count = 2
   → the exactly-one-short rule beats the minimum-3 rule; no applicant loses two
+  → each applicant ends with 1 reviewer, neither with 0
 
-31 reviewers, 150 applicants
-  → 428 slots across 31 does not divide evenly; loads differ by at most 1
+31 reviewers, 0 Sparklets, 150 applicants
+  → 450 total slots, pool = 22, 428 assigned
+  → 428 across 31 does not divide evenly. No reviewer exceeds
+    ceil(450/31) = 15
 
 Regeneration after manual overrides exist
   → warns, and preserves MANUAL assignments unless explicitly told otherwise
+  → a preserved MANUAL assignment counts against its reviewer's load ceiling
+    and against the one-Sparklet-per-applicant rule
+  → an applicant with 1 MANUAL assignment still receives 2 generated slots;
+    it is not excluded from generation
+  → preserved MANUAL assignments that already exceed a ceiling, or that already
+    put 2 Sparklets on one applicant, are reported and left in place, never
+    silently removed to satisfy the constraint
+```
+The roster is a smaller piece but it is where the round's data starts, so its cases go over too:
+
+```
+Roster bulk paste (FR-6)
+
+Paste with trailing blank lines and a line of only spaces
+  → those lines dropped, no empty reviewer rows created
+
+"Mary Anne Chen"
+  → first name "Mary Anne", last name "Chen". Split on the LAST space, not the first
+
+"Cher"
+  → cannot split. Lands in the confirmation queue, does not import with a
+    blank last name
+
+"Alex Kim" appearing twice in one paste
+  → both import, both flagged for confirmation. Not deduplicated silently;
+    two reviewers may share a name and §5 puts no unique constraint on it
+
+A 30-line paste with no Sparklets marked
+  → all 30 import as non-Sparklet, scoped to the round being staffed
 ```
 
-**Prompt shape:** PRD §7.2 plus those cases as the spec. Ask for the algorithm as a pure function with no database access, tested in isolation, and a thin persistence layer around it. Pure functions are the part you can actually verify.
+**Prompt shape:** PRD §7.2 plus the assignment cases above as the spec for lib/assignment.ts, and the roster cases as the spec for lib/roster.ts. Ask for the algorithm as a pure function with no database access, tested in isolation, and a thin persistence layer around it. Pure functions are the part you can actually verify.
 
-**Gate:** All cases pass, and you have read the tests to confirm they assert what you asked. Load distribution printed to console and eyeballed. Feasibility failure message is one a non-technical successor could act on.
+Gate: All cases pass, and you have read the tests to confirm they assert what you asked. Load distribution printed to console and eyeballed. Feasibility failure message is one a non-technical successor could act on. Paste a roster containing a blank line, a single-word name, and a duplicated name; confirm the blank is dropped and the other two reach the confirmation queue rather than importing.
 
 ---
 
