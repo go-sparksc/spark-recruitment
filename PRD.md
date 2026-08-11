@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
-**Owner:** Kai
-**Status:** v1.2, Phase 0 complete, Phase 1 in progress
+**Owner:** Kai Lincoln
+**Status:** v1.3, Phase 0-1 complete, Phase 2 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -17,19 +17,20 @@ Concrete failure modes visible in the current file:
 - **Rubric scores and demographics live in the same rows.** There is no mechanism to show a first-round interviewer the scores without also exposing race, first-gen status, and written responses.
 - **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it. Training a new operator on the workbook takes significant time and close oversight.
 - **Editing the workbook is difficult.** Updating or making changes to the workbook is tricky and cumbersome, with significant limitations based on how the workbook was originally built. Changes to the rubric, number or types of questions, and other variables between application cycles requires significant maintenance of the workbook beforehand.
+- **Reviewers make and record their scores outside of the workbook.** To prevent leaking sensitive information or someone accidentally breaking the workbook, all reviews and scores are recorded on separate linked and unlinked spreadsheets, leading to complicated cross-workbook dependencies or cumbersome manual uploads.
 
 ## 2. Goals
 
 1. **One canonical applicant record.** Every score, note, vote, and decision attaches to a stable applicant ID, never a name string.
 2. **Near-zero reviewer friction.** A reviewer opens a link, picks a round and their name, and starts grading. No account creation, no download, no spreadsheet training.
 3. **Structural bias controls.** Field-level visibility per round, enforced by the system rather than by an admin remembering to hide columns.
-4. **Survives succession.** A new Co-President with no context can run a full cycle from documentation alone.
+4. **Survives succession.** A new E-Board with no context can run a full cycle from documentation alone.
 5. **Flexible to future application changes.** The system should be flexible and able to adapt to changes in number of questions, types of questions, rubric criteria, point values, or number of categories.
 6. **Portfolio-legible.** The data model, the assignment algorithm, and the pass state machine are the three pieces worth talking about in a PM interview. They should be clean enough to explain in five minutes.
 
 ## 3. Non-goals (v1)
 
-- Applicant-facing anything. Applicants never log in. Application intake stays in the existing form tool.
+- Applicant-facing anything. Applicants never log in. Application intake stays in the existing form tool and all responses are uploaded as CSVs (Typeform).
 - Automated email to applicants. The platform surfaces the email list; sending happens elsewhere.
 - Multi-org / multi-tenant SaaS. This is Spark SC's tool. Instances are recruitment cycles, not customers.
 - Interview scheduling.
@@ -87,6 +88,12 @@ Field                          // one per CSV column
   displayName                  // admin-editable
   groupId                      // nullable; the FieldGroup this column belongs to
   groupRole: OPTION | FREE_TEXT   // nullable; set only when groupId is set
+  promotedRole: EMAIL | NAME   // nullable; FR-2's designation. EMAIL is the
+                               //   join key for FR-12/FR-13. NAME may be one
+                               //   column or two ("First Name" + "Last Name"),
+                               //   joined in ordinal order. Both are removed
+                               //   at commit, when their values become
+                               //   Applicant.email and Applicant.displayName.
   category: DEMOGRAPHIC | RESPONSE | OTHER
                                //   the group's value wins when groupId is set
   ordinal
@@ -103,6 +110,15 @@ Field                          // one per CSV column
                                //   Prisma cannot express a CHECK, so this lives
                                //   in raw migration SQL and is asserted by
                                //   prisma/checks/field-groups.ts.
+  UNIQUE (instanceId) WHERE promotedRole = 'EMAIL'
+                               // partial index: at most one EMAIL column per
+                               //   instance. NAME is deliberately not covered,
+                               //   since two columns can carry it.
+  CHECK (promotedRole IS NULL OR (isIncluded AND groupId IS NULL))
+                               // FR-2's "cannot be excluded" made real. A
+                               //   promoted column is also never a group
+                               //   member, since group properties would
+                               //   override its inclusion.
 
 ImportRow                      // FR-2/FR-3 staging. Exists only between upload
   id, instanceId               //   and commit, and is deleted at commit.
@@ -390,7 +406,7 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 | Passes end with an applicant still unresolved | The "Close second round" action writes `resolution = NEEDS_ADMIN` on their final pass row. They are neither SPARKLET nor REJECTED, and FR-19 lists them under Unresolved rather than defaulting them either way. |
 | Second round closed with no pass ever created | Block the close. See "Closing the second round" above. |
 
-**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, with counts revealed to everyone at pass close. Reviewers should not have knowledge of other reviewers' votes.
+**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes.
 
 **FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained. This is only accessible by admin.
 
@@ -421,21 +437,20 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 
 | Metric | Current (S26) | Target |
 |---|---|---|
-| Admin hours per cycle on spreadsheet maintenance | Estimate before you build; you have the data | −60% |
-| Reviewer completion rate (assigned reviews finished on time) | Derive from `Scores` sheet | ≥ 95% |
+| Admin hours per cycle on spreadsheet maintenance | Estimate before you build; you have the data: ~15+ hours including training the operator | −60% |
 | Applicant records orphaned by name mismatch | Nonzero, unmeasured | 0 |
-| Time from written round close to first-round list published | Estimate | < 1 hour |
-| New admin able to run a cycle from docs alone | No | Yes, validated by a dry run with a board member |
+| Time from written round close to first-round list published | Estimate: ~3 hours | < 1 hour |
+| New admin able to run a cycle from docs alone | No, training time 2-4 hours | Yes, validated by a dry run with a board member, training time < 1 hour  |
 
 ## 10. Open decisions
 
 These need answers before or during the relevant build phase. They are the places where an unstated assumption would produce the wrong system.
 
 1. **Unassigned pool definition. RESOLVED: 5% of assignment slots.** ~22 slots of 450 left open, spread across ~22 distinct applicants who each start with 2 of 3 reviewers rather than concentrating the gap on a few applicants with zero. The pool exists as a conflict-of-interest buffer: a reviewer who recuses returns their slot to the pool, and any reviewer can claim an open slot. Chosen over holding whole applicants unassigned because a pooled applicant under that model needs three separate claims to be reviewed at all, and if the pool moves slowly they receive zero reviews. Under this model a slow-moving pool costs an applicant one opinion, not all three. Consequence: returns add slots to the pool over the course of the round, so FR-10 must warn on total applicants with fewer than 3 completed reviews, not just the initial 22.
-2. **Sparklet-heavy roster handling.** When the feasibility check fails, does the club prefer uneven Sparklet load or relaxing the one-Sparklet rule? Answer: uneven Sparklet load.
+2. **Sparklet-heavy roster handling. RESOLVED: Uneven Sparklet load.** When the feasibility check fails, does the club prefer uneven Sparklet load or relaxing the one-Sparklet rule?
 3. **Live vote visibility in passes.** RESOLVED: See FR-17.
-4. **Blind written review.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later. Answer: Written reviewers should not see applicant names.
-5. **Multiple concurrent admins.** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking. Answer: Agree with the v1 recommendation.
+4. **Blind written review. RESOLVED: Written reviewers should not see applicant names.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later.
+5. **Multiple concurrent admins. RESOLVED: Based on v1 recommendation** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking.
 6. **Interview score scale. RESOLVED.** The S26 `1R Scores` sheet carries **four category scores plus an average, per interviewer** — not the single score FR-12 originally assumed.
 
    *Display:* show the average prominently, with the category scores available but collapsed by default, for both interviewers. Ten numbers on a phone screen works against FR-14's friction goal if all are shown at once.
@@ -465,7 +480,7 @@ These need answers before or during the relevant build phase. They are the place
 
 15. **What gates password reset and instance deletion. RESOLVED: the app-level password.** See FR-5.
 
-16. **Admin identity behind the app gate. OPEN — decide in Phase 8.** §8 specifies one app-level password shared by 2–6 admins, so `AuditLog.actor` has no real identity behind it: every override, and now every password reset and instance deletion, is attributable to "an admin" and nothing finer. Acceptable among co-presidents who trust each other; not acceptable as the permanent answer for a log whose entire purpose is attribution. Options: per-admin accounts, or a name prompt at sign-in recorded on the session and copied into `actor` — weaker, but honest and cheap. Decide before hardening rather than during it.
+16. **Admin identity behind the app gate. RESOLVED: Name prompt (first and last) at sign-in. — implementation lands in Phase 8.** §8 specifies one app-level password shared by 2–6 admins, so `AuditLog.actor` has no real identity behind it: every override, and now every password reset and instance deletion, is attributable to "an admin" and nothing finer. Acceptable among E-Board members who trust each other; not acceptable as the permanent answer for a log whose entire purpose is attribution. Options: per-admin accounts, or a name prompt at sign-in recorded on the session and copied into `actor` — weaker, but honest and cheap. 
 
 17. **Two fixture directories. OPEN — no phase assigned.** `fixtures/sample-headers.csv` sits at the repo root while `prisma/fixtures/` holds the synthetic export and its README. Two directories for one purpose invites saving a file in the wrong one, and the wrong one may hold real applicant data. The `.gitignore` now names both exempt files exactly rather than globbing a directory, so neither location is currently a hole, but the duplication is the underlying problem and the ignore rules are only a guard against it. Consolidating means moving the file, updating `prisma/seed/headers.ts`, `.gitattributes`, `.gitignore`, and the phase-0 record — small, but it touches the seed, so it wants its own change rather than riding along with feature work.
 
