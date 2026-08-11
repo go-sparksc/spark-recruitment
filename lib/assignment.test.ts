@@ -122,6 +122,25 @@ function assertPlanInvariants(
   }
 }
 
+/// The mathematically even distribution of the assignable slots: `remainder`
+/// reviewers carry one more than the rest, and nobody carries anything else.
+///
+/// Used on the rosters where no Sparklet constraint binds, so "as even as
+/// possible" is pinned to a concrete shape rather than to a pair of bounds a
+/// lopsided plan could still satisfy. Derived from the report rather than
+/// written down, so it stays right if a roster in a describe changes; each
+/// caller also asserts the two counts by hand, which is the independent check.
+function assertEvenSplit(plan: AssignmentPlan, reviewerCount: number) {
+  const assigned = plan.report.assignedSlots;
+  const base = Math.floor(assigned / reviewerCount);
+  const remainder = assigned % reviewerCount;
+  const loads = Object.values(plan.loadByReviewerId);
+
+  expect(loads).toHaveLength(reviewerCount);
+  expect(loads.filter((n) => n === base + 1)).toHaveLength(remainder);
+  expect(loads.filter((n) => n === base)).toHaveLength(reviewerCount - remainder);
+}
+
 /// FR-7's exemption, evaluated. True means the plan left load on the table.
 function improvingSwapExists(
   plan: AssignmentPlan,
@@ -201,6 +220,7 @@ describe("30 reviewers, 8 Sparklets, 150 applicants", () => {
     expect(loads.filter((n) => n === 15)).toHaveLength(8);
     expect(loads.filter((n) => n === 14)).toHaveLength(22);
     expect(loads.reduce((a, b) => a + b, 0)).toBe(428);
+    assertEvenSplit(plan, 30);
   });
 
   it("gives Sparklets and non-Sparklets the same treatment", () => {
@@ -285,12 +305,32 @@ describe("30 reviewers, 15 Sparklets, 150 applicants", () => {
       }
     });
 
-    it("Sparklets carry less, which is the point of the trade", () => {
-      const sparkletLoads = relaxedArgs.reviewers
-        .filter((r) => r.isSparklet)
-        .map((r) => plan.loadByReviewerId[r.id]);
+    it("Sparklets carry only what one-per-applicant allows, spread evenly", () => {
+      // Derived, not observed. At most one Sparklet may review any applicant, so
+      // the Sparklets share at most `applicantCount` slots between them — 150 —
+      // and an even share of that is 150 / 15 = 10 each. That 10 is the number
+      // the relaxed trade buys, against 18 or 19 for everyone else, so it is
+      // computed here rather than written down: if the roster in this describe
+      // changes, the expectation should move with it instead of failing as a
+      // stale literal nobody can classify as requirement or observation.
+      const applicantCount = relaxedArgs.applicantIds.length;
+      const sparklets = relaxedArgs.reviewers.filter((r) => r.isSparklet);
+      const evenSparkletShare = Math.ceil(applicantCount / sparklets.length);
 
-      for (const load of sparkletLoads) expect(load).toBeLessThanOrEqual(10);
+      expect(evenSparkletShare).toBe(10);
+      for (const reviewer of sparklets) {
+        expect(plan.loadByReviewerId[reviewer.id]).toBeLessThanOrEqual(evenSparkletShare);
+      }
+    });
+
+    it("saturates the Sparklets — one on every applicant, which is what frees the rest", () => {
+      // The other half of the same fact. If Sparklets took fewer than one per
+      // applicant, non-Sparklets would have to carry more than 278 and the
+      // relaxed ceiling of 19 would be wrong.
+      const { sparkletsPerApplicant } = count(plan, relaxedArgs.reviewers);
+      const total = [...sparkletsPerApplicant.values()].reduce((a, b) => a + b, 0);
+
+      expect(total).toBe(relaxedArgs.applicantIds.length);
     });
 
     it("holds every other invariant", () => {
@@ -313,6 +353,15 @@ describe("3 reviewers, 0 Sparklets, 10 applicants", () => {
 
     expect([...perApplicant.values()].filter((n) => n === 3)).toHaveLength(7);
     expect([...perApplicant.values()].filter((n) => n === 2)).toHaveLength(3);
+  });
+
+  it("splits 27 slots as 9 each, with no remainder to argue about", () => {
+    // By hand: 27 = 3 x 9 exactly. A third roster with a knowable optimum, and
+    // the one where the even split is perfect rather than off by a remainder.
+    const loads = Object.values(plan.loadByReviewerId);
+
+    expect(loads).toEqual([9, 9, 9]);
+    assertEvenSplit(plan, 3);
   });
 
   it("holds every invariant", () => {
@@ -342,6 +391,14 @@ describe("2 reviewers, 2 applicants", () => {
     for (const applicantId of args.applicantIds) expect(perApplicant.get(applicantId)).toBe(1);
     assertPlanInvariants(plan, args);
   });
+
+  it("and each reviewer carries exactly 1", () => {
+    // By hand: 2 assignable slots over 2 reviewers. The smallest roster where
+    // the shape is knowable, and the one where a pool that ignored its cap would
+    // show up immediately as a reviewer carrying nothing.
+    expect(Object.values(plan.loadByReviewerId)).toEqual([1, 1]);
+    assertEvenSplit(plan, 2);
+  });
 });
 
 describe("31 reviewers, 0 Sparklets, 150 applicants", () => {
@@ -363,6 +420,18 @@ describe("31 reviewers, 0 Sparklets, 150 applicants", () => {
     expect(plan.report.loadFloor).toBe(13);
     for (const load of Object.values(plan.loadByReviewerId)) expect(load).toBeGreaterThanOrEqual(13);
     assertPlanInvariants(plan, args);
+  });
+
+  it("distributes exactly 25 reviewers at 14 and 6 at 13", () => {
+    // By hand: 428 = 31 x 13 + 25, so 25 reviewers carry one more than the other
+    // 6 and no other shape is even. This is the second roster with a knowable
+    // optimum, and it divides differently from 150/30/8 — remainder 25 of 31
+    // rather than 8 of 30 — so the floor logic is not verified at a single point.
+    const loads = Object.values(plan.loadByReviewerId);
+
+    expect(loads.filter((n) => n === 14)).toHaveLength(25);
+    expect(loads.filter((n) => n === 13)).toHaveLength(6);
+    assertEvenSplit(plan, 31);
   });
 });
 
