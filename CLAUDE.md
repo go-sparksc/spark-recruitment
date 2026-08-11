@@ -44,6 +44,8 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 - Small commits with real messages.
 - Run `npm run verify` (typecheck, lint, test) before declaring a phase done.
 - Ask rather than assume when the PRD is ambiguous. PRD §10 lists known open decisions; if you hit a new one, add it there rather than picking silently.
+- **One command per shell call.** Do not chain a file write, a test run, and a restore into one invocation. When a chain half-succeeds you cannot tell which half, and a `cp` restore tacked onto the end of a failing command does not run — so the tree is left modified in a way the next command's output will not mention.
+- **Never edit tracked source to test it.** If a case needs coverage, write the test. Mutating the implementation to watch a test fail leaves the repository in a state no one asked for, and it proves the test catches *that* mutation rather than that the case is covered. The gap it seems to find is a missing test; write that instead.
 
 ## Testing
 
