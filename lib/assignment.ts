@@ -313,6 +313,7 @@ export function checkFeasibility(input: AssignmentInput): FeasibilityReport {
           loadCeiling: shape.loadCeiling,
           relaxedNonSparkletCeiling,
           relaxedNonSparkletAverage,
+          preservedCount: (input.preserved ?? []).length,
         }),
     preexistingViolations: violations,
   };
@@ -332,6 +333,10 @@ function failureMessage(n: {
   loadCeiling: number;
   relaxedNonSparkletCeiling: number | null;
   relaxedNonSparkletAverage: number | null;
+  /// MANUAL and CLAIMED_FROM_POOL rows already on the round. Both numbers above
+  /// are computed net of them, so on a live instance they will not match a
+  /// worked example done on a clean roster.
+  preservedCount: number;
 }): string {
   const head =
     `You have ${n.sparkletCount} Sparklets among ${n.reviewerCount} reviewers. ` +
@@ -350,12 +355,25 @@ function failureMessage(n: {
     `non-Sparklet reviewers would have to cover ${n.nonSparkletMinimum} of the assignments, ` +
     `and an even share caps them at ${n.loadCeiling} each — ${n.nonSparkletCapacity} in total.`;
 
+  // Both figures above are net of whatever is already assigned by hand, so on a
+  // live instance they will not match a worked example done on a clean roster.
+  // Naming the count rather than the fact is what makes it checkable: the
+  // number here should equal the manual and claimed rows the page lists above.
+  // Without this, the sensible reading of the discrepancy is that the tool is
+  // wrong — which is exactly how it was read the first time it appeared.
+  const preserved =
+    n.preservedCount === 0
+      ? ""
+      : ` ${n.preservedCount} assignment${n.preservedCount === 1 ? "" : "s"} already on this ` +
+        `round — manual overrides and claimed slots — ${n.preservedCount === 1 ? "is" : "are"} ` +
+        `counted in both figures, so they are lower than they would be on a clean run.`;
+
   const options =
     `Options: add non-Sparklet reviewers, or allow Sparklet load to be lighter than average, ` +
     `which would put about ${n.relaxedNonSparkletAverage?.toFixed(1)} assignments on each ` +
     `non-Sparklet reviewer (capped at ${n.relaxedNonSparkletCeiling}) instead of ${n.loadCeiling}.`;
 
-  return `${head} ${why} ${options}`;
+  return `${head} ${why}${preserved} ${options}`;
 }
 
 // ---------------------------------------------------------------------------

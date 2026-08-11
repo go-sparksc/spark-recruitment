@@ -401,6 +401,33 @@ describe("the failure message tracks preserved rows", () => {
     expectMessageMatchesReport(report);
   });
 
+  it("says how many preserved rows moved them, by count", () => {
+    // The count, not the fact: it has to be checkable against the manual and
+    // claimed rows the page lists above the message. Naming only the fact leaves
+    // the reader unable to tell whether the number is the one they are looking at.
+    expect(report.message).toContain("1 assignment already on this round");
+    expect(report.message).toContain("counted in both figures");
+  });
+
+  it("pluralises, and says nothing at all when nothing is preserved", () => {
+    const two = checkFeasibility(
+      input({
+        applicantIds: applicants(150),
+        reviewers,
+        preserved: [
+          { applicantId: "app_0", reviewerId: nonSparklet.id },
+          { applicantId: "app_1", reviewerId: reviewers[21].id },
+        ],
+      }),
+    );
+    const clean = checkFeasibility(input({ applicantIds: applicants(150), reviewers }));
+
+    expect(two.message).toContain("2 assignments already on this round");
+    // A clause explaining a discrepancy that does not exist is noise on the
+    // screen an admin sees most often.
+    expect(clean.message).not.toContain("already on this round");
+  });
+
   it("a preserved SPARKLET moves neither, which is why the pair has to be tested together", () => {
     // The applicant's Sparklet headroom goes to zero at the same time as its
     // need drops, so the minimum is unchanged; and a Sparklet's load never

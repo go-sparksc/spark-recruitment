@@ -385,3 +385,24 @@ npm run dev
 Then the by-hand passes at the end of Slices 0, 2 and 4, in that order. The gate's own wording is the acceptance test: read `lib/roster.test.ts` and `lib/assignment.test.ts` against the two BUILD_PLAN blocks and confirm each case is asserted rather than approximated, and read the feasibility message on screen as though you had never seen this codebase.
 
 Only once all of that has passed does the PRD status line move to Phase 2 complete, as its own final commit.
+
+---
+
+## What the walkthrough found
+
+Run by the owner, which is the only reason most of this phase's defects were found at all. Recorded here rather than only in commit messages, because the pattern in what the walkthrough caught is more useful than any individual fix.
+
+**Everything the walkthrough surfaced, it surfaced by someone using the screen.** Not one of these came from a failing test, a typecheck, a lint run, or a self-review of the diff:
+
+- The FR-6 manual-add gap (Slice 2) — see the correction in Slice 2.
+- All five Slice 4 gaps, including 90 unreachable applicants and a missing FR-8 verb — see the correction in Slice 4.
+- The reviewers page being unreachable in practice, because the FR-5 recovery path is named in prose on `/unlock` and not linked, so an admin without the instance password cannot get to the settings page that resets it. Still open; it is a Phase 1 surface and wants its own change.
+- A `.env` that was correct but whose password had been pasted in as an unparsed line, and a `hash-secret` output that invited exactly that paste — which in turn exposed a real double-escaping bug in the same script that had never been caught because nothing tested its output.
+
+**The one finding that was not a defect is the most instructive.** At step 5 the feasibility message read 277 and 224 where the tests assert 278 and 225, and the sensible reading — mine would have been the same — was that the message recomputed its numbers instead of rendering the report's. It does not: `failureMessage` is handed the same locals `checkFeasibility` returns, so they cannot diverge. The difference was state. Step 3 swaps a reviewer, leaving one `MANUAL` row, and FR-8 makes a preserved row consumed capacity: the minimum drops by one because that applicant now needs two slots rather than three, and the capacity drops by one because that reviewer has one slot less to give. Two different causes, same magnitude, which is what made it look like an off-by-one.
+
+Three things came out of that, and the third matters most:
+
+1. The message now names the preserved count — "1 assignment already on this round … is counted in both figures" — so the discrepancy explains itself against the override list on the same page.
+2. The test asserting the message was checking 15 and 19, both load ceilings, which read the same on any roster of this size. It passed while saying nothing about the two numbers the refusal rests on. It now derives its expectation from the report and pins the preserved case as well as the clean one.
+3. **A number that is correct but unexplained costs the same as a wrong one.** The reader has to choose between "the tool is wrong" and "I am missing something", and choosing correctly requires knowing the code. Where a displayed figure depends on state the reader cannot see, name the state. That generalises past this message: FR-10's variance, FR-15's yes-percentage over skips, and FR-19's fractional demographic counts are all numbers a reader will otherwise have to take on trust.
