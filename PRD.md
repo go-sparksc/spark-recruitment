@@ -145,6 +145,12 @@ Applicant
 
 RubricCategory
   id, instanceId, name, maxPoints, ordinal
+  description                  // nullable. What this category is asking for, and
+                               //   what the top of its scale means. FR-9 renders
+                               //   it beside the score input, which is the only
+                               //   place a written reviewer ever sees it. Without
+                               //   it the "rubric" a reviewer scores against is
+                               //   four bare words. See decision 32.
 
 Reviewer
   id, instanceId, firstName, lastName
@@ -299,7 +305,11 @@ The preview also carries two warnings that do not block, because each describes 
 
 An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. Corrections after commit happen by editing an applicant's fields directly, or by deleting the instance and importing again. This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
-**FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
+**FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category and for describing it. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
+
+**Each category carries a description, and it is optional but strongly prompted.** A name and a maximum are a scale, not a rubric: thirty reviewers scoring "Fit with Spark SC" out of 5 with no shared definition of a 4 produce exactly the divergence FR-10 then has to surface as high variance. The description is what FR-9 puts beside the score input. It is nullable because an admin mid-setup should not be blocked by it, and because a cycle that genuinely briefs its reviewers elsewhere is entitled to leave it empty.
+
+The description is part of the rubric and is therefore covered by the same lock. That is deliberate but not free: a typo in a description cannot be corrected once grading has started without discarding every score. Accepted for v1 rather than building a second write path that bypasses the lock, on the grounds that the lock only engages after the first score is submitted and the rubric is written before reviewers are let in. If this bites in practice, the fix is a description-only edit action, since prose orphans no `Score` row — not a weakening of the lock itself.
 
 **FR-5 Instance save.** Admin sets an instance name and password. Password is hashed (argon2id or bcrypt, cost ≥ 12). Never stored or logged in plaintext. Never recoverable; recovery means an admin with app-level access resets it.
 
@@ -576,6 +586,14 @@ These need answers before or during the relevant build phase. They are the place
     This is outside FR-9's six bullets and ships anyway, because BUILD_PLAN's Phase 3 gate requires a board member who has never seen the tool to complete a review, and that cannot happen on an instance with no code. Deferring it would leave the phase verifiable only against the seed — which is the same shape as decision 24's mistake, where leaving a decision open would not have stopped the surface that suffers from it being built.
 
     It lives on `/instances/[id]/reviewers`, which is already round-scoped and is where an admin thinks about a round's staff. Setting a code hashes it with the same argon2id path as every other secret here and never displays it again; rotating replaces it and is audited under §8, since it changes who can reach applicant data. The shareable reviewer link is shown beside it. Rotation does not evict reviewers already signed in — the reviewer session is signed rather than looked up — and the control says so rather than leaving an admin to assume otherwise.
+
+32. **What "rubric" means on the reviewer's screen. RESOLVED: each category carries a description, and FR-9 renders it.** FR-9 requires the rubric "always visible alongside" the responses, and FR-4 defined a rubric as category names plus maximum points. Those two together produce a screen showing four bare words — which satisfies the sentence and defeats its purpose.
+
+    Found the way these things are found here: the owner opened the built screen on a phone, read "Show rubric", tapped it, and got a list of category names. Nothing in the tests, the schema, or the FR text was wrong; the gap only existed at the point where a person had to act on what was rendered.
+
+    §5 therefore gains `RubricCategory.description`, nullable, and FR-4 collects it beside the name and maximum. The cost of not having it is not cosmetic: a shared definition of a 4 is the main thing standing between thirty untrained reviewers and the score variance FR-10 exists to flag, so an unstated rubric converts a setup omission into a data-quality problem two phases later.
+
+    **The description is inside FR-4's lock, and the consequence is stated rather than discovered:** once any `Score` exists, fixing a typo in a description requires the reset that discards every score. Rejected the alternative of a description-only write path that bypasses the lock — it is the right eventual answer, since prose orphans no `Score` row, but it is a second mutation route into a locked table and Phase 3 is not where that belongs.
 
 ## 11. Out of scope for v1, worth noting for v2
 
