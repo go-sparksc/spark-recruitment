@@ -61,13 +61,21 @@ function adminPasswordHash(): string {
 
 // Module-level so it survives between requests within a process. See PRD open
 // decision 19 for what this does and does not cover.
-const limiter = createAttemptLimiter(PASSWORD_ATTEMPT_POLICY);
+//
+// Exported because lib/reviewer-auth.ts gates the round access code through the
+// same limiter rather than standing up a second one. Buckets are namespaced by
+// scope, so the two never share an allowance; what sharing the instance buys is
+// one bounded map and one prune, instead of two that grow independently.
+export const limiter = createAttemptLimiter(PASSWORD_ATTEMPT_POLICY);
 
 /// Best-effort client identifier for rate limiting. On Vercel x-forwarded-for is
 /// set by the platform; locally it usually is not. Falling back to a shared
 /// bucket is deliberate — an attacker who strips the header lands in the same
 /// bucket as everyone else rather than escaping the limiter entirely.
-async function attemptKey(scope: string): Promise<string> {
+///
+/// Exported for the same reason as the limiter: a second copy of this parsing is
+/// a place the two gates can come to disagree about who a caller is.
+export async function attemptKey(scope: string): Promise<string> {
   const forwarded = (await headers()).get("x-forwarded-for");
   const ip = forwarded?.split(",")[0]?.trim() || "unknown";
   return `${scope}:${ip}`;

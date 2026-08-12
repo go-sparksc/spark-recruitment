@@ -22,6 +22,16 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except the login page itself, Next's internals, and static files.
-  matcher: ["/((?!login|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the login page itself, the reviewer surface, Next's
+  // internals, and static files.
+  //
+  // `/r` is exempt because reviewers do not hold the app-level password and must
+  // not be sent to /login. Their gate is requireReviewer() in lib/reviewer-auth.ts,
+  // called in every reviewer page and every reviewer action — the same posture
+  // as the admin gates, and for the same reason: this file is a convenience
+  // redirect, not an authorization boundary.
+  //
+  // `r(?:/|$)` and not a bare `r`, which would also exempt every future
+  // top-level path that happens to begin with the letter r.
+  matcher: ["/((?!login|r(?:/|$)|_next/static|_next/image|favicon.ico).*)"],
 };

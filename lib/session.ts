@@ -15,7 +15,7 @@
 // Pure: no cookie jar, no Next imports, no environment reads. lib/auth.ts binds
 // this to the request.
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { decodeSignedToken, encodeSignedToken } from "@/lib/signed-token";
 
 export interface SessionPayload {
   /// Cleared the app-level gate.
@@ -31,46 +31,23 @@ export interface SessionPayload {
 export const SESSION_COOKIE = "spark_session";
 export const SESSION_TTL_SECONDS = 12 * 60 * 60;
 
-function b64url(input: Buffer | string): string {
-  return Buffer.from(input).toString("base64url");
-}
-
-function sign(encodedPayload: string, secret: string): string {
-  return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
-}
-
 export function encodeSession(payload: SessionPayload, secret: string): string {
-  const encoded = b64url(JSON.stringify(payload));
-  return `${encoded}.${sign(encoded, secret)}`;
+  return encodeSignedToken(payload, secret);
 }
 
 /// Returns null for anything that is not a currently valid session: malformed,
 /// wrong signature, expired, or structurally wrong. The caller cannot tell those
 /// apart, and should not — every one of them means "not signed in".
+///
+/// The signature check lives in lib/signed-token.ts, shared with the reviewer
+/// session. What stays here is the shape and the expiry, which are this session
+/// type's own and differ from the reviewer's.
 export function decodeSession(
   token: string | undefined,
   secret: string,
   nowSeconds: number,
 ): SessionPayload | null {
-  if (!token) return null;
-
-  const parts = token.split(".");
-  if (parts.length !== 2) return null;
-  const [encoded, signature] = parts;
-
-  const expected = sign(encoded, secret);
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
-  // Length check first: timingSafeEqual throws on a length mismatch, and a
-  // differing length is already a failed signature.
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
+  const parsed = decodeSignedToken(token, secret);
 
   if (typeof parsed !== "object" || parsed === null) return null;
   const { adm, ins, exp } = parsed as Record<string, unknown>;

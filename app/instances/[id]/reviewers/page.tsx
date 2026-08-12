@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AccessCodeCard } from "./access-code-card";
 import { RosterControls, type ReviewerRow } from "./roster-controls";
 import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
@@ -36,6 +37,13 @@ export default async function ReviewersPage({
   });
 
   if (!instance) notFound();
+
+  const accessCode = await prisma.roundAccessCode.findUnique({
+    where: { instanceId_round: { instanceId: id, round } },
+    // Deliberately not selecting codeHash. §8 puts access codes under the same
+    // rule as passwords, and a hash that is never loaded cannot be rendered.
+    select: { id: true },
+  });
 
   const reviewers = await prisma.reviewer.findMany({
     where: { instanceId: id },
@@ -96,6 +104,8 @@ export default async function ReviewersPage({
           </Link>
         ))}
       </nav>
+
+      <AccessCodeCard instanceId={id} round={round} hasCode={accessCode !== null} />
 
       <RosterControls instanceId={id} round={round} reviewers={rows} />
     </main>

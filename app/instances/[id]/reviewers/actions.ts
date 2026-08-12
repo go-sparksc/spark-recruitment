@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
+import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import {
   checkReviewerName,
@@ -420,4 +421,78 @@ export async function addRound(
 
   revalidatePath(path(instanceId));
   return ok;
+}
+
+// ---------------------------------------------------------------------------
+// Round access code (PRD decision 31)
+// ---------------------------------------------------------------------------
+
+/// Set or rotate the access code reviewers type to reach this round, per §8.
+///
+/// Outside FR-9's six bullets and shipped anyway: `RoundAccessCode` has existed
+/// since Phase 0 and only the seed has ever written one, so every instance built
+/// through FR-2 carried an unreachable reviewer dashboard. The Phase 3 gate
+/// requires a board member who has never seen the tool to complete a review, and
+/// that cannot happen on an instance with no code.
+///
+/// Hashed with the same argon2id path as every other secret here, and never
+/// returned or re-displayed — §8 puts access codes under the same rule as
+/// passwords. An admin who forgets it rotates it rather than reading it back.
+export async function setRoundCode(
+  instanceId: string,
+  round: Round,
+  code: string,
+): Promise<ActionState> {
+  await requireInstance(instanceId, path(instanceId));
+
+  // Reviewers type this on a phone keyboard from a Slack message. A code with a
+  // leading or trailing space is one nobody can enter, and trimming it silently
+  // would store something other than what the admin typed.
+  if (code.trim() !== code) {
+    return { error: "Leading and trailing spaces are not allowed — reviewers cannot type them." };
+  }
+  // Long enough to be worth hashing. The limiter in decision 19 caps one address
+  // at roughly 40 guesses an hour, which makes a strong code impractical to
+  // guess and does nothing at all for "spark".
+  if (code.length < 6) {
+    return { error: "An access code needs at least 6 characters." };
+  }
+
+  const existing = await prisma.roundAccessCode.findUnique({
+    where: { instanceId_round: { instanceId, round } },
+    select: { id: true },
+  });
+  const rotated = existing !== null;
+
+  const codeHash = await hashSecret(code);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.roundAccessCode.upsert({
+      where: { instanceId_round: { instanceId, round } },
+      create: { instanceId, round, codeHash },
+      update: { codeHash },
+    });
+    // Audited per §8: this changes who can reach applicant data. previousValue
+    // records that a rotation happened and never the old hash, matching what
+    // resetInstancePassword already does.
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: rotated ? "ROTATE_ROUND_CODE" : "SET_ROUND_CODE",
+        entityType: "RoundAccessCode",
+        entityId: existing?.id ?? `${instanceId}:${round}`,
+        previousValue: { round, rotated },
+      },
+    });
+  });
+
+  revalidatePath(path(instanceId));
+
+  const rotatedMessage =
+    `Rotated the ${ROUND_LABELS[round]} code. Reviewers already signed in stay signed in ` +
+    `until their session expires; the old code no longer works for anyone new.`;
+  const setMessage = `Set the ${ROUND_LABELS[round]} code. Share it with the link below.`;
+
+  return { message: rotated ? rotatedMessage : setMessage };
 }
