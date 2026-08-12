@@ -8,10 +8,17 @@
 export interface RubricCategoryInput {
   name: string;
   maxPoints: number;
+  /// What this category asks for and what the top of its scale means. Optional
+  /// per FR-4, and the only thing a written reviewer has to score against beyond
+  /// the name — see PRD decision 32.
+  description?: string | null;
 }
 
 export const MAX_CATEGORIES = 20;
 export const MAX_POINTS_CEILING = 1000;
+/// Long enough for two or three sentences of guidance, short enough that nobody
+/// pastes an essay into a card that has to fit on a phone beside a score input.
+export const MAX_DESCRIPTION_LENGTH = 400;
 
 /// Goal 5: the rubric must be reconfigurable between cycles, so nothing here
 /// assumes four categories or any particular scale. The only limits are the
@@ -41,6 +48,16 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
       errors.push(`Category ${position} needs at least 1 point.`);
     } else if (category.maxPoints > MAX_POINTS_CEILING) {
       errors.push(`Category ${position} is capped at ${MAX_POINTS_CEILING} points.`);
+    }
+
+    // Absent is fine — FR-4 makes the description optional. Only its length is
+    // validated, because it renders inside a card that has to share a phone
+    // screen with the score input it explains.
+    if ((category.description ?? "").length > MAX_DESCRIPTION_LENGTH) {
+      errors.push(
+        `Category ${position}'s description is over ${MAX_DESCRIPTION_LENGTH} characters. ` +
+          `Reviewers read this on a phone beside the score box.`,
+      );
     }
   });
 

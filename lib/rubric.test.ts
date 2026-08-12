@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_CATEGORIES, rubricTotal, validateRubric } from "@/lib/rubric";
+import {
+  MAX_CATEGORIES,
+  MAX_DESCRIPTION_LENGTH,
+  rubricTotal,
+  validateRubric,
+} from "@/lib/rubric";
 
 const ok = [
   { name: "Written quality", maxPoints: 5 },
@@ -64,6 +69,45 @@ describe("validateRubric", () => {
       maxPoints: 1,
     }));
     expect(validateRubric(many).join(" ")).toMatch(/almost certainly a typo/);
+  });
+});
+
+describe("category descriptions — PRD decision 32", () => {
+  it("accepts a category with no description at all", () => {
+    // FR-4 makes it optional. An admin mid-setup must not be blocked by it, and
+    // a cycle that briefs reviewers elsewhere is entitled to leave it empty.
+    expect(validateRubric([{ name: "Drive", maxPoints: 5 }])).toEqual([]);
+  });
+
+  it("accepts an explicitly null or empty description", () => {
+    expect(validateRubric([{ name: "Drive", maxPoints: 5, description: null }])).toEqual([]);
+    expect(validateRubric([{ name: "Drive", maxPoints: 5, description: "" }])).toEqual([]);
+  });
+
+  it("accepts a description at the limit", () => {
+    const atLimit = "x".repeat(MAX_DESCRIPTION_LENGTH);
+    expect(validateRubric([{ name: "Drive", maxPoints: 5, description: atLimit }])).toEqual([]);
+  });
+
+  it("rejects one character over the limit, and says why it matters", () => {
+    // The limit is not arbitrary tidiness: this renders inside a card that has
+    // to share a phone screen with the score input it explains.
+    const tooLong = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
+    const errors = validateRubric([{ name: "Drive", maxPoints: 5, description: tooLong }]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/Category 1's description is over/);
+    expect(errors[0]).toMatch(/phone/);
+  });
+
+  it("names the offending category by position", () => {
+    const errors = validateRubric([
+      { name: "A", maxPoints: 5 },
+      { name: "B", maxPoints: 5, description: "x".repeat(MAX_DESCRIPTION_LENGTH + 1) },
+    ]);
+
+    expect(errors.join(" ")).toMatch(/Category 2/);
+    expect(errors.join(" ")).not.toMatch(/Category 1/);
   });
 });
 

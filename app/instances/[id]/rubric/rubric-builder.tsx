@@ -6,11 +6,12 @@ import { resetWrittenScores, saveRubric, type RubricState } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { rubricTotal, validateRubric } from "@/lib/rubric";
+import { MAX_DESCRIPTION_LENGTH, rubricTotal, validateRubric } from "@/lib/rubric";
 
 export interface RubricRow {
   name: string;
   maxPoints: number;
+  description: string;
 }
 
 export function RubricBuilder({
@@ -24,7 +25,7 @@ export function RubricBuilder({
   lockedByScoreCount: number;
 }) {
   const [rows, setRows] = useState<RubricRow[]>(
-    initial.length > 0 ? initial : [{ name: "", maxPoints: 5 }],
+    initial.length > 0 ? initial : [{ name: "", maxPoints: 5, description: "" }],
   );
   const [state, setState] = useState<RubricState>({});
   const [pending, start] = useTransition();
@@ -86,7 +87,8 @@ export function RubricBuilder({
 
       <div className="space-y-3">
         {rows.map((row, index) => (
-          <div key={index} className="flex flex-wrap items-end gap-3">
+          <div key={index} className="space-y-3 rounded-md border p-3">
+            <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
               <Label htmlFor={`name-${index}`} className="text-xs">
                 Category {index + 1}
@@ -116,14 +118,42 @@ export function RubricBuilder({
                 className="h-9 w-24"
               />
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={locked || pending || rows.length === 1}
-              onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
-            >
-              Remove
-            </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={locked || pending || rows.length === 1}
+                onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+              >
+                Remove
+              </Button>
+            </div>
+
+            {/* PRD decision 32. Optional, but prompted hard: a name and a
+                maximum are a scale, not a rubric, and this is the only guidance
+                a written reviewer ever sees. Left empty it costs nothing here
+                and surfaces two phases later as FR-10 variance nobody can
+                explain. */}
+            <div className="space-y-1.5">
+              <Label htmlFor={`description-${index}`} className="text-xs">
+                What reviewers should look for{" "}
+                <span className="text-muted-foreground font-normal">
+                  — optional, shown beside their score box
+                </span>
+              </Label>
+              <textarea
+                id={`description-${index}`}
+                value={row.description}
+                disabled={locked || pending}
+                onChange={(e) => update(index, { description: e.target.value })}
+                rows={2}
+                maxLength={MAX_DESCRIPTION_LENGTH}
+                placeholder="e.g. Evidence of starting something and seeing it through. A 5 is a project they ran end to end; a 1 is an idea never acted on."
+                className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+              />
+              <p className="text-muted-foreground text-xs tabular-nums">
+                {row.description.length}/{MAX_DESCRIPTION_LENGTH}
+              </p>
+            </div>
           </div>
         ))}
       </div>
@@ -133,7 +163,7 @@ export function RubricBuilder({
           size="sm"
           variant="outline"
           disabled={locked || pending}
-          onClick={() => setRows((current) => [...current, { name: "", maxPoints: 5 }])}
+          onClick={() => setRows((current) => [...current, { name: "", maxPoints: 5, description: "" }])}
         >
           Add category
         </Button>

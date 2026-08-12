@@ -317,8 +317,22 @@ model RubricCategory {
   name       String
   maxPoints  Int
   ordinal    Int
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+
+  /// What this category is asking for, and what the top of its scale means.
+  /// FR-9 renders it beside the score input, which is the only place a written
+  /// reviewer ever sees it — without it the "rubric" they score against is a
+  /// list of category names. See PRD decision 32.
+  ///
+  /// Nullable so an admin mid-setup is not blocked by it, and so a cycle that
+  /// briefs its reviewers elsewhere can leave it empty.
+  ///
+  /// Covered by FR-4's lock along with the rest of the rubric: once any Score
+  /// exists, changing this needs the reset that discards every score. Stated in
+  /// decision 32 rather than left to be discovered.
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   scores Score[]
 

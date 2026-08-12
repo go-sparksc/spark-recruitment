@@ -43,6 +43,10 @@ export async function saveRubric(
   const cleaned = categories.map((category, ordinal) => ({
     name: category.name.trim(),
     maxPoints: category.maxPoints,
+    // Empty and whitespace-only both store as null rather than "". A blank
+    // string would render as an empty paragraph under the category name and
+    // read as a description that failed to load.
+    description: (category.description ?? "").trim() || null,
     ordinal,
   }));
 
