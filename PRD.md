@@ -595,6 +595,20 @@ These need answers before or during the relevant build phase. They are the place
 
     **The description is inside FR-4's lock, and the consequence is stated rather than discovered:** once any `Score` exists, fixing a typo in a description requires the reset that discards every score. Rejected the alternative of a description-only write path that bypasses the lock — it is the right eventual answer, since prose orphans no `Score` row, but it is a second mutation route into a locked table and Phase 3 is not where that belongs.
 
+33. **Work typed before the page finishes hydrating. RESOLVED: adopt the DOM, submit through forms, and never leave a control silently dead.** Distinct from decision 26, which is about a save already in flight. This one loses work *before any save is attempted*, and the two need different fixes.
+
+    **The mechanism, because it is invisible in the code.** A server-rendered page is interactive-looking long before React attaches to it. In that window the markup is real, the fields accept keystrokes, and nothing is wired up. When React hydrates a **controlled** input it renders its own state — which is empty — over whatever is in the DOM, so anything typed in that window is silently discarded. No error, no failed request, nothing in a log: the characters were simply never React's to keep. Measured on this app at roughly **640 ms** on a warm route on a desktop; a cold route in development and a phone over Wi-Fi are both slower. A reviewer who opens an applicant and starts typing immediately is not an unusual user, they are the fast one.
+
+    **The same window has a second effect, on controls rather than fields.** A `<button type="button">` driven by `onClick` has no native behaviour, so a tap before hydration does nothing at all and says nothing. A `<form>` bound to a server action does not share this: React ships it with `method="POST"` and hidden `$ACTION_REF_*` fields, so it submits natively with no JavaScript. Whether a control works before hydration is therefore decided by how it is built, not by what it does.
+
+    **Resolution, three parts:**
+
+    - **Adopt whatever is already in the DOM on mount** rather than assuming a field starts empty, so keystrokes from the hydration window are picked up instead of overwritten.
+    - **Every control that mutates data is a form submit**, not an `onClick` handler, so it works before hydration rather than pretending to.
+    - **Any control that genuinely cannot work yet says so**, disabled until hydrated, because a button that ignores a tap in silence is worse than one that admits it is not ready.
+
+    Found while investigating why three separate buttons appeared to ignore clicks. Two of those turned out to be a test-automation artifact and one was this. The distinction matters: the automation problem was noise, and underneath it was a real way to lose a reviewer's work on the one screen whose requirement is that work is never lost.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
