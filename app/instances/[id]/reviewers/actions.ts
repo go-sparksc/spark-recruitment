@@ -27,6 +27,10 @@ const ROUND_LABELS: Record<Round, string> = {
   [Round.SECOND_ROUND]: "second round",
 };
 
+/// For validating a round that arrived as a form field rather than as a typed
+/// argument. A string from the browser is untrusted until it is one of these.
+const ROUND_VALUES: readonly string[] = Object.values(Round);
+
 function path(instanceId: string) {
   return `/instances/${instanceId}/reviewers`;
 }
@@ -438,11 +442,24 @@ export async function addRound(
 /// Hashed with the same argon2id path as every other secret here, and never
 /// returned or re-displayed — §8 puts access codes under the same rule as
 /// passwords. An admin who forgets it rotates it rather than reading it back.
+/// Takes (prevState, formData) so the card can drive it through `useActionState`,
+/// the same shape `resetInstancePassword` uses. That is not a style choice: React
+/// resets a form once its action completes, which clears the field a secret was
+/// typed into. Holding the value in `useState` instead left the old one on screen
+/// after a successful rotation, which reads as "the change did not take".
 export async function setRoundCode(
-  instanceId: string,
-  round: Round,
-  code: string,
+  _prev: ActionState,
+  formData: FormData,
 ): Promise<ActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const roundValue = String(formData.get("round") ?? "");
+  const code = String(formData.get("code") ?? "");
+
+  if (!ROUND_VALUES.includes(roundValue)) {
+    return { error: "Something went wrong. Reload the page and try again." };
+  }
+  const round = roundValue as Round;
+
   await requireInstance(instanceId, path(instanceId));
 
   // Reviewers type this on a phone keyboard from a Slack message. A code with a

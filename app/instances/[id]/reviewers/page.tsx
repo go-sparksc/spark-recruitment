@@ -105,7 +105,15 @@ export default async function ReviewersPage({
         ))}
       </nav>
 
-      <AccessCodeCard instanceId={id} round={round} hasCode={accessCode !== null} />
+      {/* key={round}: the round nav above is a client navigation, so without it
+          this component stays mounted across a round switch and carries the
+          previous round's success message and typed code onto the new one. */}
+      <AccessCodeCard
+        key={round}
+        instanceId={id}
+        round={round}
+        hasCode={accessCode !== null}
+      />
 
       <RosterControls instanceId={id} round={round} reviewers={rows} />
     </main>

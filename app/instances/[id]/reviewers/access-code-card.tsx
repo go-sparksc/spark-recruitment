@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 
 import { setRoundCode, type ActionState } from "./actions";
 import { Round } from "@/generated/prisma/enums";
@@ -16,6 +16,18 @@ const ROUND_LABELS: Record<Round, string> = {
 
 /// PRD decision 31. The one thing standing between an instance built through
 /// FR-2 and a reviewer dashboard nobody can reach.
+///
+/// An uncontrolled form driven by `useActionState`, matching `ResetPasswordForm`
+/// — the codebase's other "type a new secret" form. React resets a form once its
+/// action completes, so the field a code was typed into clears itself on success.
+/// An earlier version held the value in `useState` and cleared it by hand, and
+/// the old value stayed on screen after a successful rotation; a secret field
+/// still showing what you replaced reads as "the change did not take".
+///
+/// The parent renders this with `key={round}`, so switching rounds remounts it.
+/// Without that the round nav is a client navigation, this component stays
+/// mounted, and one round's success message and typed value carry over onto
+/// another round's card.
 export function AccessCodeCard({
   instanceId,
   round,
@@ -25,9 +37,7 @@ export function AccessCodeCard({
   round: Round;
   hasCode: boolean;
 }) {
-  const [code, setCode] = useState("");
-  const [state, setState] = useState<ActionState>({});
-  const [pending, startTransition] = useTransition();
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(setRoundCode, {});
   const [copied, setCopied] = useState(false);
 
   // The absolute link is assembled in the browser, because what an admin wants
@@ -47,14 +57,6 @@ export function AccessCodeCard({
   const path = `/r/${instanceId}?round=${round}`;
   const link = origin === "" ? path : `${origin}${path}`;
 
-  function submit() {
-    startTransition(async () => {
-      const result = await setRoundCode(instanceId, round, code);
-      setState(result);
-      if (!result.error) setCode("");
-    });
-  }
-
   return (
     <section className="space-y-3 rounded-md border p-4">
       <div className="space-y-1">
@@ -66,32 +68,39 @@ export function AccessCodeCard({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-2">
+      <form action={formAction} className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="instanceId" value={instanceId} />
+        <input type="hidden" name="round" value={round} />
+
         <div className="min-w-48 flex-1 space-y-1">
           <Label htmlFor="round-code" className="text-xs">
             {hasCode ? "New code" : "Code"}
           </Label>
           <Input
             id="round-code"
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
+            name="code"
+            required
+            minLength={6}
             placeholder="written-s26"
+            // Not type="password": an admin is choosing a value to paste into
+            // Slack, not entering an existing secret, and hiding it invites the
+            // typo that locks thirty reviewers out.
             autoComplete="off"
             spellCheck={false}
             disabled={pending}
           />
         </div>
-        <Button type="button" onClick={submit} disabled={pending || code === ""}>
+        <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : hasCode ? "Rotate" : "Set code"}
         </Button>
-      </div>
+      </form>
 
       {state.error ? (
         <p role="alert" className="text-destructive text-xs">
           {state.error}
         </p>
       ) : null}
-      {state.message ? <p className="text-xs">{state.message}</p> : null}
+      {state.message ? <p className="text-xs text-emerald-600">{state.message}</p> : null}
 
       <div className="space-y-1">
         <p className="text-muted-foreground text-xs">Share this link with the code:</p>
