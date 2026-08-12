@@ -539,6 +539,14 @@ These need answers before or during the relevant build phase. They are the place
 
 25. **How the roster's four name-entry paths stay consistent. RESOLVED: one shared gate.** A name reaches the database by four routes — a pasted line, the two free-text inputs the paste queue offers for a line it could not split, the manual-add form, and a rename in the grid — and only the first is a line at all. `lib/roster.ts` exports one `checkReviewerName` that all four call. It returns the values to store, which is what makes it impossible to validate one string and persist another; it normalizes without folding case, since folding belongs to the comparison key and a gate that lowercased would put the roster and FR-20's export of it in lower case; and it reports duplicate names rather than refusing them, because FR-6 allows two reviewers to share one.
 
+29. **A recovery path named in prose is not a recovery path. RESOLVED: linked from `/unlock`.** FR-5 puts instance password reset behind the app-level password *alone*, precisely so that an admin who has lost the instance password has a way back. `/unlock` had described that route since Phase 1 without linking it, and the settings page's only inbound link sat on the second-upload refusal inside `/mapping`, which renders behind `requireInstance` — so the sole route to the recovery was gated on the password being recovered. An admin who typoed a password at creation could read the sentence describing their way out and have no way to follow it.
+
+    The capability was never wrong: the settings page and both of its actions gate on `requireAdmin` alone, deliberately and with comments saying why. Only the navigation was missing.
+
+    The link lives on `/unlock` specifically and is unconditional. That page renders exactly when the session does **not** hold the instance — the redirect above it sends you on if it does — which is the state a locked-out admin is in; making it conditional on anything would reintroduce the same class of gap.
+
+    Recorded as a decision rather than left as a bug fix because the general form is worth having written down: **a capability that is correct and unreachable is indistinguishable, from the outside, from one that is missing.** Found by the owner's Phase 2 walkthrough, not by review, tests, or typecheck — none of which can see that a page has no inbound link.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
