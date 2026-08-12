@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { signOut } from "../actions";
@@ -5,16 +6,21 @@ import { AssignmentStatus } from "@/generated/prisma/enums";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
+import { completionOf } from "@/lib/review";
 
 export const metadata = { title: "Your applicants — Spark SC" };
 
-/// PLACEHOLDER, replaced in Slice 4 by the real FR-9 assigned list with
-/// completion state.
+/// FR-9 bullet 1: "Their assigned applicants as a list with completion state
+/// (0/4 scored, 4/4 scored)".
 ///
-/// It exists now because Slice 3's walkthrough has to land somewhere that proves
-/// the session works, and a sign-in that redirects to a 404 cannot be walked. It
-/// shows only what the session itself establishes: who the server thinks you
-/// are, which round, and how many applicants you hold.
+/// Both halves of that are here — the per-applicant state on every row, and the
+/// aggregate in the header. The aggregate is the easy one and the one a reviewer
+/// actually navigates by ("am I done yet"); the per-applicant state is what
+/// tells them which one to open next.
+///
+/// A returned applicant is simply absent, not shown greyed out as "returned".
+/// That falls out of the ACTIVE filter rather than needing a rule: the
+/// assignment stopped being this reviewer's the moment they handed it back.
 export default async function ReviewerListPage({
   params,
 }: {
@@ -23,41 +29,102 @@ export default async function ReviewerListPage({
   const { instanceId } = await params;
   const { session, reviewer } = await requireReviewerOnRoster(instanceId);
 
-  const instance = await prisma.instance.findUnique({
-    where: { id: instanceId },
-    select: { name: true },
-  });
+  const [instance, categories, assignments] = await Promise.all([
+    prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { name: true },
+    }),
+    prisma.rubricCategory.findMany({
+      where: { instanceId },
+      orderBy: { ordinal: "asc" },
+      select: { id: true },
+    }),
+    prisma.assignment.findMany({
+      where: {
+        instanceId,
+        round: session.rd,
+        reviewerId: reviewer.id,
+        status: AssignmentStatus.ACTIVE,
+      },
+      // Source order, which is the order the anonymous labels run in. A reviewer
+      // working top to bottom sees "Applicant 12, 47, 91" ascending rather than
+      // whatever order the generator happened to insert them in.
+      orderBy: { applicant: { sourceRowIndex: "asc" } },
+      select: {
+        id: true,
+        // §6: the applicant's name and email are not selected at all. Nothing
+        // on this page needs them, and a column that is never loaded cannot be
+        // rendered by mistake.
+        applicant: { select: { sourceRowIndex: true } },
+        scores: { select: { rubricCategoryId: true } },
+      },
+    }),
+  ]);
 
   if (!instance) notFound();
 
-  const assignedCount = await prisma.assignment.count({
-    where: {
-      instanceId,
-      round: session.rd,
-      reviewerId: reviewer.id,
-      status: AssignmentStatus.ACTIVE,
-    },
-  });
+  const categoryIds = categories.map((category) => category.id);
+
+  const rows = assignments.map((assignment) => ({
+    id: assignment.id,
+    label: `Applicant ${assignment.applicant.sourceRowIndex}`,
+    completion: completionOf(
+      categoryIds,
+      assignment.scores.map((score) => score.rubricCategoryId),
+    ),
+  }));
+
+  const completeCount = rows.filter((row) => row.completion.complete).length;
 
   return (
-    <main className="mx-auto w-full max-w-2xl space-y-6 px-6 py-10">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {reviewer.firstName} {reviewer.lastName}
-        </h1>
+    <main className="mx-auto w-full max-w-2xl px-4 py-6">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight">Your applicants</h1>
         <p className="text-muted-foreground text-sm">
-          {instance.name} · {session.rd === "WRITTEN" ? "Written round" : session.rd}
+          {reviewer.firstName} {reviewer.lastName} · {instance.name}
         </p>
-      </div>
+      </header>
 
-      <p className="rounded-md border p-4 text-sm">
-        You have <strong>{assignedCount}</strong> applicant{assignedCount === 1 ? "" : "s"} to
-        review. The list itself arrives in the next slice.
-      </p>
+      {rows.length === 0 ? (
+        <p className="text-muted-foreground mt-6 rounded-md border p-4 text-sm">
+          Nothing is assigned to you yet. An admin generates assignments once the roster is set —
+          check back, or ask in Slack.
+        </p>
+      ) : (
+        <>
+          <p className="mt-5 text-sm font-medium">
+            {completeCount} of {rows.length} complete
+          </p>
 
-      <form action={signOut}>
+          <ul className="mt-3 divide-y rounded-md border">
+            {rows.map((row) => (
+              <li key={row.id}>
+                <Link
+                  href={`/r/${instanceId}/a/${row.id}`}
+                  // min-h-14: a full-width row is the tap target, not the text
+                  // inside it. This is the control a reviewer hits fifteen times.
+                  className="hover:bg-muted flex min-h-14 items-center justify-between gap-3 px-4 py-3"
+                >
+                  <span className="font-medium">{row.label}</span>
+                  <span
+                    className={
+                      row.completion.complete
+                        ? "text-sm text-emerald-600"
+                        : "text-muted-foreground text-sm"
+                    }
+                  >
+                    {row.completion.scored}/{row.completion.total} categories
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <form action={signOut} className="mt-8">
         <input type="hidden" name="instanceId" value={instanceId} />
-        <Button type="submit" variant="outline" className="h-11">
+        <Button type="submit" variant="outline" size="sm">
           Sign out
         </Button>
       </form>

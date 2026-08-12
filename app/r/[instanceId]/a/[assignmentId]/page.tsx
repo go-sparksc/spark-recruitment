@@ -1,0 +1,204 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { ScoreCard, type RubricRow } from "./score-card";
+import { AssignmentStatus } from "@/generated/prisma/enums";
+import { prisma } from "@/lib/prisma";
+import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
+import { buildApplicantView, completionOf } from "@/lib/review";
+
+export const metadata = { title: "Review an applicant — Spark SC" };
+
+/// FR-9 bullet 2: "An applicant detail view: anonymous label (e.g. 'Applicant
+/// 47'), all RESPONSE fields, rubric always visible alongside. No name, per §6."
+///
+/// The §6 projection happens in `buildApplicantView`, which is tested against
+/// plain objects in lib/review.test.ts. A hidden field is absent from the object
+/// this page renders, so it is absent from the RSC payload too — §6 requires
+/// that a request for a hidden field return no data, not that the client hide it.
+export default async function ApplicantDetailPage({
+  params,
+}: {
+  params: Promise<{ instanceId: string; assignmentId: string }>;
+}) {
+  const { instanceId, assignmentId } = await params;
+  const { session, reviewer } = await requireReviewerOnRoster(instanceId);
+
+  // An assignment id in a URL is an untrusted reference until it has been shown
+  // to belong to this reviewer, in this round, and to still be theirs. Scoping
+  // the lookup rather than fetching and then checking means a mismatched id is a
+  // 404 by construction.
+  const assignment = await prisma.assignment.findFirst({
+    where: {
+      id: assignmentId,
+      instanceId,
+      round: session.rd,
+      reviewerId: reviewer.id,
+      status: AssignmentStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+      applicant: {
+        select: {
+          sourceRowIndex: true,
+          // Loaded because buildApplicantView takes them and decides. For a
+          // written reviewer it returns a shape that has no field for either,
+          // so neither can reach the payload — see the union in lib/review.ts.
+          displayName: true,
+          email: true,
+          data: true,
+        },
+      },
+      scores: { select: { rubricCategoryId: true, points: true } },
+    },
+  });
+
+  if (!assignment) notFound();
+
+  const [fields, groups, categories, siblings] = await Promise.all([
+    prisma.field.findMany({
+      where: { instanceId },
+      orderBy: { ordinal: "asc" },
+      select: {
+        id: true,
+        displayName: true,
+        ordinal: true,
+        category: true,
+        isIncluded: true,
+        groupId: true,
+        groupRole: true,
+        visibleToWrittenReviewer: true,
+        visibleToFirstRoundReviewer: true,
+      },
+    }),
+    prisma.fieldGroup.findMany({
+      where: { instanceId },
+      select: {
+        id: true,
+        displayName: true,
+        category: true,
+        isIncluded: true,
+        visibleToWrittenReviewer: true,
+        visibleToFirstRoundReviewer: true,
+      },
+    }),
+    prisma.rubricCategory.findMany({
+      where: { instanceId },
+      orderBy: { ordinal: "asc" },
+      select: { id: true, name: true, maxPoints: true, description: true },
+    }),
+    // Prev/next, so a reviewer working through fifteen never returns to the list.
+    prisma.assignment.findMany({
+      where: {
+        instanceId,
+        round: session.rd,
+        reviewerId: reviewer.id,
+        status: AssignmentStatus.ACTIVE,
+      },
+      orderBy: { applicant: { sourceRowIndex: "asc" } },
+      select: { id: true },
+    }),
+  ]);
+
+  const view = buildApplicantView(
+    {
+      sourceRowIndex: assignment.applicant.sourceRowIndex,
+      displayName: assignment.applicant.displayName,
+      email: assignment.applicant.email,
+      data: (assignment.applicant.data ?? {}) as Record<string, unknown>,
+    },
+    fields,
+    groups,
+    "WRITTEN_REVIEWER",
+  );
+
+  const pointsByCategory = new Map(
+    assignment.scores.map((score) => [score.rubricCategoryId, score.points]),
+  );
+
+  const rubric: RubricRow[] = categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    maxPoints: category.maxPoints,
+    description: category.description,
+    points: pointsByCategory.get(category.id) ?? null,
+  }));
+
+  const completion = completionOf(
+    categories.map((category) => category.id),
+    assignment.scores.map((score) => score.rubricCategoryId),
+  );
+
+  const position = siblings.findIndex((sibling) => sibling.id === assignment.id);
+  const previous = position > 0 ? siblings[position - 1] : null;
+  const next = position >= 0 && position < siblings.length - 1 ? siblings[position + 1] : null;
+
+  return (
+    // No large bottom padding: the score card is sticky rather than fixed, so it
+    // occupies its own space at the end of the flow and covers nothing once the
+    // page is scrolled to the bottom.
+    <main className="mx-auto w-full max-w-5xl px-4 pt-5 pb-10">
+      <div className="flex items-center justify-between gap-3">
+        <Link href={`/r/${instanceId}/list`} className="text-muted-foreground text-sm hover:underline">
+          ← All applicants
+        </Link>
+        {position >= 0 ? (
+          <span className="text-muted-foreground text-sm tabular-nums">
+            {position + 1} of {siblings.length}
+          </span>
+        ) : null}
+      </div>
+
+      <h1 className="mt-2 text-xl font-semibold tracking-tight">{view.label}</h1>
+
+      <div className="mt-5 lg:grid lg:grid-cols-[1fr_20rem] lg:items-start lg:gap-8">
+        <article className="space-y-6">
+          {view.fields.length === 0 ? (
+            <p className="text-muted-foreground rounded-md border p-4 text-sm">
+              This applicant has no written responses to show. That usually means the import
+              excluded them — tell an admin rather than scoring a blank profile.
+            </p>
+          ) : (
+            view.fields.map((field) => (
+              <section key={field.fieldId} className="space-y-1.5">
+                <h2 className="text-sm font-medium">
+                  {field.groupDisplayName ? `${field.groupDisplayName} — ` : ""}
+                  {field.displayName}
+                </h2>
+                {/* whitespace-pre-wrap: essay answers carry the paragraph breaks
+                    the applicant typed, and collapsing them turns five
+                    paragraphs into a wall. */}
+                <p className="text-[0.95rem] leading-relaxed whitespace-pre-wrap">{field.value}</p>
+              </section>
+            ))
+          )}
+
+          <nav className="flex items-center justify-between gap-3 pt-2">
+            {previous ? (
+              <Link
+                href={`/r/${instanceId}/a/${previous.id}`}
+                className="hover:bg-muted rounded-md border px-3 py-2 text-sm"
+              >
+                ← Previous
+              </Link>
+            ) : (
+              <span />
+            )}
+            {next ? (
+              <Link
+                href={`/r/${instanceId}/a/${next.id}`}
+                className="hover:bg-muted rounded-md border px-3 py-2 text-sm"
+              >
+                Next →
+              </Link>
+            ) : (
+              <span />
+            )}
+          </nav>
+        </article>
+
+        <ScoreCard rubric={rubric} scored={completion.scored} />
+      </div>
+    </main>
+  );
+}
