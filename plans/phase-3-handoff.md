@@ -22,7 +22,7 @@ The LAN address is printed as "Network" in the `next dev` banner — it was `192
 |---|---|
 | App-level password | Yours — only its argon2 hash is in `.env`. `npm run hash-secret -- "new password"` to replace. |
 | Instance password | `phase0-dev-password` (`prisma/seed.ts`) |
-| Round codes | `written-s26`, `firstround-s26`, `secondround-s26` |
+| Round codes | **`written-f26`**, `firstround-s26`, `secondround-s26` — the written code was rotated on 2026-08-13 while testing the access-code card. `written-s26` is dead. `prisma/seed.ts` still writes `written-s26`, so `npm run seed` resets it. |
 | Seed instance id | `seed_s26_demo` |
 
 ### Fixture state
@@ -71,12 +71,21 @@ Behind the app-level password, then the instance password.
 - **Claim from pool.** `/r/<id>/pool` does not exist and 404s. Clauses 6a–6c — Slice 6.
 - **First-round and second-round dashboards.** Sign-in offers those rounds and the seed has codes, but no rosters and no dashboards exist behind them. Phases 5 and 6.
 
-## Waiting to be verified
+## Waiting to be verified — **both closed 2026-08-13**
 
-Both are Slice 3 leftovers that could not be driven from the automation harness.
+Both were Slice 3 leftovers that could not be driven from the automation harness. Both passed in the
+structured testing pass; see **`plans/phase-3-test-pass.md`** for that pass in full.
 
-1. **Sign-in lockout.** Enter a wrong code eleven times. Attempts 1–10 should read "That code is not right for this round"; the 11th should name a wait in minutes. Tests the limiter wiring in `signInReviewer`.
-2. **A non-seeded instance.** Full FR-2 import with `prisma/fixtures/s26-shape.csv`, then a rubric, one reviewer, an access code, and sign in from a phone. This is decision 31's whole point and the one clause the seed hides — every instance built through FR-2 had an unreachable reviewer dashboard until Slice 3.
+1. ~~**Sign-in lockout.**~~ Passed — attempts 1–10 gave the code error, the 11th named a wait. It
+   also surfaced **F-04**: the name dropdown's visible label reverts after every failed submission,
+   though the submitted value survives.
+2. ~~**A non-seeded instance.**~~ Passed end to end, twice, including phone sign-in — decision 31
+   satisfied on an instance built through FR-2.
+
+**Read `plans/phase-3-test-pass.md` before starting Slice 5.** It carries nine findings, one of them
+**blocks-gate** (F-07: `…/reviewers` and `…/assignments` have no inbound link from anywhere in the
+app, so FR-6 and FR-7/FR-8 are reachable only by typing a URL). Agreed fix order: F-07, then F-08 and
+F-03 together, then F-02 and F-04. Four preferences are held for a separate PRD conversation.
 
 ## Known hazards
 
