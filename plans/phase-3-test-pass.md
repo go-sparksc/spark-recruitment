@@ -485,6 +485,9 @@ and it belongs with the triage, not with the discovery.
 
 **Severity:** defect — and the resolution needs a §10 decision before any code
 **FR / decision:** §6, FR-2's per-round visibility row, FR-3's finality, goal 3, decision 18
+**Resolved 2026-08-14 by PRD decision 34** (`1c32fe9`). The proposed resolution below was adopted as
+written — the three booleans become editable after commit, identity-bearing properties stay frozen —
+with audit under §8 and no mid-round restriction. Code is queued behind F-07.
 
 **Did:** tried to reach the Written/Include toggles on `/instances/seed_s26_demo/mapping` to run C.1
 and C.2.
@@ -720,6 +723,8 @@ redirects rather than rendering anything, so there is no surface to add the link
 
 **Severity:** defect
 **FR / decision:** FR-3 ("Commit is final"), FR-5's deletion gate, F-03
+**Resolved 2026-08-14 by PRD decision 35** (`1c32fe9`) — a two-step confirmation naming what becomes
+final, deliberately lighter than FR-5's typed-name gate. Code is queued behind F-07.
 
 **Did:** worked through the preview page on `cmsr3mynk00c9fclik46frgl9`, discarding two duplicate rows
 and correcting a padded email. The instance committed without the owner registering that it had.
@@ -816,8 +821,8 @@ into it triggers `MATCHES_EXISTING_REVIEWER` directly.
 | id | Severity | Where | What |
 |---|---|---|---|
 | **F-07** | **blocks-gate** | `…/reviewers`, `…/assignments` | Two whole FR surfaces have no inbound link from anywhere in the app |
-| F-03 | defect | `…/mapping` | Field visibility and inclusion become unreachable at commit; needs a §10 decision |
-| F-08 | defect | `…/preview` | Commit is one unguarded click, and it is irreversible twice over |
+| F-03 | defect | `…/mapping` | Field visibility and inclusion become unreachable at commit — **decision 34**, code queued |
+| F-08 | defect | `…/preview` | Commit is one unguarded click, and it is irreversible twice over — **decision 35**, code queued |
 | F-02 | defect | `…/reviewers` | The access-code placeholder is a real credential and reads as the live code |
 | F-04 | defect | `/r/<id>` | The name `<select>`'s label reverts after a failed sign-in; value survives |
 | F-01 | preference | `…/rubric` | One description per category, not one per point value |
@@ -828,6 +833,10 @@ into it triggers `MATCHES_EXISTING_REVIEWER` directly.
 **Three of these need a decision before any code**, and all three are recorded with the decision
 stated rather than assumed: F-03 (what FR-3's finality is meant to cover), F-01 (a §5 change to the
 rubric model), F-08 (which belongs with F-03, since both concern what commit is allowed to freeze).
+
+**Two of the three are now decided.** F-03 and F-08 were resolved together on 2026-08-14 as PRD
+decisions 34 and 35 (`1c32fe9`), before any code, per CLAUDE.md's PRD-leads-code rule. **F-01 remains
+open** and is still a PRD conversation rather than a fix.
 
 **F-04's scope was narrowed by testing rather than by argument.** It looked like data loss; two
 discriminating checks proved the submitted value is correct and only the rendered label reverts. The
