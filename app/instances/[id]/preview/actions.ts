@@ -82,7 +82,24 @@ export async function setRowEmail(
 }
 
 /// FR-3's commit. One transaction, and final.
-export async function commitImport(instanceId: string): Promise<ActionState> {
+///
+/// A form action rather than an onClick handler, per decision 35 and the third
+/// part of decision 33. An `onClick` control is inert before hydration and then
+/// fires instantly afterwards, which is the profile that produces "I do not
+/// think I clicked that" — and this is the click that creates every applicant
+/// and freezes what the columns mean. React ships a form bound to a server
+/// action with `method="POST"` and hidden `$ACTION_REF_*` fields, so this
+/// submits natively with no JavaScript at all.
+///
+/// The guard is decision 35's two-step: the confirmation panel on `?confirm=1`
+/// is what renders this form, so reaching it is a deliberate second step rather
+/// than one button among the preview's others.
+export async function commitImport(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+
   await openDraft(instanceId);
 
   const loaded = await loadPreview(instanceId);

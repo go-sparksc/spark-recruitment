@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 
 import { commitImport, setRowDiscarded, setRowEmail, type ActionState } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -68,41 +68,36 @@ export function RowControls({
   );
 }
 
-export function CommitButton({
+/// Decision 35's second step. The first step is a plain `<Link>` to `?confirm=1`
+/// on the page itself — it mutates nothing and is server-rendered, so it cannot
+/// be a dead tap in the hydration window — and this form is what that link
+/// reveals.
+///
+/// `useActionState` over an `onClick`, so errors render AND the form submits
+/// natively before React has hydrated. The DeleteInstanceForm shape, which is
+/// the other irreversible action in the product.
+export function CommitForm({
   instanceId,
-  canCommit,
   keptCount,
-  warningCount,
 }: {
   instanceId: string;
-  canCommit: boolean;
   keptCount: number;
-  warningCount: number;
 }) {
-  const { run, pending, error } = useAction();
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(commitImport, {});
 
   return (
-    <div className="space-y-2">
-      <Button
-        disabled={pending || !canCommit}
-        onClick={() => run(() => commitImport(instanceId))}
-      >
+    <form action={formAction} className="space-y-2">
+      <input type="hidden" name="instanceId" value={instanceId} />
+      <Button type="submit" disabled={pending}>
         {pending
           ? "Creating applicants…"
-          : `Commit — create ${keptCount} applicant${keptCount === 1 ? "" : "s"}`}
+          : `Yes — create ${keptCount} applicant${keptCount === 1 ? "" : "s"} and commit`}
       </Button>
-      <p className="text-muted-foreground text-xs">
-        {canCommit
-          ? warningCount > 0
-            ? "The warnings above do not block this, but they will be much harder to fix afterwards."
-            : "This is final. Correcting it afterwards means deleting the instance and importing again."
-          : "Resolve the problems above first."}
-      </p>
-      {error ? (
+      {state.error ? (
         <p role="alert" className="text-destructive text-sm">
-          {error}
+          {state.error}
         </p>
       ) : null}
-    </div>
+    </form>
   );
 }

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { loadPreview } from "./load";
-import { CommitButton, RowControls } from "./preview-controls";
+import { CommitForm, RowControls } from "./preview-controls";
 import { ImportCommitted } from "../import-committed";
 import { InstanceCrumbs } from "../instance-crumbs";
 import { buttonVariants } from "@/components/ui/button";
@@ -20,8 +20,15 @@ import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Preview import — Spark SC Recruitment" };
 
-export default async function PreviewPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PreviewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ confirm?: string }>;
+}) {
   const { id } = await params;
+  const { confirm } = await searchParams;
   await requireInstance(id, `/instances/${id}/preview`);
 
   const loaded = await loadPreview(id);
@@ -43,6 +50,12 @@ export default async function PreviewPage({ params }: { params: Promise<{ id: st
       </main>
     );
   }
+
+  // Step two of decision 35's guard, held in the URL rather than in client
+  // state so it survives with no JavaScript. Gated on canCommit as well, so a
+  // bookmarked or stale `?confirm=1` cannot present a confirmation for an import
+  // that a blocker has since made impossible.
+  const confirming = confirm === "1" && findings.canCommit;
 
   const duplicateRowIndexes = new Set(findings.duplicates.flatMap((d) => d.rowIndexes));
   const blankNames = new Set(findings.blankNameRowIndexes);
@@ -176,17 +189,88 @@ export default async function PreviewPage({ params }: { params: Promise<{ id: st
         </Card>
       )}
 
-      <Card className="mt-8">
+      {/* Decision 35's two-step guard. Both steps are server-rendered: step one
+          is a Link, step two is a form bound to a server action, so neither is
+          a dead tap before hydration and neither fires from a stray click on a
+          page whose whole purpose is reviewing and adjusting.
+
+          Deliberately lighter than FR-5's typed-name gate for deletion, which
+          is rare and destroys work that exists. This creates rather than
+          destroys, it is on the path every instance takes, and since decision
+          34 it no longer takes the visibility controls down with it. */}
+      <Card className={`mt-8 ${confirming ? "border-amber-500/60" : ""}`}>
         <CardHeader>
-          <CardTitle>Commit</CardTitle>
+          <CardTitle>{confirming ? "Commit this import?" : "Commit"}</CardTitle>
+          {confirming ? (
+            <CardDescription>There is no undo. Here is what changes.</CardDescription>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
-          <CommitButton
-            instanceId={id}
-            canCommit={findings.canCommit}
-            keptCount={findings.keptCount}
-            warningCount={findings.warnings.length}
-          />
+          {confirming ? (
+            <>
+              <ul className="space-y-1.5 text-sm">
+                <li>
+                  · <strong className="font-medium">{findings.keptCount}</strong> applicant
+                  {findings.keptCount === 1 ? "" : "s"} are created
+                  {findings.discardedCount > 0
+                    ? `, and ${findings.discardedCount} discarded row${
+                        findings.discardedCount === 1 ? "" : "s"
+                      } are not`
+                    : null}
+                  .
+                </li>
+                <li>
+                  · This instance will <strong className="font-medium">not accept another CSV</strong>.
+                  Importing a corrected file means deleting the instance and starting again, which
+                  removes every applicant, assignment and score with it.
+                </li>
+                <li>
+                  · Each column&apos;s <strong className="font-medium">meaning</strong> is fixed:
+                  its category, its grouping, its display name, and which column is the email and
+                  which the name.
+                </li>
+                <li className="text-muted-foreground">
+                  · Still yours to change afterwards: whether a column is included, and which rounds
+                  can see it. Those stay on the mapping table for the whole cycle.
+                </li>
+                {findings.warnings.length > 0 ? (
+                  <li className="text-amber-700 dark:text-amber-400">
+                    · {findings.warnings.length} warning
+                    {findings.warnings.length === 1 ? "" : "s"} above{" "}
+                    {findings.warnings.length === 1 ? "is" : "are"} unresolved. They do not block
+                    this, but they are much harder to fix afterwards.
+                  </li>
+                ) : null}
+              </ul>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <CommitForm instanceId={id} keptCount={findings.keptCount} />
+                <Link
+                  href={`/instances/${id}/preview`}
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  No, keep reviewing
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              {findings.canCommit ? (
+                <Link href={`/instances/${id}/preview?confirm=1`} className={buttonVariants()}>
+                  Commit — create {findings.keptCount} applicant
+                  {findings.keptCount === 1 ? "" : "s"}…
+                </Link>
+              ) : (
+                <p className="text-muted-foreground text-sm">Resolve the problems above first.</p>
+              )}
+              <p className="text-muted-foreground text-xs">
+                {findings.canCommit
+                  ? "You will see exactly what becomes final before anything is created."
+                  : null}
+              </p>
+            </>
+          )}
+
           <Link
             href={`/instances/${id}/mapping`}
             className={buttonVariants({ variant: "ghost", size: "sm" })}
