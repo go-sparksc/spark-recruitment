@@ -81,7 +81,20 @@ export function AccessCodeCard({
             name="code"
             required
             minLength={6}
-            placeholder="written-s26"
+            // States the constraint rather than showing an example value.
+            //
+            // This used to read `written-s26`, which is prisma/seed.ts's real
+            // written-round code. React clears this field when the action
+            // succeeds, so the placeholder became visible for the first time
+            // immediately below a green success message — grey text in a
+            // just-cleared field, at that moment, is indistinguishable from a
+            // value, and this one looked like the CORRECT value. An admin who
+            // trusted it would paste a dead code to thirty reviewers.
+            //
+            // Any example would have the same shape of problem, so there is no
+            // example. `minLength` is otherwise invisible until the browser
+            // rejects a short one, so the hint earns its place saying that.
+            placeholder="at least 6 characters"
             // Not type="password": an admin is choosing a value to paste into
             // Slack, not entering an existing secret, and hiding it invites the
             // typo that locks thirty reviewers out.
@@ -100,7 +113,20 @@ export function AccessCodeCard({
           {state.error}
         </p>
       ) : null}
-      {state.message ? <p className="text-xs text-emerald-600">{state.message}</p> : null}
+      {state.message ? (
+        <div className="space-y-1">
+          <p className="text-xs text-emerald-600">{state.message}</p>
+          {/* The success message is the exact moment the field goes empty, and an
+              empty secret field reads as "nothing was saved" unless something
+              says otherwise. The card's prose above already says a code cannot
+              be read back, but that is above the fold of the admin's attention
+              here — they are looking at the box they just typed into. */}
+          <p className="text-muted-foreground text-xs">
+            The box is empty because codes are never shown again, not because the change was lost.
+            Copy the code from wherever you composed it, or set a new one.
+          </p>
+        </div>
+      ) : null}
 
       <div className="space-y-1">
         <p className="text-muted-foreground text-xs">Share this link with the code:</p>

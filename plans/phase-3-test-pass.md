@@ -92,8 +92,9 @@ table making groups, so the case is cheap there and impossible here.
 - [x] Old code `written-s26` is refused after rotation
 - [x] The card states that reviewers already signed in keep their session
 
-**Section E is closed.** The only open item it leaves is documentation: the handoff's credential
-table still says `written-s26`.
+**Section E is closed.** The only open item it left was documentation — the handoff's credential
+table — and that was corrected in `16045d7`, which now reads `written-f26`. Note that
+`prisma/seed.ts:18` still writes `written-s26`, so `npm run seed` resets the code to the dead value.
 
 ### F. Non-seeded instance, end to end — decision 31's whole point
 
@@ -485,9 +486,11 @@ and it belongs with the triage, not with the discovery.
 
 **Severity:** defect — and the resolution needs a §10 decision before any code
 **FR / decision:** §6, FR-2's per-round visibility row, FR-3's finality, goal 3, decision 18
-**Resolved 2026-08-14 by PRD decision 34** (`1c32fe9`). The proposed resolution below was adopted as
-written — the three booleans become editable after commit, identity-bearing properties stay frozen —
-with audit under §8 and no mid-round restriction. Code is queued behind F-07.
+**Resolved 2026-08-14 by PRD decision 34** (`1c32fe9`), **fixed in `46b0ba8`.** The proposed
+resolution below was adopted as written — the three booleans become editable after commit,
+identity-bearing properties stay frozen — with audit under §8 and no mid-round restriction.
+`isMultiSelect` joined the frozen side during implementation: it decides §10.7's checked predicate
+and 1/n denominator, so it changes what a committed cohort's demographics mean.
 
 **Did:** tried to reach the Written/Include toggles on `/instances/seed_s26_demo/mapping` to run C.1
 and C.2.
@@ -677,6 +680,10 @@ the cleanup logic already exists.
 
 **Severity:** blocks-gate
 **FR / decision:** FR-6, FR-7, FR-8, decision 31, decision 29's general form, goal 4
+**Resolved 2026-08-14 by PRD decision 36** (`47f4a25`), **fixed in `d8c42ca`.** `/instances/[id]` is
+now an instance hub listing every surface in cycle order with its current state, and every instance
+page carries a crumb back to it. `/unlock` and `/settings` deliberately keep a plain `← Instances`,
+since both gate on less than `requireInstance` and a hub crumb would bounce a locked-out admin.
 
 **Did:** tried to reach the roster and assignment pages from the rubric page on a draft instance.
 
@@ -723,8 +730,9 @@ redirects rather than rendering anything, so there is no surface to add the link
 
 **Severity:** defect
 **FR / decision:** FR-3 ("Commit is final"), FR-5's deletion gate, F-03
-**Resolved 2026-08-14 by PRD decision 35** (`1c32fe9`) — a two-step confirmation naming what becomes
-final, deliberately lighter than FR-5's typed-name gate. Code is queued behind F-07.
+**Resolved 2026-08-14 by PRD decision 35** (`1c32fe9`), **fixed in `d109f20`** — a two-step
+confirmation naming what becomes final, deliberately lighter than FR-5's typed-name gate. Both steps
+are server-rendered and work with no JavaScript, per decision 33.
 
 **Did:** worked through the preview page on `cmsr3mynk00c9fclik46frgl9`, discarding two duplicate rows
 and correcting a padded email. The instance committed without the owner registering that it had.
@@ -820,9 +828,9 @@ into it triggers `MATCHES_EXISTING_REVIEWER` directly.
 
 | id | Severity | Where | What |
 |---|---|---|---|
-| **F-07** | **blocks-gate** | `…/reviewers`, `…/assignments` | Two whole FR surfaces have no inbound link from anywhere in the app |
-| F-03 | defect | `…/mapping` | Field visibility and inclusion become unreachable at commit — **decision 34**, code queued |
-| F-08 | defect | `…/preview` | Commit is one unguarded click, and it is irreversible twice over — **decision 35**, code queued |
+| **F-07** | **blocks-gate** | `…/reviewers`, `…/assignments` | Two whole FR surfaces have no inbound link from anywhere in the app — **decision 36**, fixed in `d8c42ca` |
+| F-03 | defect | `…/mapping` | Field visibility and inclusion become unreachable at commit — **decision 34**, fixed in `46b0ba8` |
+| F-08 | defect | `…/preview` | Commit is one unguarded click, and it is irreversible twice over — **decision 35**, fixed in `d109f20` |
 | F-02 | defect | `…/reviewers` | The access-code placeholder is a real credential and reads as the live code |
 | F-04 | defect | `/r/<id>` | The name `<select>`'s label reverts after a failed sign-in; value survives |
 | F-01 | preference | `…/rubric` | One description per category, not one per point value |
@@ -867,9 +875,10 @@ behaves correctly. What remains is a real usability point, logged as a preferenc
 
 ### Housekeeping this pass leaves behind
 
-1. **`plans/phase-3-handoff.md`'s credential table is wrong.** The written-round code on the seed
-   instance is now **`written-f26`**; `written-s26` was rotated away during section E and is dead.
-   A stale credential in the resume-point document will cost the next session real time.
+1. ~~**`plans/phase-3-handoff.md`'s credential table is wrong.**~~ **Done in `16045d7`.** The
+   written-round code on the seed instance is **`written-f26`**; `written-s26` was rotated away
+   during section E and is dead. What remains true, and is not a defect: `prisma/seed.ts:18` still
+   writes `written-s26`, so `npm run seed` puts the dead value back.
 2. **`S26 Gate Run` (`cmsmpjg2n000010libuyl08f5`) is still there**, an uncommitted draft from
    2026-08-10 holding 28 import rows and one unnamed 10-column proposal. It was left deliberately —
    it is the instance F.5c's warning check was run against, since it was already in exactly the
