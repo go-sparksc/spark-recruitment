@@ -23,6 +23,17 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
   const reviewerId = String(formData.get("reviewerId") ?? "");
   const code = String(formData.get("code") ?? "").trim();
 
+  // Order matters and is not arbitrary: the name is checked BEFORE the code.
+  //
+  // This is the second of the two guards that stop a nameless sign-in — the
+  // first is `required` on the <select>, which works before hydration. This one
+  // is the boundary, since a client guard is only ever a courtesy.
+  //
+  // Keeping the name first is also what makes the message right. Reverse them
+  // and a reviewer whose name did not reach the server is told their code is
+  // wrong, sending them to re-check a code that was fine. Verified in a browser
+  // by stripping `required` and submitting an empty id: the server answers
+  // "Pick your name from the list." and creates no session.
   if (instanceId === "") return { error: "Something went wrong. Reload the page and try again." };
   if (round === null) return { error: "Pick a round." };
   if (reviewerId === "") return { error: "Pick your name from the list." };
