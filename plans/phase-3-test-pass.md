@@ -560,6 +560,13 @@ instance. See the C.1/C.2 note below for how they were covered instead.
 **Severity:** defect
 **FR / decision:** FR-9's premise, decision 30, `plans/phase-3.md` Slice 3 verify step 4 —
 *"Wrong code → a clear failure, **the name selection preserved**, no stack trace"*
+**Fixed 2026-08-14 in `42feb19`**, after reproducing it in a browser as this entry asked. Two
+corrections to the account below. The guess that *"the `<select>` has no `selected` attribute on any
+option"* is backwards — the placeholder **does** carry it in server-rendered HTML, and that is
+exactly what React's post-action form reset snaps back to. And the conclusion that no data is lost
+is **right**: React captures the form data at submit time, before the reset, so every submission
+carried the correct id. The control case that settles the mechanism: reached by a client-side
+transition instead of a server render, React never sets the attribute, and the selection survives.
 
 **Did:** section D's lockout run — eleven wrong codes on `SECOND_ROUND`. The lockout itself behaved:
 attempts 1–10 gave the code error, the 11th named a wait.
@@ -831,8 +838,8 @@ into it triggers `MATCHES_EXISTING_REVIEWER` directly.
 | **F-07** | **blocks-gate** | `…/reviewers`, `…/assignments` | Two whole FR surfaces have no inbound link from anywhere in the app — **decision 36**, fixed in `d8c42ca` |
 | F-03 | defect | `…/mapping` | Field visibility and inclusion become unreachable at commit — **decision 34**, fixed in `46b0ba8` |
 | F-08 | defect | `…/preview` | Commit is one unguarded click, and it is irreversible twice over — **decision 35**, fixed in `d109f20` |
-| F-02 | defect | `…/reviewers` | The access-code placeholder is a real credential and reads as the live code |
-| F-04 | defect | `/r/<id>` | The name `<select>`'s label reverts after a failed sign-in; value survives |
+| F-02 | defect | `…/reviewers` | The access-code placeholder is a real credential and reads as the live code — fixed in `fab954b` |
+| F-04 | defect | `/r/<id>` | The name `<select>`'s label reverts after a failed sign-in; value survives — fixed in `42feb19` |
 | F-01 | preference | `…/rubric` | One description per category, not one per point value |
 | F-05 | preference | `…/mapping` | Creating a group is reachable only from a column's own dropdown |
 | F-06 | preference | `…/mapping` | No direct way to dissolve a group |
@@ -906,3 +913,9 @@ first, since two FR surfaces nobody can navigate to is the largest gap and block
 purpose; then F-08 and F-03 together, since they are the same question about commit; then F-02 and
 F-04, both of which mislead a user who is already recovering from an error. The four preferences are
 PRD conversations, not code.
+
+**The fix pass ran in that order and is complete for the five defects.** Decisions 34, 35 and 36
+landed in `PRD.md` first (`1c32fe9`, `47f4a25`), then F-07 (`d8c42ca`), F-03 (`46b0ba8`), F-08
+(`d109f20`), F-02 (`fab954b`) and F-04 (`42feb19`). **F-01, F-05, F-06 and F-09 remain open** and are
+still PRD conversations rather than fixes. Nothing here closes the Phase 3 gate — see the table
+above; gate steps 2, 3 and 4 still need Slices 5, 6 and 7.
