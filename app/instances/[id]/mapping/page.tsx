@@ -9,6 +9,7 @@ import {
   type GroupView,
 } from "./mapping-controls";
 import { ImportCommitted } from "../import-committed";
+import { InstanceCrumbs } from "../instance-crumbs";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -54,9 +55,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
     const applicantCount = await prisma.applicant.count({ where: { instanceId: id } });
     return (
       <main className="mx-auto w-full max-w-2xl px-6 py-16">
-        <Link href="/" className="text-muted-foreground text-sm hover:underline">
-          ← Instances
-        </Link>
+        <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
         <ImportCommitted
           instanceId={id}
           instanceName={instance.name}
@@ -127,9 +126,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-16">
-      <Link href="/" className="text-muted-foreground text-sm hover:underline">
-        ← Instances
-      </Link>
+      <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>

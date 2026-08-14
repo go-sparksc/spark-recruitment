@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { loadPreview } from "./load";
 import { CommitButton, RowControls } from "./preview-controls";
 import { ImportCommitted } from "../import-committed";
+import { InstanceCrumbs } from "../instance-crumbs";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,9 +33,7 @@ export default async function PreviewPage({ params }: { params: Promise<{ id: st
     const applicantCount = await prisma.applicant.count({ where: { instanceId: id } });
     return (
       <main className="mx-auto w-full max-w-2xl px-6 py-16">
-        <Link href="/" className="text-muted-foreground text-sm hover:underline">
-          ← Instances
-        </Link>
+        <InstanceCrumbs instanceId={id} instanceName={instance.name} />
         <ImportCommitted
           instanceId={id}
           instanceName={instance.name}
@@ -63,12 +62,10 @@ export default async function PreviewPage({ params }: { params: Promise<{ id: st
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-16">
-      <Link
-        href={`/instances/${id}/mapping`}
-        className="text-muted-foreground text-sm hover:underline"
-      >
-        ← Map columns
-      </Link>
+      {/* The step back to mapping is the button at the foot of this page, which
+          is the more findable of the two; the crumb here is the instance-level
+          route decision 36 asks every instance page to carry. */}
+      <InstanceCrumbs instanceId={id} instanceName={instance.name} />
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">{instance.name}</h1>
       <p className="text-muted-foreground mt-2 text-sm">

@@ -9,6 +9,7 @@ import {
   type ApplicantRow,
   type ReviewerOption,
 } from "./assignment-controls";
+import { InstanceCrumbs } from "../instance-crumbs";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -49,12 +50,10 @@ export default async function AssignmentsPage({
 
   const header = (
     <div className="space-y-1">
-      <Link href="/" className="text-muted-foreground text-sm hover:underline">
-        ← Instances
-      </Link>
+      <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
       <h1 className="text-2xl font-semibold">Assignments</h1>
       <p className="text-muted-foreground text-sm">
-        {instance.name} · written round
+        Written round
         {" · "}
         <Link href={`/instances/${id}/reviewers`} className="hover:underline">
           Reviewers

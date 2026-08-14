@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { RubricBuilder } from "./rubric-builder";
+import { InstanceCrumbs } from "../instance-crumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -28,9 +28,7 @@ export default async function RubricPage({ params }: { params: Promise<{ id: str
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-16">
-      <Link href="/" className="text-muted-foreground text-sm hover:underline">
-        ← Instances
-      </Link>
+      <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">{instance.name}</h1>
       <p className="text-muted-foreground mt-2 text-sm">Written round rubric</p>

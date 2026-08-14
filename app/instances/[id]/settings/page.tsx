@@ -30,6 +30,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
 
   return (
     <main className="mx-auto w-full max-w-xl px-6 py-16">
+      {/* `← Instances` only, deliberately — NOT InstanceCrumbs. This page gates
+          on requireAdmin alone so a locked-out admin can reach it, and the hub
+          gates on requireInstance, so a hub crumb here would bounce exactly the
+          person FR-5's recovery path exists for straight back to /unlock. */}
       <Link href="/" className="text-muted-foreground text-sm hover:underline">
         ← Instances
       </Link>

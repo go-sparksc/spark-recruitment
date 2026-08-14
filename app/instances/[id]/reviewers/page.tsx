@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AccessCodeCard } from "./access-code-card";
 import { RosterControls, type ReviewerRow } from "./roster-controls";
+import { InstanceCrumbs } from "../instance-crumbs";
 import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -70,11 +71,8 @@ export default async function ReviewersPage({
   return (
     <main className="mx-auto w-full max-w-4xl space-y-8 px-6 py-12">
       <div className="space-y-1">
-        <Link href="/" className="text-muted-foreground text-sm hover:underline">
-          ← Instances
-        </Link>
+        <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
         <h1 className="text-2xl font-semibold">Reviewers</h1>
-        <p className="text-muted-foreground text-sm">{instance.name}</p>
       </div>
 
       {instance._count.applicants === 0 ? (
