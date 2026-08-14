@@ -48,23 +48,19 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
 
   if (!instance) notFound();
 
-  // FR-3: an instance accepts exactly one CSV and commit is final, so the
-  // mapping is no longer editable. Rendered as a page state that explains
-  // itself, not a screen full of disabled controls.
-  if (instance.importCommittedAt !== null) {
-    const applicantCount = await prisma.applicant.count({ where: { instanceId: id } });
-    return (
-      <main className="mx-auto w-full max-w-2xl px-6 py-16">
-        <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
-        <ImportCommitted
-          instanceId={id}
-          instanceName={instance.name}
-          applicantCount={applicantCount}
-          committedAt={instance.importCommittedAt}
-        />
-      </main>
-    );
-  }
+  // Decision 34: commit freezes field IDENTITY, not presentation policy. This
+  // page used to return the ImportCommitted card and stop, which took the
+  // inclusion and per-round visibility controls down with the structural ones —
+  // so §6's "configurable" OTHER row had nowhere to be configured from the
+  // moment the CSV landed, weeks before any round ran.
+  //
+  // Now the card explains what is final and the table below it stays, with the
+  // identity controls disabled and the three booleans live.
+  const committedAt = instance.importCommittedAt;
+  const committed = committedAt !== null;
+  const applicantCount = committed
+    ? await prisma.applicant.count({ where: { instanceId: id } })
+    : 0;
 
   const proposals = ((instance.importProposals as { proposals?: GroupProposal[] } | null)
     ?.proposals ?? []) as GroupProposal[];
@@ -132,8 +128,11 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{instance.name}</h1>
           <p className="text-muted-foreground mt-2 text-sm">
-            {instance.fields.length} columns and {instance._count.importRows} applicants read from
-            the file. Nothing is created until you commit.
+            {committed
+              ? `${instance.fields.length} columns across ${applicantCount} applicant${
+                  applicantCount === 1 ? "" : "s"
+                }. What reviewers see is still set here.`
+              : `${instance.fields.length} columns and ${instance._count.importRows} applicants read from the file. Nothing is created until you commit.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -143,13 +142,24 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
           >
             Rubric
           </Link>
-          <Link href={`/instances/${id}/preview`} className={buttonVariants({ size: "sm" })}>
-            Preview and commit →
-          </Link>
+          {committed ? null : (
+            <Link href={`/instances/${id}/preview`} className={buttonVariants({ size: "sm" })}>
+              Preview and commit →
+            </Link>
+          )}
         </div>
       </div>
 
-      {outstanding.length > 0 ? (
+      {committedAt !== null ? (
+        <ImportCommitted
+          instanceId={id}
+          instanceName={instance.name}
+          applicantCount={applicantCount}
+          committedAt={committedAt}
+        />
+      ) : null}
+
+      {!committed && outstanding.length > 0 ? (
         <Card className="mt-8 border-amber-500/40">
           <CardHeader>
             <CardTitle className="text-base">Before you can commit</CardTitle>
@@ -164,7 +174,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
         </Card>
       ) : null}
 
-      {proposals.length > 0 ? (
+      {!committed && proposals.length > 0 ? (
         <Card className="mt-8">
           <CardHeader>
             <CardTitle>Detected groups</CardTitle>
@@ -196,6 +206,9 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
             <CardDescription>
               Category, inclusion and visibility are set here and apply to every member, so a group
               cannot end up half hidden and half visible.
+              {committed
+                ? " Category and grouping are fixed now that the import has committed; inclusion and the round toggles are not."
+                : null}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -205,6 +218,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
                 instanceId={instance.id}
                 group={group}
                 otherGroups={groupOptions.filter((g) => g.id !== group.id)}
+                frozen={committed}
               />
             ))}
           </CardContent>
@@ -215,8 +229,9 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
         <CardHeader>
           <CardTitle>Columns</CardTitle>
           <CardDescription>
-            Every column starts as Other and included. Categories are never guessed from header
-            text.
+            {committed
+              ? "Include and the per-round toggles decide what reviewers see, and stay editable for the life of the cycle. Display name, designation, grouping and category are fixed — each of them decides what the imported data means."
+              : "Every column starts as Other and included. Categories are never guessed from header text."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -251,6 +266,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
                       instanceId={instance.id}
                       column={column}
                       groups={groupOptions}
+                      frozen={committed}
                     />
                   </TableCell>
                 </TableRow>

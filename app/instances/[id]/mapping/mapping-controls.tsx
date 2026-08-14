@@ -8,6 +8,8 @@ import {
   dismissProposal,
   mergeGroups,
   nameProposal,
+  setFieldRoundSettings,
+  setGroupRoundSettings,
   setPromotedRole,
   splitGroup,
   updateField,
@@ -47,6 +49,12 @@ function Error({ message }: { message: string | null }) {
     </p>
   );
 }
+
+/// Decision 34: after commit, identity is frozen and presentation policy is not.
+/// Every control this disables says so rather than sitting greyed out with no
+/// account of itself — the same argument import-committed.tsx makes for being a
+/// page state rather than a disabled button.
+const FROZEN_NOTE = "fixed at commit — it decides what committed data means";
 
 // ---------------------------------------------------------------------------
 
@@ -132,10 +140,15 @@ export function GroupPanel({
   instanceId,
   group,
   otherGroups,
+  frozen = false,
 }: {
   instanceId: string;
   group: GroupView;
   otherGroups: { id: string; displayName: string }[];
+  /// True once the import has committed. Freezes identity — name, category,
+  /// multi-select, split and merge — and leaves inclusion and the per-round
+  /// toggles live. Decision 34.
+  frozen?: boolean;
 }) {
   const [name, setName] = useState(group.displayName);
   const [splitting, setSplitting] = useState(false);
@@ -152,6 +165,7 @@ export function GroupPanel({
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== group.displayName && run(() => updateGroup(instanceId, group.id, { displayName: name }))}
+          disabled={pending || frozen}
           className="h-8 max-w-xs font-medium"
           aria-label="Group name"
         />
@@ -169,7 +183,8 @@ export function GroupPanel({
           <select
             className={SELECT}
             value={group.category}
-            disabled={pending}
+            disabled={pending || frozen}
+            title={frozen ? `Category is ${FROZEN_NOTE}` : undefined}
             onChange={(e) =>
               run(() => updateGroup(instanceId, group.id, { category: e.target.value as FieldCategory }))
             }
@@ -180,12 +195,16 @@ export function GroupPanel({
           </select>
         </label>
 
+        {/* Inclusion and the two round toggles below stay live after commit —
+            they key nothing and orphan nothing. Decision 34. */}
         <label className="flex items-center gap-1.5 text-xs">
           <input
             type="checkbox"
             checked={group.isIncluded}
             disabled={pending}
-            onChange={(e) => run(() => updateGroup(instanceId, group.id, { isIncluded: e.target.checked }))}
+            onChange={(e) =>
+              run(() => setGroupRoundSettings(instanceId, group.id, { isIncluded: e.target.checked }))
+            }
           />
           Include
         </label>
@@ -194,7 +213,8 @@ export function GroupPanel({
           <input
             type="checkbox"
             checked={group.isMultiSelect}
-            disabled={pending}
+            disabled={pending || frozen}
+            title={frozen ? `Multi-select is ${FROZEN_NOTE}` : undefined}
             onChange={(e) => run(() => updateGroup(instanceId, group.id, { isMultiSelect: e.target.checked }))}
           />
           Multi-select
@@ -210,7 +230,11 @@ export function GroupPanel({
                 checked={group.visibleToWrittenReviewer ?? false}
                 disabled={pending || !group.isIncluded}
                 onChange={(e) =>
-                  run(() => updateGroup(instanceId, group.id, { visibleToWrittenReviewer: e.target.checked }))
+                  run(() =>
+                    setGroupRoundSettings(instanceId, group.id, {
+                      visibleToWrittenReviewer: e.target.checked,
+                    }),
+                  )
                 }
               />
               Written reviewers
@@ -222,7 +246,9 @@ export function GroupPanel({
                 disabled={pending || !group.isIncluded}
                 onChange={(e) =>
                   run(() =>
-                    updateGroup(instanceId, group.id, { visibleToFirstRoundReviewer: e.target.checked }),
+                    setGroupRoundSettings(instanceId, group.id, {
+                      visibleToFirstRoundReviewer: e.target.checked,
+                    }),
                   )
                 }
               />
@@ -245,6 +271,15 @@ export function GroupPanel({
         </p>
       ) : null}
 
+      {/* Split and merge change which group a column belongs to, and the group's
+          values are what a member resolves through — so they are identity.
+          Hidden rather than disabled once frozen: a group with no structural
+          edits left is better read as settled than as broken. */}
+      {frozen ? (
+        <p className="text-muted-foreground mt-4 text-xs">
+          Grouping and category are {FROZEN_NOTE}. Inclusion and the round toggles above are not.
+        </p>
+      ) : (
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => setSplitting((s) => !s)}>
           {splitting ? "Cancel split" : "Split"}
@@ -271,8 +306,9 @@ export function GroupPanel({
           </label>
         ) : null}
       </div>
+      )}
 
-      {splitting ? (
+      {splitting && !frozen ? (
         <div className="bg-muted/40 mt-3 rounded-md p-3">
           <p className="text-xs font-medium">Move these columns to a new group</p>
           <div className="mt-2 space-y-1">
@@ -354,10 +390,15 @@ export function ColumnControls({
   instanceId,
   column,
   groups,
+  frozen = false,
 }: {
   instanceId: string;
   column: ColumnView;
   groups: { id: string; displayName: string }[];
+  /// True once the import has committed. Freezes display name, designation,
+  /// grouping and category; leaves Include and the round toggles live.
+  /// Decision 34.
+  frozen?: boolean;
 }) {
   const [displayName, setDisplayName] = useState(column.displayName);
   const [newGroupName, setNewGroupName] = useState("");
@@ -377,6 +418,7 @@ export function ColumnControls({
             displayName !== column.displayName &&
             run(() => updateField(instanceId, column.id, { displayName }))
           }
+          disabled={pending || frozen}
           className="h-8 w-56"
           aria-label={`Display name for column ${column.ordinal + 1}`}
         />
@@ -386,7 +428,8 @@ export function ColumnControls({
         <select
           className={SELECT}
           value={column.promotedRole ?? ""}
-          disabled={pending || grouped}
+          disabled={pending || grouped || frozen}
+          title={frozen ? `The designation is ${FROZEN_NOTE}` : undefined}
           aria-label="Designation"
           onChange={(e) =>
             run(() =>
@@ -406,7 +449,8 @@ export function ColumnControls({
         <select
           className={SELECT}
           value={column.groupId ?? ""}
-          disabled={pending || promoted}
+          disabled={pending || promoted || frozen}
+          title={frozen ? `Grouping is ${FROZEN_NOTE}` : undefined}
           aria-label="Group"
           onChange={(e) => {
             const value = e.target.value;
@@ -437,7 +481,8 @@ export function ColumnControls({
           <select
             className={SELECT}
             value={column.groupRole ?? FieldGroupRole.OPTION}
-            disabled={pending}
+            disabled={pending || frozen}
+            title={frozen ? `The role in the group is ${FROZEN_NOTE}` : undefined}
             aria-label="Role in group"
             onChange={(e) =>
               run(() =>
@@ -496,7 +541,8 @@ export function ColumnControls({
         <select
           className={SELECT}
           value={column.effectiveCategory}
-          disabled={pending || grouped}
+          disabled={pending || grouped || frozen}
+          title={frozen ? `Category is ${FROZEN_NOTE}` : undefined}
           aria-label="Category"
           onChange={(e) =>
             run(() => updateField(instanceId, column.id, { category: e.target.value as FieldCategory }))
@@ -507,12 +553,17 @@ export function ColumnControls({
           <option value={FieldCategory.OTHER}>Other</option>
         </select>
 
+        {/* Include and the two round toggles below survive commit — decision 34.
+            Their existing gating is unchanged: a grouped column defers to its
+            group, and a promoted one cannot be excluded at all (FR-2). */}
         <label className="flex items-center gap-1.5 text-xs">
           <input
             type="checkbox"
             checked={column.effectiveIncluded}
             disabled={pending || grouped || promoted}
-            onChange={(e) => run(() => updateField(instanceId, column.id, { isIncluded: e.target.checked }))}
+            onChange={(e) =>
+              run(() => setFieldRoundSettings(instanceId, column.id, { isIncluded: e.target.checked }))
+            }
           />
           Include
         </label>
@@ -526,7 +577,9 @@ export function ColumnControls({
                 disabled={pending || !column.effectiveIncluded}
                 onChange={(e) =>
                   run(() =>
-                    updateField(instanceId, column.id, { visibleToWrittenReviewer: e.target.checked }),
+                    setFieldRoundSettings(instanceId, column.id, {
+                      visibleToWrittenReviewer: e.target.checked,
+                    }),
                   )
                 }
               />
@@ -539,7 +592,7 @@ export function ColumnControls({
                 disabled={pending || !column.effectiveIncluded}
                 onChange={(e) =>
                   run(() =>
-                    updateField(instanceId, column.id, {
+                    setFieldRoundSettings(instanceId, column.id, {
                       visibleToFirstRoundReviewer: e.target.checked,
                     }),
                   )

@@ -115,7 +115,11 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
           : [
               plural(counts.fields, "column"),
               counts.fieldGroups > 0 ? plural(counts.fieldGroups, "group") : null,
-              committed ? "committed" : `${plural(counts.importRows, "row")} staged`,
+              // Not "committed" alone. Decision 34 keeps inclusion and the
+              // per-round toggles editable here for the whole cycle, and a row
+              // that says only "committed" describes the surface as more frozen
+              // than it is — which is the reading that made F-03 invisible.
+              committed ? "visibility still editable" : `${plural(counts.importRows, "row")} staged`,
             ]
               .filter((part) => part !== null)
               .join(" · "),
