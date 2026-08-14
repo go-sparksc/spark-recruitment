@@ -280,6 +280,8 @@ Names are hidden from written reviewers for the same reason (open decision 4). W
 
 **FR-1 Dashboard.** Landing page lists existing instances by name with created date and stage. Also offers "New instance from CSV."
 
+Opening an instance lands on that instance's hub, which lists every surface it has in the order a cycle uses them — columns, rubric, reviewers, assignments, settings — each carrying the state it is actually in rather than a bare link. Every instance page links back to the hub as well as to this list. See decision 36.
+
 **FR-2 CSV import.** Accept the applicant CSV. Parse headers. Show a mapping table with one row per column:
 
 - Detected header (read-only)
@@ -634,6 +636,16 @@ These need answers before or during the relevant build phase. They are the place
     Found the way these things are found here: the owner committed a test instance during the Phase 3 testing pass without registering that they had, on their own tool, while deliberately testing it. Two properties of the control made that easy and both are worth recording. It sat among other buttons on a page whose entire purpose is reviewing and adjusting, so nothing about it read as terminal. And as an `onClick` handler rather than a form submit it is inert before hydration and then fires instantly afterwards — decision 33's profile, which is exactly what produces "I do not think I clicked that".
 
     **The resolution is a confirmation step, not FR-5's typed-name gate.** Following the primary control renders a panel stating what is about to become final — the applicant count, the one-CSV rule, and the column properties decision 34 leaves frozen — and the commit is a separate submit inside that panel. Lighter than deletion's gate on purpose: deletion is rare and destroys work that exists, while commit is on the path every instance takes and creates rather than destroys, and decision 34 removes the half of its cost that was the mapping surface. Both steps work before hydration, per decision 33.
+
+36. **How an admin reaches an instance's surfaces. RESOLVED: an instance hub at `/instances/[id]`.** FR-1 described the instance *list* and nothing described what opening an instance lands on, so `/instances/[id]` shipped as an unconditional redirect to `/mapping`, with a comment saying an instance has no landing page of its own yet. The consequence was that **`/instances/[id]/reviewers` and `/instances/[id]/assignments` had no inbound link from anywhere in the application.** `/assignments` links to `/reviewers`; nothing links to either. The only way in was typing the URL, which is also why the gap survived a full testing pass — the pass reached both pages because its own instructions supplied the URLs.
+
+    This is decision 29's general form at a larger scale — *"a capability that is correct and unreachable is indistinguishable, from the outside, from one that is missing"* — and the scale is what makes it worse than the original. There it was one link to one recovery page. Here it is FR-6's entire roster surface and FR-7/FR-8's entire assignment surface, all built, all working, none findable. It also defeated decision 31: the round access-code card lives on `/reviewers` precisely so the Phase 3 gate could be run on a non-seeded instance, and an admin cannot set a code without first reaching a page nothing links to. And it defeats goal 4, since an E-Board working from documentation alone cannot navigate to two of the surfaces a written round requires.
+
+    **The resolution is a hub, not a nav bar.** `/instances/[id]` renders every surface the instance has, in the order a cycle uses them, each row carrying state read from the database rather than a bare link: how many columns and whether the import has committed, how many rubric categories and whether the lock has engaged, how many reviewers and whether the round's access code is set, how many assignments and how many applicants are short one. A nav bar would make every surface reachable in one tap and would still never say where the cycle had got to. Goal 4 wants a new E-Board to run a cycle from documentation alone, and a hub stating the running order and the current position is the nearest thing to that documentation living inside the product.
+
+    The cost is one extra hop between sibling surfaces, since leaving the rubric for the roster goes via the hub. Accepted: CLAUDE.md's tap budget is a property of the reviewer dashboard — thirty people, once, on a phone — not of an admin screen used by two to six people working through a cycle over weeks. If it bites in practice the answer is to add a nav bar alongside the hub, not to replace it.
+
+    Every instance page keeps its `← Instances` link to FR-1's list and gains the instance name as a second crumb pointing at the hub, so the hub is reachable from the surfaces it links to rather than only from the list.
 
 ## 11. Out of scope for v1, worth noting for v2
 
