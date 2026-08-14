@@ -1,6 +1,7 @@
-# Phase 3 handoff — end of Slice 4
+# Phase 3 handoff — end of Slice 4, plus the fix pass
 
-**As of `6eab63b`, 2026-08-11.** Slices 0–4 are committed and pushed. Slices 5–8 are not built.
+**As of `ab79803`, 2026-08-14.** Slices 0–4 are committed, and the testing pass's five defects are
+fixed. Slices 5–8 are not built. **Next session starts at Slice 5.**
 
 This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually exists, what does not, and what is waiting to be verified.
 
@@ -53,8 +54,9 @@ Behind the app-level password, then the instance password.
 |---|---|
 | `/` | Instance list |
 | `/instances/new` | FR-2 CSV import |
-| `…/mapping` | Field categories, inclusion, OTHER per-round visibility |
-| `…/preview` | FR-3 duplicates, blanks, commit |
+| `/instances/<id>` | **Instance hub** — every surface in cycle order with its current state (decision 36). Was an unconditional redirect to `…/mapping` until `d8c42ca` |
+| `…/mapping` | Field categories, inclusion, OTHER per-round visibility. **Still reachable after commit** — identity is frozen, the three booleans are not (decision 34) |
+| `…/preview` | FR-3 duplicates, blanks, **two-step commit** (decision 35) |
 | `…/rubric` | FR-4 builder — name, max points, **description** (400 chars) |
 | `…/reviewers` | FR-6 roster, paste, removal guard, **access-code card** |
 | `…/assignments` | FR-7 precheck/generate, FR-8 assign/unassign/swap |
@@ -78,20 +80,40 @@ structured testing pass; see **`plans/phase-3-test-pass.md`** for that pass in f
 
 1. ~~**Sign-in lockout.**~~ Passed — attempts 1–10 gave the code error, the 11th named a wait. It
    also surfaced **F-04**: the name dropdown's visible label reverts after every failed submission,
-   though the submitted value survives.
+   though the submitted value survives. Diagnosed and fixed on 2026-08-14 in `42feb19`.
 2. ~~**A non-seeded instance.**~~ Passed end to end, twice, including phone sign-in — decision 31
    satisfied on an instance built through FR-2.
 
-**Read `plans/phase-3-test-pass.md` before starting Slice 5.** It carries nine findings, one of them
-**blocks-gate** (F-07: `…/reviewers` and `…/assignments` have no inbound link from anywhere in the
-app, so FR-6 and FR-7/FR-8 are reachable only by typing a URL). Agreed fix order: F-07, then F-08 and
-F-03 together, then F-02 and F-04. Four preferences are held for a separate PRD conversation.
+## The fix pass — **complete for all five defects, 2026-08-14**
+
+`plans/phase-3-test-pass.md` carried nine findings. The five defects are fixed and the PRD decisions
+that had to precede three of them landed first, per CLAUDE.md's PRD-leads-code rule.
+
+| Finding | Severity | Decision | Fix |
+|---|---|---|---|
+| F-07 — `…/reviewers` and `…/assignments` had no inbound link | blocks-gate | 36 | `d8c42ca` |
+| F-03 — field visibility unreachable after commit | defect | 34 | `46b0ba8` |
+| F-08 — commit was one unguarded click | defect | 35 | `d109f20` |
+| F-02 — access-code placeholder was a real credential | defect | — | `fab954b` |
+| F-04 — sign-in name reverted after a failed code | defect | — | `42feb19` |
+
+**Still open, and deliberately not code:** F-01 (per-point rubric descriptions, a §5 change), F-05 and
+F-06 (group creation and dissolution affordances), F-09 (within-paste duplicate resolution). All four
+are `preference` — the screen does what the requirement says and the owner wants it done differently
+— so each is a PRD conversation first. Read the test pass's own note on why that distinction matters
+before picking one up.
+
+**Nothing in the fix pass closes the Phase 3 gate.** Only step 1 (the RSC payload check) was ever
+reachable; steps 2, 3 and 4 need Slices 5, 6 and 7. `PRD.md`'s status line is correctly still
+`v1.5, Phase 0-2 complete, Phase 3 next`.
 
 ## Known hazards
 
 - **Pre-hydration taps do nothing.** `<button type="button">` with `onClick` has no native behaviour, and hydration took ~640 ms on a warm route on desktop. `Generate assignments` is the one that bites in practice — tap it again. PRD decision 33; Slice 5 converts mutating controls to form submits.
 - **`position: fixed` with `bottom: 0` is unusable on mobile Chrome.** It anchors to the layout viewport and renders below the visible area while the URL bar is showing. The score card uses `sticky` for this reason; do not "simplify" it back.
-- **Automation cannot reliably drive a native `<select>` or a submit button.** Verify reviewer flows over HTTP with a minted session cookie, or by hand.
+- **Clicking a native `<select>` from automation is unreliable — driving it from JavaScript is not.** Set the value through the native property setter and dispatch a bubbling `change`, and React's state receives it like a real selection; submit with `form.requestSubmit(button)`. Verified in Chrome on 2026-08-14 while diagnosing F-04, including reading the component's own hook state off the React fiber to confirm the selection had landed. That is what made a DOM-level diagnosis possible where reading server responses could not have reached it.
+- **A server response cannot see a client-side rendering bug.** F-04 was invisible to every HTTP-level check in the testing pass, because the divergence was between React's state and the DOM after hydration. If a finding is about what a control *shows*, it has to be reproduced in a browser.
+- **Server actions can be driven over HTTP, but the two kinds differ.** Plain-argument actions take a `Next-Action: <id>` header with a JSON array body, and the ids are in the page's client chunk (grep it for the exported name). Actions bound through `useActionState` reject that shape with `Connection closed` — replay the form's own hidden `$ACTION_REF_*` / `$ACTION_KEY` fields as multipart instead, with no `Next-Action` header, which is also exactly how the no-JavaScript path is tested.
 
 ## Commits in this phase
 
@@ -107,6 +129,22 @@ cb55512  Slice 3 follow-up — access-code card staleness
 c39d8d9  PRD decision 33 — pre-hydration data loss
 fbdb17a  Slice 4 — assigned list and applicant detail
 6eab63b  CLAUDE.md — restart next dev after prisma generate
+a6ecc39  Phase 3 handoff — what exists at the end of Slice 4
+16045d7  Phase 3 testing pass — nine findings, one blocking
 ```
 
-Next: Slice 5, carrying decision 33's three mitigations — adopt DOM values on mount, mutating controls as form submits, disabled rather than silently inert.
+Then the fix pass, 2026-08-14 — PRD decisions leading their code in every case:
+
+```
+1c32fe9  PRD decisions 34-35 — what commit may freeze, and its guard
+ccb61a8  Test pass — point F-03 and F-08 at their decisions
+47f4a25  PRD decision 36 — an instance hub
+d8c42ca  F-07 — the instance hub                        (blocks-gate)
+46b0ba8  F-03 — visibility survives the commit
+d109f20  F-08 — two-step guard on the commit
+fab954b  F-02 — access-code placeholder + doc catch-up
+42feb19  F-04 — sign-in name no longer reverts
+ab79803  Test pass — record F-02/F-04 fixed, close the record
+```
+
+Next: Slice 5, carrying decision 33's three mitigations — adopt DOM values on mount, mutating controls as form submits, disabled rather than silently inert. Note that F-04's fix is a fourth instance of the same family, and worth reading first: `app/r/[instanceId]/sign-in-form.tsx` documents why controlled state alone does not survive React's post-action form reset on a `<select>`, which is the same reset Slice 5's score inputs will meet.
