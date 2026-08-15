@@ -104,12 +104,27 @@ export function useAutosave({
             // thing to the queue: it did not land, so keep the mirror and retry.
             // The distinction matters to nobody here — a dropped connection
             // rejects, a refused value returns.
+            // `attempt` is carried back so the queue can tell this reply from
+            // one belonging to a request it has already given up on. A save
+            // issued as the radio came back can answer minutes later, long
+            // after a retry has replaced it, and believing it would report
+            // "Saved" for a value that is no longer current.
             void sendRef.current(effect.key, effect.value)
               .then((result) => {
-                dispatchRef.current?.({ type: "settled", key: effect.key, ok: result.ok });
+                dispatchRef.current?.({
+                  type: "settled",
+                  key: effect.key,
+                  ok: result.ok,
+                  attempt: effect.attempt,
+                });
               })
               .catch(() => {
-                dispatchRef.current?.({ type: "settled", key: effect.key, ok: false });
+                dispatchRef.current?.({
+                  type: "settled",
+                  key: effect.key,
+                  ok: false,
+                  attempt: effect.attempt,
+                });
               });
             return;
           }

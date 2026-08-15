@@ -7,6 +7,7 @@ import {
   reduce,
   statusOf,
   withInitial,
+  type DraftValue,
   type Effect,
   type QueueEvent,
   type QueueState,
@@ -36,8 +37,14 @@ function drive(
   return { state, effects };
 }
 
-const saves = (effects: readonly Effect[]) => effects.filter((e) => e.type === "save");
-const edit = (value: string, key = NOTE): QueueEvent => ({ type: "edit", key, value });
+type SaveEffect = Extract<Effect, { type: "save" }>;
+
+/// A type predicate rather than a bare filter, so a test can read `.attempt` off
+/// the result without casting.
+const saves = (effects: readonly Effect[]): SaveEffect[] =>
+  effects.filter((e): e is SaveEffect => e.type === "save");
+
+const edit = (value: DraftValue, key = NOTE): QueueEvent => ({ type: "edit", key, value });
 
 // ---------------------------------------------------------------------------
 // Debounce and coalescing — walkthrough step 6
@@ -51,7 +58,9 @@ describe("the debounce", () => {
       [{ type: "tick" }, 600],
     ]);
 
-    expect(saves(effects)).toEqual([{ type: "save", key: NOTE, value: "a note" }]);
+    expect(saves(effects)).toEqual([
+      { type: "save", key: NOTE, value: "a note", attempt: 1 },
+    ]);
   });
 
   it("collapses two edits inside the window into one save carrying the second", () => {
@@ -65,7 +74,7 @@ describe("the debounce", () => {
       [{ type: "tick" }, 800],
     ]);
 
-    expect(saves(effects)).toEqual([{ type: "save", key: NOTE, value: "the" }]);
+    expect(saves(effects)).toEqual([{ type: "save", key: NOTE, value: "the", attempt: 1 }]);
   });
 
   it("mirrors every edit, including the ones coalescing discards", () => {
@@ -116,8 +125,8 @@ describe("in-flight coalescing", () => {
     ]);
 
     expect(saves(effects)).toEqual([
-      { type: "save", key: NOTE, value: "first" },
-      { type: "save", key: NOTE, value: "second" },
+      { type: "save", key: NOTE, value: "first", attempt: 1 },
+      { type: "save", key: NOTE, value: "second", attempt: 2 },
     ]);
   });
 
@@ -207,11 +216,120 @@ describe("retry", () => {
     expect(nextDueAt(state)).toBe(1650);
 
     const online = reduce(state, { type: "online" }, 700);
-    expect(saves(online.effects)).toEqual([{ type: "save", key: NOTE, value: "a" }]);
+    expect(saves(online.effects)).toEqual([
+      { type: "save", key: NOTE, value: "a", attempt: 2 },
+    ]);
 
     // And the next failure starts the backoff over at 1 s rather than at 2 s.
     const failed = reduce(online.state, { type: "settled", key: NOTE, ok: false }, 750);
     expect(nextDueAt(failed.state)).toBe(1750);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The offline → online transition
+//
+// Every case here is a regression test for one defect, found on a real phone in
+// the Slice 5 walkthrough: airplane mode on, score tapped, "Unsaved — will
+// retry" shown correctly; airplane mode off, and the card then sat on "Saving…"
+// indefinitely and never recovered.
+//
+// The cause was that an in-flight save had no deadline. A fetch issued while the
+// radio is down does not reliably reject — it can hang forever — and the retry
+// path skipped any key that was `sending`, so the one state that most needed
+// rescuing was the one state nothing could reach.
+// ---------------------------------------------------------------------------
+
+describe("recovering from a save that never answers", () => {
+  /// Drives to the exact state the walkthrough reached: one failure recorded,
+  /// then a retry issued that never comes back.
+  function stuckInFlight() {
+    let state = createQueue();
+    state = reduce(state, edit(3), 0).state;
+    state = reduce(state, { type: "tick" }, 600).state; // save issued
+    state = reduce(state, { type: "settled", key: NOTE, ok: false }, 650).state; // rejected
+    state = reduce(state, { type: "tick" }, 1650).state; // retry issued, never answers
+    return state;
+  }
+
+  it("issues the retry when the connection returns", () => {
+    // THE BUG: this returned no effects at all, so nothing was ever sent and the
+    // status never moved off "Saving…" again.
+    const { effects } = reduce(stuckInFlight(), { type: "online" }, 5000);
+
+    expect(saves(effects)).toEqual([
+      { type: "save", key: NOTE, value: 3, attempt: expect.any(Number) },
+    ]);
+  });
+
+  it("leaves no deadline in the past for the interpreter to spin on", () => {
+    // THE OTHER HALF: `online` set a due-date and then skipped the key for being
+    // in flight, so `nextDueAt` kept returning a timestamp that had already
+    // passed. The hook re-armed at zero delay forever and made no progress.
+    const { state } = reduce(stuckInFlight(), { type: "online" }, 5000);
+
+    const due = nextDueAt(state);
+    expect(due).not.toBeNull();
+    expect(due!).toBeGreaterThan(5000);
+  });
+
+  it("gives up on an unanswered save and retries it, with no online event at all", () => {
+    // The reviewer whose connection returns without the browser firing `online`
+    // — a captive portal, a flaky tower — must still recover.
+    let state = createQueue({ saveTimeoutMs: 10000 });
+    state = reduce(state, edit(3), 0).state;
+    const first = reduce(state, { type: "tick" }, 600);
+    state = first.state;
+    expect(saves(first.effects)).toHaveLength(1);
+
+    // Nine seconds in: still waiting, nothing abandoned.
+    const early = reduce(state, { type: "tick" }, 9000);
+    expect(saves(early.effects)).toEqual([]);
+    expect(statusOf(early.state, NOTE)).toBe("saving");
+
+    // Past the deadline: abandoned, counted as a failure, retry scheduled.
+    state = reduce(state, { type: "tick" }, 10700).state;
+    expect(statusOf(state, NOTE)).toBe("failed");
+
+    const retry = reduce(state, { type: "tick" }, nextDueAt(state)!);
+    expect(saves(retry.effects)).toHaveLength(1);
+  });
+
+  it("ignores a reply from an attempt it already gave up on", () => {
+    // The hung request answering minutes later, after a retry has replaced it.
+    // Believing it would report "Saved" for a value that is no longer current.
+    let state = createQueue({ saveTimeoutMs: 10000 });
+    state = reduce(state, edit("first"), 0).state;
+
+    const issued = reduce(state, { type: "tick" }, 600);
+    state = issued.state;
+    const stale = saves(issued.effects)[0];
+
+    state = reduce(state, { type: "tick" }, 10700).state; // abandoned
+    state = reduce(state, edit("second"), 10800).state;
+
+    const late = reduce(
+      state,
+      { type: "settled", key: NOTE, ok: true, attempt: stale.attempt },
+      11000,
+    );
+
+    expect(statusOf(late.state, NOTE)).not.toBe("saved");
+    expect(late.effects.filter((e) => e.type === "unmirror")).toEqual([]);
+  });
+
+  it("does not abandon a healthy save just because the reviewer backgrounded the app", () => {
+    // `flush` asks for pending work to go sooner. It must never be read as
+    // giving up on a request already on its way.
+    let state = createQueue({ saveTimeoutMs: 10000 });
+    state = reduce(state, edit(3), 0).state;
+    state = reduce(state, { type: "tick" }, 600).state;
+
+    const flushed = reduce(state, { type: "flush" }, 700);
+
+    expect(saves(flushed.effects)).toEqual([]);
+    expect(statusOf(flushed.state, NOTE)).toBe("saving");
+    expect(nextDueAt(flushed.state)).toBe(600 + 10000);
   });
 });
 
@@ -226,7 +344,9 @@ describe("flush", () => {
       [{ type: "flush" }, 100],
     ]);
 
-    expect(saves(effects)).toEqual([{ type: "save", key: NOTE, value: "half typed" }]);
+    expect(saves(effects)).toEqual([
+      { type: "save", key: NOTE, value: "half typed", attempt: 1 },
+    ]);
   });
 
   it("leaves an in-flight save alone rather than sending it twice", () => {

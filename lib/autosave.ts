@@ -46,11 +46,17 @@ export type QueueEvent =
   | { type: "tick" }
   /// The browser came back online.
   | { type: "online" }
-  | { type: "settled"; key: string; ok: boolean };
+  /// A save came back. `attempt` identifies WHICH save — a reply from an attempt
+  /// the queue has already abandoned must not be believed, or a request that
+  /// hung across a reconnect can resolve minutes later and overwrite the state
+  /// of the retry that replaced it. Optional only so tests that never abandon
+  /// anything can stay readable; the interpreter always supplies it.
+  | { type: "settled"; key: string; ok: boolean; attempt?: number };
 
 export type Effect =
   /// Send this value for this key. One per key at a time, guaranteed by reduce.
-  | { type: "save"; key: string; value: DraftValue }
+  /// `attempt` comes back on the matching `settled`.
+  | { type: "save"; key: string; value: DraftValue; attempt: number }
   /// Write the localStorage mirror. Emitted on every edit, because decision 26
   /// makes the mirror — not the dialog — the thing that makes "never a silent
   /// loss" true.
@@ -67,8 +73,22 @@ interface KeyState {
   /// The value handed to the in-flight save, meaningful only while `sending`.
   sendingValue: DraftValue;
   sending: boolean;
-  /// Absolute ms at which a save should be issued. Null when nothing is pending.
+  /// Absolute ms at which the next save should be issued. Null when nothing is
+  /// pending. **Only ever about the NEXT send** — never about the one in flight,
+  /// which is what `timeoutAt` is for. Conflating the two meant an edit arriving
+  /// mid-flight rescheduled the deadline of the request it was queued behind.
   dueAt: number | null;
+  /// Absolute ms at which an in-flight save is given up on. Null when nothing is
+  /// in flight.
+  ///
+  /// **This is the field whose absence caused the stuck-on-"Saving…" bug.** A
+  /// fetch issued while the radio is down does not reliably reject: it can hang
+  /// indefinitely, and without a deadline the key sits in `sending` forever,
+  /// which also makes it invisible to the retry path.
+  timeoutAt: number | null;
+  /// Which send is outstanding. Incremented on every issue AND on every abandon,
+  /// so an abandoned request's late reply no longer matches and is discarded.
+  attempt: number;
   /// Consecutive failures. Indexes into `backoffMs`.
   failures: number;
   /// Whether the server has ever confirmed this key, which is what separates
@@ -80,6 +100,7 @@ export interface QueueState {
   keys: Readonly<Record<string, KeyState>>;
   debounceMs: number;
   backoffMs: readonly number[];
+  saveTimeoutMs: number;
 }
 
 export interface QueueOptions {
@@ -89,16 +110,28 @@ export interface QueueOptions {
   /// Capped rather than unbounded: a reviewer who walks back into signal should
   /// wait at most this long, and `online` short-circuits it anyway.
   backoffMs?: readonly number[];
+  saveTimeoutMs?: number;
 }
 
 export const DEFAULT_DEBOUNCE_MS = 600;
 export const DEFAULT_BACKOFF_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
+
+/// How long an in-flight save may go unanswered before the queue stops waiting
+/// for it and retries.
+///
+/// One upsert is 80–250 ms in practice and a slow-4G round trip settles well
+/// under a second, so ten seconds is far past any healthy save and cannot
+/// abandon one that was merely slow. It exists for the request that will never
+/// answer at all — issued as the radio came back, hung by the operating system,
+/// and with nothing underneath it to produce either a response or an error.
+export const DEFAULT_SAVE_TIMEOUT_MS = 10000;
 
 export function createQueue(options: QueueOptions = {}): QueueState {
   return {
     keys: {},
     debounceMs: options.debounceMs ?? DEFAULT_DEBOUNCE_MS,
     backoffMs: options.backoffMs ?? DEFAULT_BACKOFF_MS,
+    saveTimeoutMs: options.saveTimeoutMs ?? DEFAULT_SAVE_TIMEOUT_MS,
   };
 }
 
@@ -112,6 +145,8 @@ function seed(value: DraftValue): KeyState {
     sendingValue: value,
     sending: false,
     dueAt: null,
+    timeoutAt: null,
+    attempt: 0,
     failures: 0,
     confirmed: false,
   };
@@ -121,20 +156,60 @@ function keyOf(state: QueueState, key: string): KeyState {
   return state.keys[key] ?? seed(null);
 }
 
-/// Issue saves for every key whose debounce has expired and which has nothing in
-/// flight. Shared by `tick`, `flush` and `online` rather than written three
-/// times, because "only one save per key at a time" has to hold on all three
-/// paths and a second copy is where it stops holding.
-function issueDue(
+function backoffFor(state: QueueState, failures: number): number {
+  return state.backoffMs[Math.min(failures, state.backoffMs.length) - 1];
+}
+
+/// Stop waiting for an in-flight save, counting it as a failure and scheduling a
+/// retry on the backoff. Bumping `attempt` is what makes the abandoned request's
+/// eventual reply — if it ever comes — land on a generation nobody is listening
+/// for.
+function abandon(entry: KeyState, state: QueueState, nowMs: number): KeyState {
+  const failures = entry.failures + 1;
+  return {
+    ...entry,
+    sending: false,
+    timeoutAt: null,
+    attempt: entry.attempt + 1,
+    failures,
+    dueAt: nowMs + backoffFor(state, failures),
+  };
+}
+
+/// Advance every key that has a deadline in the past.
+///
+/// **Two deadlines, not one**, and keeping them apart is the fix for the
+/// stuck-on-"Saving…" bug: `timeoutAt` gives up on a request that never
+/// answered, `dueAt` issues the next one. Shared by `tick`, `flush` and `online`
+/// so that "one save per key at a time" holds on all three paths rather than in
+/// three separate copies of the rule.
+///
+/// Every branch either issues something or clears the deadline it just handled.
+/// A branch that did neither is what span the interpreter's timer: `nextDueAt`
+/// kept returning a timestamp in the past, so it re-armed at zero delay forever
+/// and made no progress.
+function advance(
   keys: Record<string, KeyState>,
+  state: QueueState,
   nowMs: number,
 ): { keys: Record<string, KeyState>; effects: Effect[] } {
   const next: Record<string, KeyState> = { ...keys };
   const effects: Effect[] = [];
 
-  for (const [key, entry] of Object.entries(keys)) {
-    if (entry.sending) continue;
-    if (entry.dueAt === null || entry.dueAt > nowMs) continue;
+  for (const [key, original] of Object.entries(keys)) {
+    let entry = original;
+
+    // An in-flight save that has run out of patience. Its retry is scheduled on
+    // the backoff rather than issued here, so a server that is up but slow does
+    // not get hammered.
+    if (entry.sending && entry.timeoutAt !== null && entry.timeoutAt <= nowMs) {
+      entry = abandon(entry, state, nowMs);
+    }
+
+    if (entry.sending || entry.dueAt === null || entry.dueAt > nowMs) {
+      next[key] = entry;
+      continue;
+    }
 
     // Nothing to send: the value was edited back to what the server already
     // has. Clear the pending state rather than issuing a no-op write.
@@ -143,8 +218,16 @@ function issueDue(
       continue;
     }
 
-    next[key] = { ...entry, sending: true, sendingValue: entry.value, dueAt: null };
-    effects.push({ type: "save", key, value: entry.value });
+    const attempt = entry.attempt + 1;
+    next[key] = {
+      ...entry,
+      sending: true,
+      sendingValue: entry.value,
+      attempt,
+      dueAt: null,
+      timeoutAt: nowMs + state.saveTimeoutMs,
+    };
+    effects.push({ type: "save", key, value: entry.value, attempt });
   }
 
   return { keys: next, effects };
@@ -182,32 +265,53 @@ export function reduce(
     }
 
     case "tick": {
-      const { keys, effects } = issueDue({ ...state.keys }, nowMs);
+      const { keys, effects } = advance({ ...state.keys }, state, nowMs);
       return { state: { ...state, keys }, effects };
     }
 
     case "flush": {
-      // Bring every pending debounce forward to now, then issue. Anything
-      // already in flight is left alone — it is already on its way.
+      // Bring every pending debounce forward to now. Anything already in flight
+      // is left strictly alone — its `timeoutAt` is not touched, because a flush
+      // is a request to send sooner, never to give up on a request already on
+      // its way.
       const brought: Record<string, KeyState> = {};
       for (const [key, entry] of Object.entries(state.keys)) {
-        brought[key] = entry.dueAt === null ? entry : { ...entry, dueAt: nowMs };
+        brought[key] =
+          entry.sending || entry.dueAt === null ? entry : { ...entry, dueAt: nowMs };
       }
-      const { keys, effects } = issueDue(brought, nowMs);
+      const { keys, effects } = advance(brought, state, nowMs);
       return { state: { ...state, keys }, effects };
     }
 
     case "online": {
-      // A reviewer walking back into signal should not have to touch anything,
-      // and should not wait out a backoff that was earned while there was no
-      // network at all. Every failed key becomes due immediately and its backoff
-      // resets.
+      // A reviewer walking back into signal should not have to touch anything.
+      //
+      // **An in-flight save is abandoned here rather than waited on**, and that
+      // is the whole fix for the stuck-on-"Saving…" report. A request issued
+      // while the radio was down is the least likely of all requests to ever
+      // answer, and leaving it alone left the key `sending` — which the retry
+      // path skips, so nothing was ever issued and the status never moved
+      // again. It is abandoned WITHOUT counting a failure, because coming back
+      // online is not evidence that the save would have failed.
       const revived: Record<string, KeyState> = {};
+
       for (const [key, entry] of Object.entries(state.keys)) {
-        revived[key] =
-          entry.failures > 0 ? { ...entry, dueAt: nowMs, failures: 0 } : entry;
+        let next = entry.sending
+          ? { ...entry, sending: false, timeoutAt: null, attempt: entry.attempt + 1 }
+          : entry;
+
+        // Anything the server has not confirmed is due immediately, and the
+        // backoff earned while there was no network at all is discarded.
+        if (next.value !== next.savedValue) {
+          next = { ...next, failures: 0, dueAt: nowMs };
+        } else if (next.failures > 0) {
+          next = { ...next, failures: 0, dueAt: null };
+        }
+
+        revived[key] = next;
       }
-      const { keys, effects } = issueDue(revived, nowMs);
+
+      const { keys, effects } = advance(revived, state, nowMs);
       return { state: { ...state, keys }, effects };
     }
 
@@ -218,14 +322,22 @@ export function reduce(
       // failure from marking a key failed after a later save succeeded.
       if (!entry || !entry.sending) return { state, effects: [] };
 
+      // And a settle from an attempt the queue has already given up on. Without
+      // this, a request that hung across a reconnect could answer minutes later
+      // and overwrite whatever the retry that replaced it had achieved —
+      // reporting "Saved" for a value that is no longer the current one.
+      if (event.attempt !== undefined && event.attempt !== entry.attempt) {
+        return { state, effects: [] };
+      }
+
       if (!event.ok) {
         const failures = entry.failures + 1;
-        const wait = state.backoffMs[Math.min(failures, state.backoffMs.length) - 1];
         const next: KeyState = {
           ...entry,
           sending: false,
+          timeoutAt: null,
           failures,
-          dueAt: nowMs + wait,
+          dueAt: nowMs + backoffFor(state, failures),
         };
         // No unmirror. The mirror is the only remaining copy of this value and
         // dropping it here is precisely the silent loss decision 26 forbids.
@@ -236,6 +348,7 @@ export function reduce(
       const next: KeyState = {
         ...entry,
         sending: false,
+        timeoutAt: null,
         savedValue: entry.sendingValue,
         failures: 0,
         confirmed: true,
@@ -298,10 +411,20 @@ export const hasUnsavedWork = (state: QueueState): boolean => !isSettled(state);
 /// individually-cancelled timers can.
 export function nextDueAt(state: QueueState): number | null {
   let earliest: number | null = null;
+
+  const consider = (at: number | null) => {
+    if (at === null) return;
+    if (earliest === null || at < earliest) earliest = at;
+  };
+
   for (const entry of Object.values(state.keys)) {
-    if (entry.dueAt === null) continue;
-    if (earliest === null || entry.dueAt < earliest) earliest = entry.dueAt;
+    consider(entry.dueAt);
+    // The timeout deadline counts too. Omitting it would mean nothing ever woke
+    // up to enforce it, which would leave the in-flight timeout as a field that
+    // exists and never fires.
+    consider(entry.timeoutAt);
   }
+
   return earliest;
 }
 
