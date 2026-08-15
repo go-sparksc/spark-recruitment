@@ -275,6 +275,36 @@ Points are validated server-side against the category's `maxPoints`; a client is
 7. Throttle to "Slow 3G" in desktop devtools, change a score, and immediately click back. Confirm the 1500 ms hold and then the dialog, and that *Wait* resolves to a saved state.
 8. Try a `points` value above the category maximum by editing the request. It must be refused server-side.
 
+**What actually shipped, where it differs from the section above.** Recorded here rather than left as a
+diff to reverse-engineer.
+
+- **The score control is a segmented row of submit buttons, not a numeric input.** One tap instead of
+  opening a numeric keyboard, and — the reason it is worth the extra code — it makes decision 33's
+  second mitigation literal rather than aspirational: each value is a `<button type="submit"
+  name="points" value="3">` inside a `<form action={saveScoreForm}>`, so a tap in the hydration
+  window is a completed native POST rather than a discarded one. `—` is the clear, sending
+  `points=""`. Falls back to a number input above `maxPoints > 10`, since `MAX_POINTS_CEILING` is
+  1000 and 101 buttons is not a control.
+- **Post-hydration, `onSubmit` calls `preventDefault` and the queue takes it**, so a score costs one
+  request rather than a route re-render. This works because React's form-action listener is queued
+  *after* the `onSubmit` listeners and checks `defaultPrevented` before dispatching — verified in
+  `react-dom-client.development.js`, not assumed.
+- **The fields are uncontrolled**, which is the opposite of what `sign-in-form.tsx` needed and is not
+  a contradiction: a controlled field is overwritten by React's own state at hydration (decision 33),
+  while an uncontrolled one in a form React *dispatches* is reset when the action settles (F-04).
+  Neither field here is in a dispatched form, which is what makes uncontrolled the safe half.
+- **PRD decision 37 leads the code**, covering what clears the localStorage mirror. Decision 26
+  made the mirror the guarantee and said nothing about its lifetime.
+- **Three commits, not one** — the PRD decision, then `lib/autosave.ts` with its tests, then the UI —
+  following this plan's own "each pure module ships and is read before the UI that consumes it".
+- **`nextDueAt` selector rather than a `schedule` effect**, so the interpreter arms one timer for the
+  whole queue and there is nothing to cancel out of step. `UnsavedGuard` folded into `GuardedLink`
+  for the same reason: one component that already knows whether it is the one holding a navigation.
+- **`experimental.useOffline` rejected.** It exists in Next 16 and looks like exactly this problem,
+  but it is experimental, its guide says dev mode is not a reliable reference for it, and it removes
+  the state step 4 above requires a reviewer to *see* — the call simply stays pending and looks like
+  a slow server.
+
 ---
 
 ### Slice 6 — Return to pool and claim from pool (clauses 5a–6c)

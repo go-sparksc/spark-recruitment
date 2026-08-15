@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { signOut } from "../actions";
+import { SignOutButton } from "../sign-out-button";
 import { AssignmentStatus } from "@/generated/prisma/enums";
-import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { completionOf } from "@/lib/review";
@@ -122,12 +121,7 @@ export default async function ReviewerListPage({
         </>
       )}
 
-      <form action={signOut} className="mt-8">
-        <input type="hidden" name="instanceId" value={instanceId} />
-        <Button type="submit" variant="outline" size="sm">
-          Sign out
-        </Button>
-      </form>
+      <SignOutButton instanceId={instanceId} />
     </main>
   );
 }

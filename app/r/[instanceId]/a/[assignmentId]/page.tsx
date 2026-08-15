@@ -1,11 +1,15 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { GuardedLink } from "./guarded-link";
 import { ScoreCard, type RubricRow } from "./score-card";
 import { AssignmentStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
-import { buildApplicantView, completionOf } from "@/lib/review";
+// completionOf is no longer read here: the card counts scored categories from
+// its own queue so the summary moves as the reviewer taps, rather than being
+// frozen at whatever the server rendered. The list page still uses it, which is
+// where the count has to agree with the database.
+import { buildApplicantView } from "@/lib/review";
 
 export const metadata = { title: "Review an applicant — Spark SC" };
 
@@ -50,6 +54,10 @@ export default async function ApplicantDetailPage({
         },
       },
       scores: { select: { rubricCategoryId: true, points: true } },
+      // FR-9 clause 3b. One row per assignment, so this is the reviewer's own
+      // note and never another reviewer's — §6 keeps those hidden from each
+      // other, and the relation is what enforces it rather than a filter.
+      note: { select: { body: true } },
     },
   });
 
@@ -124,11 +132,6 @@ export default async function ApplicantDetailPage({
     points: pointsByCategory.get(category.id) ?? null,
   }));
 
-  const completion = completionOf(
-    categories.map((category) => category.id),
-    assignment.scores.map((score) => score.rubricCategoryId),
-  );
-
   const position = siblings.findIndex((sibling) => sibling.id === assignment.id);
   const previous = position > 0 ? siblings[position - 1] : null;
   const next = position >= 0 && position < siblings.length - 1 ? siblings[position + 1] : null;
@@ -139,9 +142,12 @@ export default async function ApplicantDetailPage({
     // page is scrolled to the bottom.
     <main className="mx-auto w-full max-w-5xl px-4 pt-5 pb-10">
       <div className="flex items-center justify-between gap-3">
-        <Link href={`/r/${instanceId}/list`} className="text-muted-foreground text-sm hover:underline">
+        <GuardedLink
+          href={`/r/${instanceId}/list`}
+          className="text-muted-foreground text-sm hover:underline"
+        >
           ← All applicants
-        </Link>
+        </GuardedLink>
         {position >= 0 ? (
           <span className="text-muted-foreground text-sm tabular-nums">
             {position + 1} of {siblings.length}
@@ -175,29 +181,34 @@ export default async function ApplicantDetailPage({
 
           <nav className="flex items-center justify-between gap-3 pt-2">
             {previous ? (
-              <Link
+              <GuardedLink
                 href={`/r/${instanceId}/a/${previous.id}`}
                 className="hover:bg-muted rounded-md border px-3 py-2 text-sm"
               >
                 ← Previous
-              </Link>
+              </GuardedLink>
             ) : (
               <span />
             )}
             {next ? (
-              <Link
+              <GuardedLink
                 href={`/r/${instanceId}/a/${next.id}`}
                 className="hover:bg-muted rounded-md border px-3 py-2 text-sm"
               >
                 Next →
-              </Link>
+              </GuardedLink>
             ) : (
               <span />
             )}
           </nav>
         </article>
 
-        <ScoreCard rubric={rubric} scored={completion.scored} />
+        <ScoreCard
+          instanceId={instanceId}
+          assignmentId={assignment.id}
+          rubric={rubric}
+          noteBody={assignment.note?.body ?? ""}
+        />
       </div>
     </main>
   );

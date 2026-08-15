@@ -73,6 +73,15 @@ export function completionOf(
 // FR-9 bullet 3 — the score itself
 // ---------------------------------------------------------------------------
 
+/// Long enough for a paragraph of real reasoning, short enough that a paste of
+/// the applicant's whole essay is refused rather than stored.
+///
+/// Lives here rather than beside the action that enforces it because a
+/// `"use server"` module may only export async functions, and the textarea needs
+/// the same number for its `maxLength` — so the cap is visible to the reviewer
+/// before it is enforced, rather than silently truncating what they typed.
+export const MAX_NOTE_LENGTH = 5000;
+
 export type ScoreValidation =
   | { ok: true; points: number | null }
   | { ok: false; reason: string };
