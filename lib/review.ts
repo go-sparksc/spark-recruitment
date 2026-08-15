@@ -70,6 +70,43 @@ export function completionOf(
 }
 
 // ---------------------------------------------------------------------------
+// FR-9 bullet 3 — the score itself
+// ---------------------------------------------------------------------------
+
+export type ScoreValidation =
+  | { ok: true; points: number | null }
+  | { ok: false; reason: string };
+
+/// Whether a submitted score is one this category can actually take.
+///
+/// **Here rather than in the input control, because the bound is a rule and the
+/// control is a rendering of it.** The segmented row only ever draws legal
+/// values, so on the happy path this never refuses anything — which is exactly
+/// why it has to exist: a server action is a POST endpoint reachable without the
+/// form, and "the client only offered 0 to 5" is not a constraint on what
+/// arrives.
+///
+/// `null` is a value rather than an error. It means *clear this score*, which is
+/// what takes an applicant from 3/4 back to 2/4, and FR-9 needs that to be
+/// expressible — a reviewer who mis-taps must be able to undo it without an
+/// admin resetting the rubric.
+export function validateScore(points: number | null, maxPoints: number): ScoreValidation {
+  if (points === null) return { ok: true, points: null };
+
+  if (!Number.isInteger(points)) {
+    return { ok: false, reason: "A score has to be a whole number." };
+  }
+  if (points < 0) {
+    return { ok: false, reason: "A score cannot be negative." };
+  }
+  if (points > maxPoints) {
+    return { ok: false, reason: `This category is out of ${maxPoints}.` };
+  }
+
+  return { ok: true, points };
+}
+
+// ---------------------------------------------------------------------------
 // FR-9 bullet 6 — the pool
 // ---------------------------------------------------------------------------
 

@@ -7,6 +7,7 @@ import {
   completionOf,
   openSlotsOf,
   targetFor,
+  validateScore,
   type ApplicantSource,
   type ReviewFieldGroupLike,
   type ReviewFieldLike,
@@ -143,6 +144,50 @@ describe("completionOf — the FR-4 reset path moves the denominator", () => {
     // Unreachable through FR-4's builder, which requires at least one category.
     // "Complete" is the word a reviewer trusts to mean they can stop.
     expect(completionOf([], [])).toEqual({ scored: 0, total: 0, complete: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-9 bullet 3 — the score itself
+// ---------------------------------------------------------------------------
+
+describe("validateScore", () => {
+  it("accepts both ends of the scale", () => {
+    expect(validateScore(0, 5)).toEqual({ ok: true, points: 0 });
+    expect(validateScore(5, 5)).toEqual({ ok: true, points: 5 });
+  });
+
+  it("accepts null, which is how a score is cleared", () => {
+    // 3/4 back to 2/4. A reviewer who mis-taps must be able to undo it without
+    // an admin resetting the whole rubric.
+    expect(validateScore(null, 5)).toEqual({ ok: true, points: null });
+  });
+
+  it("refuses a value above the category maximum", () => {
+    // plans/phase-3.md's Slice 5 walkthrough, step 8: "try a points value above
+    // the category maximum by editing the request. It must be refused
+    // server-side." The segmented control never draws a 6, which is exactly why
+    // this has to be checked where the request arrives.
+    const result = validateScore(6, 5);
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ reason: expect.stringContaining("out of 5") });
+  });
+
+  it("refuses a negative score", () => {
+    expect(validateScore(-1, 5).ok).toBe(false);
+  });
+
+  it("refuses a fraction", () => {
+    // Score is an Int in §5. Accepting 2.5 here would fail at the database with
+    // a message no reviewer could act on.
+    expect(validateScore(2.5, 5).ok).toBe(false);
+  });
+
+  it("bounds against the category's own maximum, not a hardcoded 5", () => {
+    // Goal 5: the rubric is reconfigurable between cycles. A 10-point category
+    // is legal and a 5-point ceiling would silently refuse half its range.
+    expect(validateScore(9, 10)).toEqual({ ok: true, points: 9 });
+    expect(validateScore(9, 5).ok).toBe(false);
   });
 });
 
