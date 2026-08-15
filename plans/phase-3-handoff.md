@@ -1,7 +1,8 @@
-# Phase 3 handoff — end of Slice 6
+# Phase 3 handoff — Slice 6 complete
 
-**As of `6b16e65`, 2026-08-15.** Slices 0–6 are committed. **The next step is not code: it is the
-Slice 6 walkthrough, which has not been run, and then Slice 7's board-member run.**
+**As of `6b16e65`, 2026-08-15.** Slices 0–6 are committed, pushed, and **verified by hand on real
+hardware**. **The next step is Slice 7, the board-member run.** All the code FR-9 asks for now
+exists.
 
 This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually
 exists, what does not, and what is waiting to be verified.
@@ -10,15 +11,20 @@ exists, what does not, and what is waiting to be verified.
 
 ## Read this first
 
-**Nothing in Slice 6 has been seen in a browser.** `npm run verify` passes (369 tests), `npm run
-build` passes, the routes compile and respond in dev, and `prisma/checks/claim-race.ts` passes
-against a real database — but every reviewer route redirects to sign-in without a session, so no
-rendering of the return control, the pool page, or the admin returned-rows line has been observed by
-anyone. Phase 2 shipped four defects that only a person using the screen could find. Assume Slice 6
-has some.
+**Slice 6 passed all twelve walkthrough steps**, including the three that no test can produce:
 
-The full walkthrough is `plans/phase-3.md`'s Slice 6 section, steps 1–10, plus two added by decision
-38 and repeated at the end of this document.
+- **Step 6, the claim race** — two devices signed in as two different reviewers, both tapping Claim
+  on the same one-slot applicant. One landed on the applicant, the other was told the slot had gone
+  and got a pool list that no longer offered it. Neither saw a 500.
+- **Step 8, the re-claim** — an applicant returned for conflict of interest and then claimed back
+  produced **one** row, `ACTIVE` / `CLAIMED_FROM_POOL` with the return fields cleared, not two.
+  Decision 28 holds in practice.
+- **Steps 11 and 12, the draft mirror** — a return with unsaved work leaves without a "Still saving"
+  hold and discards only the unconfirmed draft; a return with everything saved gains no step.
+  Decision 38 holds in practice.
+
+Nothing outstanding from the walkthrough. Phase 2 shipped four defects that only a person using the
+screen could find, and this is the pass that would have found their equivalents.
 
 ---
 
@@ -37,8 +43,8 @@ nothing works. See `.env.example`.
 client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See
 CLAUDE.md. Slice 6 involved **no schema change and no migration**, so this did not bite here.
 
-**A dev server may still be running** from the Slice 6 session on port 3000. It has been up for
-hours; the handoff below on stale dev servers applies — restart it before trusting anything.
+**No dev server is running.** The one from the Slice 6 session was stopped once the walkthrough
+finished, so port 3000 is free.
 
 ### Credentials
 
@@ -49,20 +55,36 @@ hours; the handoff below on stale dev servers applies — restart it before trus
 | Round codes | **`written-f26`**, `firstround-s26`, `secondround-s26` — the written code was rotated on 2026-08-13 while testing the access-code card. `written-s26` is dead. `prisma/seed.ts` still writes `written-s26`, so `npm run seed` resets it. |
 | Seed instance id | `seed_s26_demo` |
 
-### Fixture state
+### Fixture state — changed by the walkthrough, read this before trusting old numbers
 
-150 applicants · 30 reviewers (8 Sparklets) · **428 assignments** · loads 14–15 · 128 applicants at 3
-reviewers, 22 at 2 · **0 scores** · 4 rubric categories at 5 points each, all with descriptions.
+150 applicants · 30 written reviewers (8 Sparklets) · 4 rubric categories at 5 points each.
 
-Unchanged from the end of Slice 5. `claim-race.ts` was run four times against this database and each
-run verified the count back at 428 afterwards.
+**427 written assignments**, no longer the 428 every earlier handoff quotes:
 
-Those 22 applicants at 2 of 3 are the 5% pool, so **the pool page has ~22 rows before anyone returns
-anything** — that is correct, not a bug, and it is what makes walkthrough steps 5 and 6 possible
-without setting anything up.
+| | |
+|---|---|
+| `ACTIVE`, `AUTO` | 422 |
+| `ACTIVE`, `CLAIMED_FROM_POOL` | 1 |
+| `RETURNED_TO_POOL` | 4 |
+| Applicants at 3 reviewers | 123 |
+| Applicants short one | 27 |
+
+The four returned rows all belong to **Fatima Fitzgerald** — applicants 3, 11, 22 and 37, three
+conflict-of-interest and one other, no free text. The count moved from 428 because walkthrough step
+10 regenerated: returned pairs are excluded from generation (decision 23) and the claimed row was
+preserved (decision 21), which is the path working, not drift.
+
+**Two consequences that will surprise the next session:**
+
+- **The rubric is now locked.** Twelve `Score` rows and four `ReviewNote` rows exist, and FR-4 locks
+  `/instances/seed_s26_demo/rubric` the moment any score does. That is correct behaviour and it has
+  never been true on this fixture before. `npm run seed` is the way back.
+- **27 applicants are short, not 22.** The 5% pool plus the four returns, so the pool page has ~27
+  rows for an eligible reviewer without anyone setting anything up.
 
 `npm run seed` rebuilds everything **and wipes assignments** — regenerate them from
-`/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty.
+`/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty. It also resets the
+written access code to the dead `written-s26`; see the credentials table.
 
 ---
 
@@ -73,9 +95,9 @@ Outside the §8 admin gate. Reviewers never see the instance list.
 | Route | Does | Status |
 |---|---|---|
 | `/r/<instanceId>?round=WRITTEN` | Sign-in: round picker, name dropdown, access code, one submit (decision 30) | Works |
-| `/r/<instanceId>/list` | Assigned applicants, completion state, **pool link with a live count**, **return control per row** | Compiles; **not clicked** |
-| `/r/<instanceId>/a/<assignmentId>` | Responses, sticky rubric, scoring, note, autosave, guarded prev/next, **return control** | Scoring works; return **not clicked** |
-| `/r/<instanceId>/pool` | **Claim from pool** — label, `n of 3 reviewers`, one-tap Claim | New; **not clicked** |
+| `/r/<instanceId>/list` | Assigned applicants, completion state, pool link with a live count, return control per row | Works |
+| `/r/<instanceId>/a/<assignmentId>` | Responses, sticky rubric, scoring, note, autosave, guarded prev/next, return control | Works |
+| `/r/<instanceId>/pool` | Claim from pool — label, `n of 3 reviewers`, one-tap Claim | Works |
 
 Session is a separate signed cookie (`spark_reviewer`), 7 days, scoped to one instance and one round.
 
@@ -88,7 +110,7 @@ Unchanged except `…/assignments`, which now renders **returned rows** under ea
 
 ## What Slice 6 shipped
 
-Three commits.
+Three code commits, then `6e0171c` and this document recording them.
 
 - **`00efdc4` — PRD decisions 38 and 39.** What a return does to the draft mirror; and the return
   reason that no admin surface rendered.
@@ -103,21 +125,27 @@ Three commits.
   `swap` both reactivate a returned row** instead of inserting over it and violating the unique
   index.
 
-### Verified without a browser
+### How it was verified
 
+- **The twelve-step walkthrough, on real hardware**, including two devices for the claim race. See
+  "Read this first". This is the one that counts.
 - `npm run verify` — 369 tests, typecheck, lint.
 - `npm run build` — the "a `use server` file may only export async functions" trap fired once, on
   `claimMessage`, and moving it to `lib/claim-slot.ts` is why that module owns the message map.
 - `npx tsx prisma/checks/claim-race.ts` — 8 checks, all passing, fixtures cleaned up and verified.
+  Re-run it after any schema change; it is not part of `npm run verify`.
 
 ---
 
 ## Not built yet
 
-- **The Slice 6 walkthrough.** Ten steps in `plans/phase-3.md` plus two below. **This is the next
-  thing to do.**
-- **The board-member run.** Slice 7. A gate step, not a demo, and it cannot be run by the owner.
-- **The PRD status line.** Slice 8, and only after the whole gate passes by hand.
+- **The board-member run.** Slice 7, and **the next thing to do.** A gate step, not a demo. It cannot
+  be run by the owner and it cannot be run twice on the same person. All eight steps are in
+  `plans/phase-3.md`; steps 5 and 6 are the ones that decide whether clauses 5a and 6a actually
+  shipped, because a control nobody finds is a control that did not ship.
+- **The PRD status line.** Slice 8, and only after the whole BUILD_PLAN gate passes by hand —
+  including Slice 7. A status line claiming an unverified phase is the one PRD edit that must not
+  lead the code.
 - **First-round and second-round dashboards.** Phases 5 and 6.
 
 ## Still open from the testing pass, and deliberately not code
@@ -129,7 +157,8 @@ F-01, F-05, F-06, F-09 — all `preference`, each a PRD conversation first. See
 
 ## The two walkthrough steps decision 38 added
 
-Beyond the ten in `plans/phase-3.md`:
+Recorded because they are not in `plans/phase-3.md`'s numbered list and a re-run should include them.
+Both passed.
 
 11. Type a note and, **before it saves**, return the applicant. It leaves the list with no "Still
     saving" hold. Claim it back from the pool and reopen it: the saved scores are there and the
@@ -137,10 +166,10 @@ Beyond the ten in `plans/phase-3.md`:
 12. Return an applicant with everything already saved. Nothing is lost and no dialog appears — the
     common case must not have gained a step.
 
-**Step 6 still needs two devices** signed in as two different reviewers, both eligible for the same
+**Step 6 needs two devices** signed in as two different reviewers, both eligible for the same
 one-slot applicant, tapping Claim within the same second. `claim-race.ts` is a pre-flight for the
 lock, not a substitute: it skips HTTP, the session, and Next's per-client sequential dispatch, and
-that dispatch is exactly what would hide the race in one browser.
+that dispatch is exactly what would hide the race in one browser. Passed on the first attempt.
 
 ---
 
@@ -172,4 +201,8 @@ Everything from the end of Slice 5 still applies. Added by Slice 6:
 
 ---
 
-Next: **run the Slice 6 walkthrough on a phone**, fix what it finds, then Slice 7.
+Next: **Slice 7, the board-member run.** Pick someone who has not seen the tool and has not been in
+any conversation about it, send them the `/r/seed_s26_demo?round=WRITTEN` link and the access code in
+one message with no explanation, and say nothing while they use it. Every place they get stuck is a
+Phase 3 defect fixed in Phase 3 — not deferred to a reviewer guide, which is the artefact FR-9's
+premise exists to make unnecessary.
