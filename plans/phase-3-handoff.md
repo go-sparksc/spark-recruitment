@@ -1,9 +1,10 @@
-# Phase 3 handoff — end of Slice 4, plus the fix pass
+# Phase 3 handoff — end of Slice 5
 
-**As of `ab79803`, 2026-08-14.** Slices 0–4 are committed, and the testing pass's five defects are
-fixed. Slices 5–8 are not built. **Next session starts at Slice 5.**
+**As of `707420f`, 2026-08-14.** Slices 0–5 are committed and pushed. **Next session starts at
+Slice 6 — return to pool and claim from pool.**
 
-This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually exists, what does not, and what is waiting to be verified.
+This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually
+exists, what does not, and what is waiting to be verified.
 
 ---
 
@@ -13,9 +14,16 @@ This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; thi
 npm run dev        # http://localhost:3000, and http://<lan-ip>:3000 for a phone
 ```
 
-The LAN address is printed as "Network" in the `next dev` banner — it was `192.168.1.110` on 2026-08-11, but it is DHCP and will move. Phone testing needs `DEV_ALLOWED_ORIGINS` in `.env` set to that host, or every JS chunk 403s and the page loads but nothing works. See `.env.example`.
+The LAN address is printed as "Network" in the `next dev` banner — it was `192.168.1.110` on
+2026-08-14, but it is DHCP and will move. Phone testing needs `DEV_ALLOWED_ORIGINS` in `.env` set to
+that host, or every JS chunk 403s and the page loads but nothing works. See `.env.example`.
 
-**If you have pulled a schema change, restart the dev server.** A running server keeps the old Prisma client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See CLAUDE.md.
+**If you have pulled a schema change, restart the dev server.** A running server keeps the old Prisma
+client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See
+CLAUDE.md.
+
+**No dev server is running.** The one from the Slice 5 session was stopped deliberately at the end of
+it, so port 3000 is free.
 
 ### Credentials
 
@@ -28,9 +36,17 @@ The LAN address is printed as "Network" in the `next dev` banner — it was `192
 
 ### Fixture state
 
-150 applicants · 30 reviewers (8 Sparklets) · 428 assignments · loads 14–15 · 128 applicants at 3 reviewers, 22 at 2 · **0 scores** · 4 rubric categories, all with descriptions.
+150 applicants · 30 reviewers (8 Sparklets) · 428 assignments · loads 14–15 · 128 applicants at 3
+reviewers, 22 at 2 · **0 scores** · 4 rubric categories at 5 points each, all with descriptions.
 
-`npm run seed` rebuilds everything **and wipes assignments** — regenerate them from `/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty.
+Scores and a note were written and then cleared again during Slice 5's smoke test, so the fixture is
+back where it started. **That matters more than it used to:** FR-4 locks the rubric the moment any
+`Score` row exists, so the first real score taken on the seed instance will lock
+`/instances/seed_s26_demo/rubric` until someone runs the reset. That is correct behaviour, not a
+regression — it has simply never been reachable before this slice.
+
+`npm run seed` rebuilds everything **and wipes assignments** — regenerate them from
+`/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty.
 
 ---
 
@@ -41,8 +57,9 @@ Outside the §8 admin gate. Reviewers never see the instance list.
 | Route | Does | Status |
 |---|---|---|
 | `/r/<instanceId>?round=WRITTEN` | Sign-in: round picker, name dropdown, access code, one submit (decision 30) | Works |
-| `/r/<instanceId>/list` | Assigned applicants; per-row `n/4 categories` and header `n of m complete` | Works |
-| `/r/<instanceId>/a/<assignmentId>` | Anonymous label, all visible RESPONSE fields, sticky rubric card with descriptions, prev/next | Works, **read-only** |
+| `/r/<instanceId>/list` | Assigned applicants; per-row `n/4 categories` and header `n of m complete`; sign-out clears drafts | Works |
+| `/r/<instanceId>/a/<assignmentId>` | Anonymous label, all visible RESPONSE fields, sticky rubric card, **scoring, note and autosave**, guarded prev/next | Works |
+| `/r/<instanceId>/pool` | Claim from pool | **Does not exist — 404s.** Slice 6 |
 
 Session is a separate signed cookie (`spark_reviewer`), 7 days, scoped to one instance and one round.
 
@@ -54,10 +71,10 @@ Behind the app-level password, then the instance password.
 |---|---|
 | `/` | Instance list |
 | `/instances/new` | FR-2 CSV import |
-| `/instances/<id>` | **Instance hub** — every surface in cycle order with its current state (decision 36). Was an unconditional redirect to `…/mapping` until `d8c42ca` |
+| `/instances/<id>` | **Instance hub** — every surface in cycle order with its current state (decision 36) |
 | `…/mapping` | Field categories, inclusion, OTHER per-round visibility. **Still reachable after commit** — identity is frozen, the three booleans are not (decision 34) |
 | `…/preview` | FR-3 duplicates, blanks, **two-step commit** (decision 35) |
-| `…/rubric` | FR-4 builder — name, max points, **description** (400 chars) |
+| `…/rubric` | FR-4 builder — name, max points, **description** (400 chars). **Locks once any Score exists** |
 | `…/reviewers` | FR-6 roster, paste, removal guard, **access-code card** |
 | `…/assignments` | FR-7 precheck/generate, FR-8 assign/unassign/swap |
 | `…/settings` | FR-5 password reset, instance deletion |
@@ -65,86 +82,96 @@ Behind the app-level password, then the instance password.
 
 ---
 
+## What Slice 5 shipped
+
+FR-9 clauses 3a, 3b, 4a and 4b. The rubric card stopped being read-only.
+
+- **Every mutating control is a form submit bound to a server action**, per decision 33. A score is a
+  `<button type="submit" name="points" value="3">` inside `<form action={saveScoreForm}>`, so a tap
+  before React attaches is a completed native POST. After hydration `onSubmit` calls
+  `preventDefault` first, which suppresses React's own dispatch, and the autosave queue sends it —
+  one request rather than a route re-render.
+- **Segmented 0…maxPoints** at `maxPoints ≤ 10`, falling back to a number input above that. `—`
+  clears, sending `points=""`, which is what takes 3/4 back to 2/4.
+- **`lib/autosave.ts`** holds the queue as a pure state machine over an injected clock: debounce,
+  coalescing, one flight per key, backoff, and the in-flight timeout. 22 tests. It never performs a
+  save — `use-autosave.ts` interprets its effects, and that split is what makes the timing testable.
+- **The localStorage mirror** (decisions 26 and 37) is written on every change and cleared only on a
+  confirmed save, on sign-out, or by a 7-day TTL.
+- **`GuardedLink`** holds an in-app navigation up to 1500 ms, then offers Wait / Leave anyway.
+
+### Verified on a real phone
+
+Walkthrough steps 4 and 5 both pass: airplane mode shows `Unsaved — will retry` and never `Saved`;
+turning it off resolves cleanly; force-quitting with unsaved work restores it still marked unsaved.
+
+The no-JavaScript path was driven end to end over HTTP as well — score saved, note saved,
+`points=99` refused server-side, both cleared again.
+
+---
+
 ## Not built yet
 
-- **Score inputs and the note.** The rubric card shows `— / 5`. FR-9 clauses 3a/3b — Slice 5.
-- **Autosave**, and everything decision 26 and 33 describe. Slice 5.
 - **Return to pool.** Clauses 5a–5c — Slice 6.
-- **Claim from pool.** `/r/<id>/pool` does not exist and 404s. Clauses 6a–6c — Slice 6.
-- **First-round and second-round dashboards.** Sign-in offers those rounds and the seed has codes, but no rosters and no dashboards exist behind them. Phases 5 and 6.
+- **Claim from pool.** `/r/<id>/pool` does not exist and 404s. Clauses 6a–6c — Slice 6, including the
+  `SELECT … FOR UPDATE` concurrency case that needs two devices to test.
+- **The board-member run.** Slice 7. It is a gate step, not a demo, and it cannot be run by the owner.
+- **The PRD status line.** Slice 8, and only after the whole gate passes by hand.
+- **First-round and second-round dashboards.** Sign-in offers those rounds and the seed has codes, but
+  no rosters and no dashboards exist behind them. Phases 5 and 6.
 
-## Waiting to be verified — **both closed 2026-08-13**
+## Still open from the testing pass, and deliberately not code
 
-Both were Slice 3 leftovers that could not be driven from the automation harness. Both passed in the
-structured testing pass; see **`plans/phase-3-test-pass.md`** for that pass in full.
+F-01 (per-point rubric descriptions, a §5 change), F-05 and F-06 (group creation and dissolution
+affordances), F-09 (within-paste duplicate resolution). All four are `preference` — the screen does
+what the requirement says and the owner wants it done differently — so each is a PRD conversation
+first. See `plans/phase-3-test-pass.md`.
 
-1. ~~**Sign-in lockout.**~~ Passed — attempts 1–10 gave the code error, the 11th named a wait. It
-   also surfaced **F-04**: the name dropdown's visible label reverts after every failed submission,
-   though the submitted value survives. Diagnosed and fixed on 2026-08-14 in `42feb19`.
-2. ~~**A non-seeded instance.**~~ Passed end to end, twice, including phone sign-in — decision 31
-   satisfied on an instance built through FR-2.
-
-## The fix pass — **complete for all five defects, 2026-08-14**
-
-`plans/phase-3-test-pass.md` carried nine findings. The five defects are fixed and the PRD decisions
-that had to precede three of them landed first, per CLAUDE.md's PRD-leads-code rule.
-
-| Finding | Severity | Decision | Fix |
-|---|---|---|---|
-| F-07 — `…/reviewers` and `…/assignments` had no inbound link | blocks-gate | 36 | `d8c42ca` |
-| F-03 — field visibility unreachable after commit | defect | 34 | `46b0ba8` |
-| F-08 — commit was one unguarded click | defect | 35 | `d109f20` |
-| F-02 — access-code placeholder was a real credential | defect | — | `fab954b` |
-| F-04 — sign-in name reverted after a failed code | defect | — | `42feb19` |
-
-**Still open, and deliberately not code:** F-01 (per-point rubric descriptions, a §5 change), F-05 and
-F-06 (group creation and dissolution affordances), F-09 (within-paste duplicate resolution). All four
-are `preference` — the screen does what the requirement says and the owner wants it done differently
-— so each is a PRD conversation first. Read the test pass's own note on why that distinction matters
-before picking one up.
-
-**Nothing in the fix pass closes the Phase 3 gate.** Only step 1 (the RSC payload check) was ever
-reachable; steps 2, 3 and 4 need Slices 5, 6 and 7. `PRD.md`'s status line is correctly still
-`v1.5, Phase 0-2 complete, Phase 3 next`.
+---
 
 ## Known hazards
 
-- **Pre-hydration taps do nothing.** `<button type="button">` with `onClick` has no native behaviour, and hydration took ~640 ms on a warm route on desktop. `Generate assignments` is the one that bites in practice — tap it again. PRD decision 33; Slice 5 converts mutating controls to form submits.
-- **`position: fixed` with `bottom: 0` is unusable on mobile Chrome.** It anchors to the layout viewport and renders below the visible area while the URL bar is showing. The score card uses `sticky` for this reason; do not "simplify" it back.
-- **Clicking a native `<select>` from automation is unreliable — driving it from JavaScript is not.** Set the value through the native property setter and dispatch a bubbling `change`, and React's state receives it like a real selection; submit with `form.requestSubmit(button)`. Verified in Chrome on 2026-08-14 while diagnosing F-04, including reading the component's own hook state off the React fiber to confirm the selection had landed. That is what made a DOM-level diagnosis possible where reading server responses could not have reached it.
-- **A server response cannot see a client-side rendering bug.** F-04 was invisible to every HTTP-level check in the testing pass, because the divergence was between React's state and the DOM after hydration. If a finding is about what a control *shows*, it has to be reproduced in a browser.
-- **Server actions can be driven over HTTP, but the two kinds differ.** Plain-argument actions take a `Next-Action: <id>` header with a JSON array body, and the ids are in the page's client chunk (grep it for the exported name). Actions bound through `useActionState` reject that shape with `Connection closed` — replay the form's own hidden `$ACTION_REF_*` / `$ACTION_KEY` fields as multipart instead, with no `Next-Action` header, which is also exactly how the no-JavaScript path is tested.
+Everything from the end of Slice 4 still applies. Added by Slice 5:
+
+- **An in-flight request needs a deadline, not just a retry.** A `fetch` issued while the radio is
+  down does not reliably reject — it can hang forever. Slice 5 originally had retry-on-failure but no
+  timeout, and the retry path skipped any key already `sending`, so a save caught across an
+  offline→online transition was unreachable by the very code meant to rescue it: stuck on `Saving…`
+  indefinitely. Found on a phone in walkthrough step 4. `KeyState.timeoutAt` and the `attempt`
+  generation are the fix; do not collapse `dueAt` and `timeoutAt` back into one field.
+- **A `"use server"` file may only export async functions.** A `const` export there passes typecheck,
+  lint and all 360 tests, and fails only at `npm run build`. **Run `npm run build`, not just
+  `npm run verify`, on anything touching a server-action module.**
+- **A long-running `next dev` goes stale.** After several hours it served a 3 KB Pages-router error
+  shell for `/r/[instanceId]` with `Failed to generate static paths` and Jest worker crashes in
+  `.next/dev/logs/`, while `npm run build` compiled the same route cleanly. Restart it; the build
+  passing while dev does not is the tell.
+- **`__gcruniqueid` / `__gcrremoteframetoken` hydration warnings are a browser extension**, not this
+  app. React's diff names them on `<html>`, the sign-in `<form>`, the `<select>` and the `<input>`;
+  no application attribute is involved, and the warning is development-only. Confirmed 2026-08-14 by
+  reading the component stack out of the dev log. Do not go looking for an app-side cause.
+- **The controlled/uncontrolled asymmetry is load-bearing in both directions.** The score card's
+  fields are **uncontrolled**, because React overwrites a controlled field with its own empty state at
+  hydration and discards anything typed in that window (decision 33). `sign-in-form.tsx`'s `<select>`
+  is **controlled with a ref write-back**, because a form React *dispatches* is reset when its action
+  settles (F-04). Neither score-card field sits in a dispatched form, which is what makes uncontrolled
+  safe there. Changing either half breaks the other.
+
+---
 
 ## Commits in this phase
 
-```
-14aa534  Phase 3 plan
-fdb468e  PRD decision 29 — FR-5 recovery path linked
-913d4de  PRD decisions 26-28, 30, 31 + FR-9 entry route
-c4565eb  Slice 2 — lib/review.ts
-bd2c8a4  Slice 3 — reviewer sign-in + access code
-cb55512  Slice 3 follow-up — access-code card staleness
-73427e6  PRD decision 32 — rubric needs descriptions
-82d5e10  FR-4 — RubricCategory.description
-c39d8d9  PRD decision 33 — pre-hydration data loss
-fbdb17a  Slice 4 — assigned list and applicant detail
-6eab63b  CLAUDE.md — restart next dev after prisma generate
-a6ecc39  Phase 3 handoff — what exists at the end of Slice 4
-16045d7  Phase 3 testing pass — nine findings, one blocking
-```
-
-Then the fix pass, 2026-08-14 — PRD decisions leading their code in every case:
+Slices 0–4 and the fix pass are listed in the git log from `14aa534` to `ab79803`. Slice 5:
 
 ```
-1c32fe9  PRD decisions 34-35 — what commit may freeze, and its guard
-ccb61a8  Test pass — point F-03 and F-08 at their decisions
-47f4a25  PRD decision 36 — an instance hub
-d8c42ca  F-07 — the instance hub                        (blocks-gate)
-46b0ba8  F-03 — visibility survives the commit
-d109f20  F-08 — two-step guard on the commit
-fab954b  F-02 — access-code placeholder + doc catch-up
-42feb19  F-04 — sign-in name no longer reverts
-ab79803  Test pass — record F-02/F-04 fixed, close the record
+1cb1803  PRD decision 37 — what clears the offline draft mirror
+ee0687f  Slice 5 — the autosave queue as a pure state machine
+95dd832  Slice 5 — score inputs, the note, and autosave
+707420f  Slice 5 — recover from a save that never answers
 ```
 
-Next: Slice 5, carrying decision 33's three mitigations — adopt DOM values on mount, mutating controls as form submits, disabled rather than silently inert. Note that F-04's fix is a fourth instance of the same family, and worth reading first: `app/r/[instanceId]/sign-in-form.tsx` documents why controlled state alone does not survive React's post-action form reset on a `<select>`, which is the same reset Slice 5's score inputs will meet.
+All pushed to `origin/main`.
+
+Next: **Slice 6**, clauses 5a–6c. Read `plans/phase-3.md`'s Slice 6 section first — the claim
+concurrency case is the one piece of it that is not obvious, and its walkthrough step 6 needs two
+devices signed in as two different reviewers.
