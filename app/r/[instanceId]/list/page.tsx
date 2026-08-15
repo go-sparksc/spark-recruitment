@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ReturnControl } from "../return-control";
 import { SignOutButton } from "../sign-out-button";
 import { AssignmentStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
@@ -115,6 +116,19 @@ export default async function ReviewerListPage({
                     {row.completion.scored}/{row.completion.total} categories
                   </span>
                 </Link>
+
+                {/* Clause 5a's "any applicant", and the placement is the point:
+                    a reviewer who recognizes a name here can hand it back
+                    without opening the applicant they are trying not to read.
+                    A sibling of the Link rather than inside it — an anchor may
+                    not contain a button, and the disclosure panel needs the
+                    full width of the row to open into. */}
+                <ReturnControl
+                  instanceId={instanceId}
+                  assignmentId={row.id}
+                  label={row.label}
+                  className="border-t border-dashed"
+                />
               </li>
             ))}
           </ul>

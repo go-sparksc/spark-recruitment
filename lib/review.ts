@@ -11,6 +11,7 @@
 // against FR-7's target, and eligibility to claim includes the one-Sparklet
 // invariant. Inlined, each becomes a place where a second surface can disagree.
 
+import { ReturnReason } from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
 import {
   projectApplicantData,
@@ -113,6 +114,52 @@ export function validateScore(points: number | null, maxPoints: number): ScoreVa
   }
 
   return { ok: true, points };
+}
+
+// ---------------------------------------------------------------------------
+// FR-9 bullet 5 — returning an applicant to the pool
+// ---------------------------------------------------------------------------
+
+/// A return note is one line explaining a recusal, not a review. The score
+/// note's 5000 is for reasoning about an applicant; this is for "we were on the
+/// same debate team", and a cap an order of magnitude smaller says so.
+export const MAX_RETURN_NOTE_LENGTH = 500;
+
+const RETURN_REASONS: readonly string[] = Object.values(ReturnReason);
+
+export type ReturnValidation =
+  | { ok: true; reason: ReturnReason; note: string | null }
+  | { ok: false; error: string };
+
+/// FR-9's "with a required reason (conflict of interest / other)".
+///
+/// **The requirement is enforced here rather than by `required` on the radio
+/// group.** The attribute is the courtesy that makes the browser say so before
+/// the round trip; this is the boundary, because the action is a POST endpoint
+/// reachable without the form. Both halves of clause 5b exist and only one of
+/// them is a constraint.
+///
+/// **The note is optional for BOTH reasons, per decision 27** — including
+/// `OTHER`, which is the half that ships as required by accident. A required
+/// text box is a wall in front of the one action a reviewer takes when they
+/// recognize an applicant, and an unexplained "Other" is still more than an
+/// abandoned return.
+///
+/// An empty or whitespace-only note becomes `null` rather than `""`. The column
+/// is nullable and "the reviewer wrote nothing" is not the same fact as "the
+/// reviewer wrote an empty string" — FR-10 will read this later and should not
+/// have to tell them apart.
+export function validateReturn(reason: string | null, note: string): ReturnValidation {
+  if (reason === null || !RETURN_REASONS.includes(reason)) {
+    return { ok: false, error: "Pick a reason." };
+  }
+
+  const trimmed = note.trim();
+  if (trimmed.length > MAX_RETURN_NOTE_LENGTH) {
+    return { ok: false, error: `Keep the reason under ${MAX_RETURN_NOTE_LENGTH} characters.` };
+  }
+
+  return { ok: true, reason: reason as ReturnReason, note: trimmed === "" ? null : trimmed };
 }
 
 // ---------------------------------------------------------------------------

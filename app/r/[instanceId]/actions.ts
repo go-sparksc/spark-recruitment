@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
-import { MAX_NOTE_LENGTH, validateScore } from "@/lib/review";
+import { MAX_NOTE_LENGTH, validateReturn, validateScore } from "@/lib/review";
 import { requireReviewerOnRoster, signInReviewer, signOutReviewer } from "@/lib/reviewer-auth";
 
 export interface SignInState {
@@ -237,6 +237,63 @@ export async function saveNote(formData: FormData): Promise<SaveState> {
   } catch (error) {
     return { ok: false, error: messageOf(error) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// FR-9 clauses 5a, 5b and 5c — returning an applicant to the pool
+// ---------------------------------------------------------------------------
+
+/// "'Return to pool' on any applicant, with a required reason (conflict of
+/// interest / other)."
+///
+/// FormData-shaped like every save above, so the control works before React
+/// attaches — a `<details>` disclosure around a plain form needs no JavaScript
+/// at all, which is decision 33's standard met without a modal.
+///
+/// **`ownedAssignmentId` is reused unchanged and does more here than it looks.**
+/// It scopes to this reviewer, this round, and `status: ACTIVE` — so a forged
+/// id, another reviewer's assignment, and a return submitted twice all refuse
+/// identically, and the second submit cannot re-return something already
+/// returned.
+///
+/// **Scores and the note are deliberately not deleted.** The reviewer handed the
+/// applicant back; they did not retract an opinion they had already recorded.
+/// Whether FR-10 counts a returned reviewer's scores is a Phase 4 question and
+/// is not decided here — but destroying the rows now would decide it silently.
+///
+/// **No `AuditLog` row.** §8 audits admin overrides, and this is not one: the
+/// `Assignment` row is its own record, carrying who returned it, why, the free
+/// text, and when. A log row would duplicate a record that cannot drift from
+/// itself.
+export async function returnToPool(formData: FormData): Promise<void> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const reason = formData.get("reason");
+  const note = String(formData.get("note") ?? "");
+
+  if (instanceId === "" || assignmentId === "") {
+    refuse("Something went wrong. Reload the page and try again.");
+  }
+
+  const verdict = validateReturn(typeof reason === "string" ? reason : null, note);
+  if (!verdict.ok) refuse(verdict.error);
+
+  const owned = await ownedAssignmentId(instanceId, assignmentId);
+
+  await prisma.assignment.update({
+    where: { id: owned },
+    data: {
+      status: AssignmentStatus.RETURNED_TO_POOL,
+      returnReason: verdict.reason,
+      returnNote: verdict.note,
+      returnedAt: new Date(),
+    },
+  });
+
+  // The list is dynamic — it reads cookies — so it re-renders on arrival and
+  // the returned applicant is simply absent, per the ACTIVE filter it already
+  // had. No revalidation needed and none wanted.
+  redirect(`/r/${instanceId}/list`);
 }
 
 /// Only messages this module wrote are shown. A Prisma or connection error

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { ReturnControl } from "../../return-control";
 import { GuardedLink } from "./guarded-link";
 import { ScoreCard, type RubricRow } from "./score-card";
 import { AssignmentStatus } from "@/generated/prisma/enums";
@@ -201,6 +202,17 @@ export default async function ApplicantDetailPage({
               <span />
             )}
           </nav>
+
+          {/* Clause 5a's other half. Outside the score card, whose forms this
+              one cannot nest inside, and deliberately NOT wrapped in
+              GuardedLink: per decision 38 a return does not wait for a save it
+              has just guaranteed will be refused. */}
+          <ReturnControl
+            instanceId={instanceId}
+            assignmentId={assignment.id}
+            label={view.label}
+            className="rounded-md border"
+          />
         </article>
 
         <ScoreCard

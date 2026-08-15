@@ -5,8 +5,10 @@ import {
   buildApplicantView,
   claimEligibility,
   completionOf,
+  MAX_RETURN_NOTE_LENGTH,
   openSlotsOf,
   targetFor,
+  validateReturn,
   validateScore,
   type ApplicantSource,
   type ReviewFieldGroupLike,
@@ -188,6 +190,73 @@ describe("validateScore", () => {
     // is legal and a 5-point ceiling would silently refuse half its range.
     expect(validateScore(9, 10)).toEqual({ ok: true, points: 9 });
     expect(validateScore(9, 5).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-9 bullet 5 — returning to the pool
+// ---------------------------------------------------------------------------
+
+describe("validateReturn", () => {
+  it("accepts a conflict of interest with no free text", () => {
+    expect(validateReturn("CONFLICT_OF_INTEREST", "")).toEqual({
+      ok: true,
+      reason: "CONFLICT_OF_INTEREST",
+      note: null,
+    });
+  });
+
+  it("accepts OTHER with no free text, per decision 27", () => {
+    // The clause most likely to ship as required by accident. Decision 27 is
+    // explicit that the text is optional for BOTH reasons.
+    expect(validateReturn("OTHER", "")).toEqual({ ok: true, reason: "OTHER", note: null });
+  });
+
+  it("keeps the free text when there is some, for either reason", () => {
+    expect(validateReturn("CONFLICT_OF_INTEREST", "We were on the same team.")).toEqual({
+      ok: true,
+      reason: "CONFLICT_OF_INTEREST",
+      note: "We were on the same team.",
+    });
+    expect(validateReturn("OTHER", "Out of town this week.")).toEqual({
+      ok: true,
+      reason: "OTHER",
+      note: "Out of town this week.",
+    });
+  });
+
+  it("stores a whitespace-only note as null rather than as text", () => {
+    // "wrote nothing" and "wrote an empty string" are different facts and FR-10
+    // reads this column later. The nullable column should carry only the first.
+    expect(validateReturn("OTHER", "   \n  ")).toEqual({ ok: true, reason: "OTHER", note: null });
+  });
+
+  it("trims the note it does keep", () => {
+    const verdict = validateReturn("OTHER", "  I know them.  ");
+    expect(verdict).toEqual({ ok: true, reason: "OTHER", note: "I know them." });
+  });
+
+  it("refuses a missing reason — clause 5b's server half", () => {
+    // `required` on the radio group is the courtesy. This is the boundary: the
+    // action is a POST endpoint reachable without ever loading the form.
+    expect(validateReturn(null, "")).toEqual({ ok: false, error: "Pick a reason." });
+    expect(validateReturn("", "")).toEqual({ ok: false, error: "Pick a reason." });
+  });
+
+  it("refuses a reason outside the two the enum offers", () => {
+    expect(validateReturn("BECAUSE_I_SAID_SO", "").ok).toBe(false);
+    // Case matters: the value goes straight into a Postgres enum column.
+    expect(validateReturn("other", "").ok).toBe(false);
+  });
+
+  it("refuses a note longer than the cap", () => {
+    expect(validateReturn("OTHER", "x".repeat(MAX_RETURN_NOTE_LENGTH)).ok).toBe(true);
+    expect(validateReturn("OTHER", "x".repeat(MAX_RETURN_NOTE_LENGTH + 1)).ok).toBe(false);
+  });
+
+  it("measures the cap after trimming, so trailing space is not an error", () => {
+    const padded = `${"x".repeat(MAX_RETURN_NOTE_LENGTH)}     `;
+    expect(validateReturn("OTHER", padded).ok).toBe(true);
   });
 });
 

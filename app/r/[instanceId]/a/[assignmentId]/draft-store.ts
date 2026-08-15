@@ -120,6 +120,25 @@ export function clearDraftField(assignmentId: string, key: string, nowMs = Date.
   });
 }
 
+/// Every draft for one assignment. Decision 38's return-to-pool clear.
+///
+/// **Why the whole key rather than `clearDraftField` per key:** a return is not
+/// a save. The reviewer no longer holds the assignment afterwards, so the save
+/// path refuses every subsequent write for it and nothing in this record can
+/// ever be flushed. Left behind it would sit for the full TTL as reviewer-
+/// authored text about an applicant they have just recused themselves from,
+/// which is the exposure decision 37 exists to bound in its least defensible
+/// form.
+///
+/// Carries decision 37's caveat unchanged: this runs as a client-side side
+/// effect on the return's submit, so a return tapped before hydration returns
+/// the applicant and leaves the draft. The TTL is the backstop.
+export function clearDraft(assignmentId: string): void {
+  withStorage(undefined, (storage) => {
+    storage.removeItem(keyFor(assignmentId));
+  });
+}
+
 /// Every draft, for every assignment. Decision 37's sign-out clear.
 ///
 /// Note what this cannot cover, per that decision: sign-out is a server action
