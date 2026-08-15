@@ -139,11 +139,23 @@ export default async function AssignmentsPage({
         displayName: true,
         id: true,
         sourceRowIndex: true,
+        // Both statuses, partitioned below. PRD decision 39: every query on this
+        // page filtered ACTIVE, which is how a return reason came to be written
+        // and then read by nobody — and decision 27 made its free text optional
+        // precisely because the reason is "what an admin acts on".
+        //
+        // One relation read rather than two, because Prisma cannot select the
+        // same relation twice under different filters and a second round trip
+        // for ~20 rows would buy nothing.
         assignments: {
-          where: { round: ROUND, status: AssignmentStatus.ACTIVE },
+          where: { round: ROUND },
+          orderBy: { returnedAt: "desc" },
           select: {
             id: true,
             origin: true,
+            status: true,
+            returnReason: true,
+            returnNote: true,
             reviewer: { select: { id: true, firstName: true, lastName: true, isSparklet: true } },
           },
         },
@@ -180,13 +192,30 @@ export default async function AssignmentsPage({
     // way to find one person among 150.
     label: `Applicant ${applicant.sourceRowIndex}`,
     name: applicant.displayName,
-    reviewers: applicant.assignments.map((assignment) => ({
-      assignmentId: assignment.id,
-      id: assignment.reviewer.id,
-      name: `${assignment.reviewer.firstName} ${assignment.reviewer.lastName}`,
-      isSparklet: assignment.reviewer.isSparklet,
-      origin: assignment.origin,
-    })),
+    reviewers: applicant.assignments
+      .filter((assignment) => assignment.status === AssignmentStatus.ACTIVE)
+      .map((assignment) => ({
+        assignmentId: assignment.id,
+        id: assignment.reviewer.id,
+        name: `${assignment.reviewer.firstName} ${assignment.reviewer.lastName}`,
+        isSparklet: assignment.reviewer.isSparklet,
+        origin: assignment.origin,
+      })),
+    // Decision 39. Rendered, and deliberately not actionable: a returned row is
+    // the record of a recusal, and an admin who could delete it would be able to
+    // let generation re-pair that reviewer with that applicant, which decision
+    // 23 forbids. Putting them back is FR-8's assign, which reactivates the row.
+    returned: applicant.assignments
+      .filter((assignment) => assignment.status === AssignmentStatus.RETURNED_TO_POOL)
+      .map((assignment) => ({
+        assignmentId: assignment.id,
+        name: `${assignment.reviewer.firstName} ${assignment.reviewer.lastName}`,
+        reason:
+          assignment.returnReason === "CONFLICT_OF_INTEREST"
+            ? "knows the applicant"
+            : "other reason",
+        note: assignment.returnNote,
+      })),
   }));
 
   return (

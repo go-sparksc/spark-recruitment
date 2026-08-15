@@ -255,6 +255,15 @@ export async function generate(
 /// The two rules that can refuse it are named rather than left to the unique
 /// index: FR-7's one-Sparklet rule, and the pair already existing. A constraint
 /// violation surfacing as a database error tells an admin nothing they can act on.
+///
+/// **Where the pair already exists as a RETURNED_TO_POOL row, this reactivates
+/// it rather than inserting** — PRD decision 39. `current` below reads only
+/// ACTIVE rows, so before Phase 3 this fell through to a `create` that violated
+/// `UNIQUE (round, applicantId, reviewerId)` and surfaced as a raw database
+/// error. It was unreachable until FR-9's return-to-pool existed to create such
+/// a row, which is why it survived Phase 2's walkthrough. Same shape as decision
+/// 28's re-claim, and the same reasoning: a deliberate person overriding a
+/// recusal is not generation re-pairing them.
 export async function assignReviewer(
   instanceId: string,
   round: Round,
@@ -289,10 +298,30 @@ export async function assignReviewer(
     };
   }
 
+  // Any row found here is RETURNED_TO_POOL: an ACTIVE one would have refused
+  // above as already on the applicant.
+  const returned = await prisma.assignment.findUnique({
+    where: { round_applicantId_reviewerId: { round, applicantId, reviewerId } },
+    select: { id: true, returnReason: true },
+  });
+
   await prisma.$transaction(async (tx) => {
-    await tx.assignment.create({
-      data: { instanceId, round, applicantId, reviewerId, origin: AssignmentOrigin.MANUAL },
-    });
+    if (returned) {
+      await tx.assignment.update({
+        where: { id: returned.id },
+        data: {
+          status: AssignmentStatus.ACTIVE,
+          origin: AssignmentOrigin.MANUAL,
+          returnReason: null,
+          returnNote: null,
+          returnedAt: null,
+        },
+      });
+    } else {
+      await tx.assignment.create({
+        data: { instanceId, round, applicantId, reviewerId, origin: AssignmentOrigin.MANUAL },
+      });
+    }
     await tx.auditLog.create({
       data: {
         instanceId,
@@ -300,13 +329,24 @@ export async function assignReviewer(
         action: "ASSIGN_REVIEWER",
         entityType: "Applicant",
         entityId: applicantId,
-        previousValue: { round, reviewerId, reviewerName: `${reviewer.firstName} ${reviewer.lastName}` },
+        previousValue: {
+          round,
+          reviewerId,
+          reviewerName: `${reviewer.firstName} ${reviewer.lastName}`,
+          // §8 wants the previous value, and "this reviewer had recused
+          // themselves and an admin overrode it" is the part worth keeping.
+          ...(returned ? { reactivatedFrom: returned.returnReason } : {}),
+        },
       },
     });
   });
 
   revalidatePath(path(instanceId));
-  return { message: `Assigned ${reviewer.firstName} ${reviewer.lastName}.` };
+  return {
+    message: returned
+      ? `Assigned ${reviewer.firstName} ${reviewer.lastName}, who had returned this applicant.`
+      : `Assigned ${reviewer.firstName} ${reviewer.lastName}.`,
+  };
 }
 
 /// FR-8's third verb. One transaction, not an unassign followed by an assign.
@@ -368,6 +408,16 @@ export async function swapReviewer(
     };
   }
 
+  // Decision 39's case again, on the other verb. FR-8 is "assign, unassign, or
+  // swap" and fixing only the first of the three is the exact failure CLAUDE.md
+  // names: the incoming reviewer may hold a RETURNED_TO_POOL row on this
+  // applicant, and `existing` above reads only ACTIVE ones, so the create below
+  // would violate the unique index.
+  const incomingReturned = await prisma.assignment.findUnique({
+    where: { round_applicantId_reviewerId: { round, applicantId, reviewerId: inReviewerId } },
+    select: { id: true, returnReason: true },
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.auditLog.create({
       data: {
@@ -386,13 +436,27 @@ export async function swapReviewer(
           deletedScoreCount: outgoing._count.scores,
           inReviewerId,
           inReviewerName: `${incoming.firstName} ${incoming.lastName}`,
+          ...(incomingReturned ? { inReactivatedFrom: incomingReturned.returnReason } : {}),
         },
       },
     });
     await tx.assignment.delete({ where: { id: outgoing.id } });
-    await tx.assignment.create({
-      data: { instanceId, round, applicantId, reviewerId: inReviewerId, origin: AssignmentOrigin.MANUAL },
-    });
+    if (incomingReturned) {
+      await tx.assignment.update({
+        where: { id: incomingReturned.id },
+        data: {
+          status: AssignmentStatus.ACTIVE,
+          origin: AssignmentOrigin.MANUAL,
+          returnReason: null,
+          returnNote: null,
+          returnedAt: null,
+        },
+      });
+    } else {
+      await tx.assignment.create({
+        data: { instanceId, round, applicantId, reviewerId: inReviewerId, origin: AssignmentOrigin.MANUAL },
+      });
+    }
   });
 
   revalidatePath(path(instanceId));

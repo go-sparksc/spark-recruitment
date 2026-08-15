@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { openPoolFor } from "../pool-query";
 import { ReturnControl } from "../return-control";
 import { SignOutButton } from "../sign-out-button";
 import { AssignmentStatus } from "@/generated/prisma/enums";
@@ -76,6 +77,15 @@ export default async function ReviewerListPage({
 
   const completeCount = rows.filter((row) => row.completion.complete).length;
 
+  // Clause 6a's live count. The same function the pool page lists with, so the
+  // number in the header and the rows behind it cannot disagree.
+  const openCount = (
+    await openPoolFor(instanceId, session.rd, {
+      id: reviewer.id,
+      isSparklet: reviewer.isSparklet,
+    })
+  ).length;
+
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-6">
       <header className="space-y-1">
@@ -84,6 +94,24 @@ export default async function ReviewerListPage({
           {reviewer.firstName} {reviewer.lastName} · {instance.name}
         </p>
       </header>
+
+      {/* Clause 6a. Outside the empty-list branch on purpose: a reviewer who has
+          returned everything, or who signed in before assignments were
+          generated, is exactly the person with a reason to look at the pool.
+          Rendered whatever the count, because a link that disappears when it
+          reads zero is a link nobody can go looking for — and the pool's own
+          empty state says more than a missing link does. */}
+      <Link
+        href={`/r/${instanceId}/pool`}
+        className="hover:bg-muted mt-4 flex min-h-11 items-center justify-between gap-3 rounded-md border px-4 text-sm font-medium"
+      >
+        Claim from pool
+        {openCount > 0 ? (
+          <span className="text-muted-foreground">{openCount} open</span>
+        ) : (
+          <span className="text-muted-foreground">none open</span>
+        )}
+      </Link>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground mt-6 rounded-md border p-4 text-sm">

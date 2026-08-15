@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
+import { claimSlotWithin } from "@/lib/claim-slot";
 import { prisma } from "@/lib/prisma";
 import { MAX_NOTE_LENGTH, validateReturn, validateScore } from "@/lib/review";
 import { requireReviewerOnRoster, signInReviewer, signOutReviewer } from "@/lib/reviewer-auth";
@@ -294,6 +295,50 @@ export async function returnToPool(formData: FormData): Promise<void> {
   // the returned applicant is simply absent, per the ACTIVE filter it already
   // had. No revalidation needed and none wanted.
   redirect(`/r/${instanceId}/list`);
+}
+
+// ---------------------------------------------------------------------------
+// FR-9 clause 6 — claiming an open slot
+// ---------------------------------------------------------------------------
+
+/// FR-9 clause 6a: "'Claim from pool'".
+///
+/// **The losing claimant is redirected, not thrown at.** A thrown error renders
+/// an error boundary, and the walkthrough's requirement is that neither device
+/// in the race sees a 500 — one lands on the applicant, the other is told
+/// plainly and gets a pool list that no longer offers it. The redirect back to
+/// `/pool` re-renders that list on the way, which is the refresh, and it works
+/// with no JavaScript, which the pre-hydration path needs.
+///
+/// **`redirect` is called after the transaction closes, never inside it.** It
+/// reports by throwing a control-flow error, and thrown inside `$transaction`
+/// that error is a rollback — the claim would be undone and the reviewer would
+/// land on an applicant that is not theirs.
+export async function claimSlot(formData: FormData): Promise<void> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const applicantId = String(formData.get("applicantId") ?? "");
+
+  if (instanceId === "" || applicantId === "") {
+    refuse("Something went wrong. Reload the page and try again.");
+  }
+
+  // Same boundary as every other action here: the session decides who is
+  // claiming, and the Sparklet flag is read from the database rather than
+  // accepted from the request.
+  const { session, reviewer } = await requireReviewerOnRoster(instanceId);
+
+  const outcome = await prisma.$transaction((tx) =>
+    claimSlotWithin(tx, {
+      instanceId,
+      round: session.rd,
+      applicantId,
+      reviewer: { id: reviewer.id, isSparklet: reviewer.isSparklet },
+    }),
+  );
+
+  if (!outcome.ok) redirect(`/r/${instanceId}/pool?claim=${outcome.reason}`);
+
+  redirect(`/r/${instanceId}/a/${outcome.assignmentId}`);
 }
 
 /// Only messages this module wrote are shown. A Prisma or connection error

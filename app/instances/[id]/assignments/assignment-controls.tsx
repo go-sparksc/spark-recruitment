@@ -21,6 +21,9 @@ export interface ApplicantRow {
   /// The real name. Admin-only by §6, and the only way to find one person.
   name: string;
   reviewers: { assignmentId: string; id: string; name: string; isSparklet: boolean; origin: string }[];
+  /// Reviewers who handed this applicant back, per PRD decision 39. Read-only:
+  /// the row records a recusal that generation must keep honouring.
+  returned: { assignmentId: string; name: string; reason: string; note: string | null }[];
 }
 
 export interface PagingView {
@@ -439,6 +442,21 @@ export function OverridePanel({
                   </Button>
                 )}
               </div>
+
+              {/* PRD decision 39. Read-only by design: a returned row is the
+                  record of a recusal and generation must keep honouring it
+                  (decision 23), so there is no × here. To put one of these
+                  reviewers back, use Assign — it reactivates this row. */}
+              {applicant.returned.length > 0 ? (
+                <ul className="text-muted-foreground space-y-0.5 text-xs">
+                  {applicant.returned.map((entry) => (
+                    <li key={entry.assignmentId}>
+                      Returned · {entry.name} — {entry.reason}
+                      {entry.note ? <span className="italic"> — “{entry.note}”</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </li>
           );
         })}
