@@ -647,6 +647,16 @@ These need answers before or during the relevant build phase. They are the place
 
     Every instance page keeps its `← Instances` link to FR-1's list and gains the instance name as a second crumb pointing at the hub, so the hub is reachable from the surfaces it links to rather than only from the list.
 
+37. **The offline draft mirror is reviewer data on a personal device. RESOLVED: cleared on a confirmed save, on sign-out, and by a 7-day TTL.** Decision 26 makes a `localStorage` mirror the thing that makes "never a silent loss" true, and then says nothing about what ever removes it. §8 governs applicant data on the server and in the repository; this is reviewer-authored text *about* an applicant, sitting unencrypted in a browser on someone's own phone, and under decision 26 as written nothing would delete it — not signing out, not the end of the round, not the end of the cycle.
+
+    The mirror is keyed by `assignmentId` and holds only what the reviewer typed: scores, and the free-text note. **No applicant name, no email, and not even the anonymous label** — a reader of the storage sees `spark-review:draft:<cuid>` and some prose, with nothing in it that identifies who the prose is about. That is what keeps the exposure proportionate to the guarantee it buys, and it is a property to preserve rather than an accident of the first implementation.
+
+    Three things clear it. A **confirmed save** clears that key, which is the common case and the reason the mirror is usually empty. **Signing out** clears every draft for the instance. And any record older than **7 days** is dropped rather than restored when it is next read — which matches `REVIEWER_SESSION_TTL_SECONDS` exactly, on the reasoning that a draft outliving the session that could have saved it is not a draft any more.
+
+    **What the sign-out clear does not cover, stated rather than left to be discovered.** Sign-out is a server action and the clearing is a client-side side effect on its submit, so a sign-out tapped before the page hydrates signs the reviewer out and leaves the drafts behind. That is decision 33's window again, and it is not closable here: clearing browser storage is not something a server action can do. The TTL is the backstop for precisely that case, which is why this decision does not rest on the sign-out path alone.
+
+    **Related, and the reason this needed writing down at all:** decision 26 is careful that the dialog is not the guarantee and the mirror is. That makes the mirror the one component whose *absence* is a silent failure and whose *persistence* is a privacy question, and it had neither an owner nor an expiry. Both are now stated. No schema change and no server-side storage — this is entirely browser-local, which is also why §8's retention rules could never have reached it.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
