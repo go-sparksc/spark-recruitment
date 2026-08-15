@@ -343,6 +343,23 @@ The insert writes `origin: CLAIMED_FROM_POOL` (per §5, FR-8, and decision 21). 
 
 ---
 
+**What actually shipped, where it differs from the section above.** Recorded here rather than left as a
+diff to reverse-engineer.
+
+- **Two PRD decisions lead, not one.** 38 covers what a return does to the offline draft mirror — decision 37 named three things that clear it and return-to-pool was not one, because it did not exist yet. 39 covers a gap found while reading: **every query on `/instances/[id]/assignments` filters `status: ACTIVE`**, so the reason decision 27 called "what an admin acts on" was written and then readable by nobody. Decision 29's general form for the third time.
+- **Decision 39 grew a second half during implementation, and it is the more serious one.** `assignReviewer` checks only a applicant's *active* reviewers and then inserts, so assigning a reviewer who had returned that applicant violates `UNIQUE (round, applicantId, reviewerId)` and surfaces as a raw database error. It reactivates the row instead. **`swapReviewer` had the identical defect** and is fixed with it — FR-8 is "assign, unassign, or swap", which is CLAUDE.md's own example of the clause list where the first item gets built and the rest quietly do not.
+- **The return control is a `<details>` disclosure around a plain form, not a modal.** It opens natively, so it works with no JavaScript and identically before hydration — decision 33's standard met without a dialog, a portal or a state machine. The client wrapper adds one thing: decision 38's draft clear, on `onSubmit`, exactly as `sign-out-button.tsx` does.
+- **The pool link renders whatever the count**, rather than being hidden at zero as this plan said, and it sits outside the empty-list branch. A link that disappears when it reads zero is a link nobody can go looking for — and Slice 7 asks a stranger to find it unaided. A reviewer who has returned everything is exactly the person with a reason to open the pool.
+- **`claimMessage` lives in `lib/claim-slot.ts`**, not beside the action: a `"use server"` module may only export async functions, and that module owns the failure union the message map is keyed by. A total `Record`, so a fifth failure cannot be added without writing its sentence.
+- **The admin page reads both statuses in one relation and partitions in JS**, because Prisma cannot select the same relation twice under two filters.
+- **The race harness took two rewrites, and this is the part worth reading.** Both of the obvious versions pass over a deliberately unlocked copy of the claim:
+  1. *Two concurrent claims, assert one loses.* They serialize on their own often enough that the loser refuses for the right reason by accident.
+  2. *Hold the row lock elsewhere, assert the claim blocks.* True either way — inserting an `Assignment` takes a `FOR KEY SHARE` lock on its parent `Applicant` for the foreign key, which conflicts with a held `FOR UPDATE` all by itself. **Every** claim blocks.
+
+  What separates a locked claim from an unlocked one is *when the eligibility read happens*, so part 1 now takes the last slot away while the claim is waiting. The unlocked copy returns `ok` and leaves 4 reviewers against a target of 3; the real one refuses with `NO_OPEN_SLOTS`. Measured with a throwaway probe file rather than by editing `lib/claim-slot.ts`, per CLAUDE.md.
+
+  The general lesson, since it will recur: **a green check that would stay green with the mechanism removed is the same failure as a test that agrees with the implementation and is wrong with it.** Ask what the check would do against the bug before trusting it.
+
 ### Slice 7 — The board-member run
 
 BUILD_PLAN's Phase 3 gate ends with *"have one board member who has never seen it complete a review without instructions."* It is the hardest clause in the gate and the easiest to let evaporate into "I showed someone and they seemed fine," so it is scheduled here as its own step between the last code slice and the status line, not folded into either.

@@ -1,10 +1,24 @@
-# Phase 3 handoff — end of Slice 5
+# Phase 3 handoff — end of Slice 6
 
-**As of `707420f`, 2026-08-14.** Slices 0–5 are committed and pushed. **Next session starts at
-Slice 6 — return to pool and claim from pool.**
+**As of `6b16e65`, 2026-08-15.** Slices 0–6 are committed. **The next step is not code: it is the
+Slice 6 walkthrough, which has not been run, and then Slice 7's board-member run.**
 
 This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually
 exists, what does not, and what is waiting to be verified.
+
+---
+
+## Read this first
+
+**Nothing in Slice 6 has been seen in a browser.** `npm run verify` passes (369 tests), `npm run
+build` passes, the routes compile and respond in dev, and `prisma/checks/claim-race.ts` passes
+against a real database — but every reviewer route redirects to sign-in without a session, so no
+rendering of the return control, the pool page, or the admin returned-rows line has been observed by
+anyone. Phase 2 shipped four defects that only a person using the screen could find. Assume Slice 6
+has some.
+
+The full walkthrough is `plans/phase-3.md`'s Slice 6 section, steps 1–10, plus two added by decision
+38 and repeated at the end of this document.
 
 ---
 
@@ -15,15 +29,16 @@ npm run dev        # http://localhost:3000, and http://<lan-ip>:3000 for a phone
 ```
 
 The LAN address is printed as "Network" in the `next dev` banner — it was `192.168.1.110` on
-2026-08-14, but it is DHCP and will move. Phone testing needs `DEV_ALLOWED_ORIGINS` in `.env` set to
-that host, or every JS chunk 403s and the page loads but nothing works. See `.env.example`.
+2026-08-15, unchanged from the Slice 5 session, but it is DHCP and will move. Phone testing needs
+`DEV_ALLOWED_ORIGINS` in `.env` set to that host, or every JS chunk 403s and the page loads but
+nothing works. See `.env.example`.
 
 **If you have pulled a schema change, restart the dev server.** A running server keeps the old Prisma
 client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See
-CLAUDE.md.
+CLAUDE.md. Slice 6 involved **no schema change and no migration**, so this did not bite here.
 
-**No dev server is running.** The one from the Slice 5 session was stopped deliberately at the end of
-it, so port 3000 is free.
+**A dev server may still be running** from the Slice 6 session on port 3000. It has been up for
+hours; the handoff below on stale dev servers applies — restart it before trusting anything.
 
 ### Credentials
 
@@ -36,14 +51,15 @@ it, so port 3000 is free.
 
 ### Fixture state
 
-150 applicants · 30 reviewers (8 Sparklets) · 428 assignments · loads 14–15 · 128 applicants at 3
+150 applicants · 30 reviewers (8 Sparklets) · **428 assignments** · loads 14–15 · 128 applicants at 3
 reviewers, 22 at 2 · **0 scores** · 4 rubric categories at 5 points each, all with descriptions.
 
-Scores and a note were written and then cleared again during Slice 5's smoke test, so the fixture is
-back where it started. **That matters more than it used to:** FR-4 locks the rubric the moment any
-`Score` row exists, so the first real score taken on the seed instance will lock
-`/instances/seed_s26_demo/rubric` until someone runs the reset. That is correct behaviour, not a
-regression — it has simply never been reachable before this slice.
+Unchanged from the end of Slice 5. `claim-race.ts` was run four times against this database and each
+run verified the count back at 428 afterwards.
+
+Those 22 applicants at 2 of 3 are the 5% pool, so **the pool page has ~22 rows before anyone returns
+anything** — that is correct, not a bug, and it is what makes walkthrough steps 5 and 6 possible
+without setting anything up.
 
 `npm run seed` rebuilds everything **and wipes assignments** — regenerate them from
 `/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty.
@@ -57,121 +73,103 @@ Outside the §8 admin gate. Reviewers never see the instance list.
 | Route | Does | Status |
 |---|---|---|
 | `/r/<instanceId>?round=WRITTEN` | Sign-in: round picker, name dropdown, access code, one submit (decision 30) | Works |
-| `/r/<instanceId>/list` | Assigned applicants; per-row `n/4 categories` and header `n of m complete`; sign-out clears drafts | Works |
-| `/r/<instanceId>/a/<assignmentId>` | Anonymous label, all visible RESPONSE fields, sticky rubric card, **scoring, note and autosave**, guarded prev/next | Works |
-| `/r/<instanceId>/pool` | Claim from pool | **Does not exist — 404s.** Slice 6 |
+| `/r/<instanceId>/list` | Assigned applicants, completion state, **pool link with a live count**, **return control per row** | Compiles; **not clicked** |
+| `/r/<instanceId>/a/<assignmentId>` | Responses, sticky rubric, scoring, note, autosave, guarded prev/next, **return control** | Scoring works; return **not clicked** |
+| `/r/<instanceId>/pool` | **Claim from pool** — label, `n of 3 reviewers`, one-tap Claim | New; **not clicked** |
 
 Session is a separate signed cookie (`spark_reviewer`), 7 days, scoped to one instance and one round.
 
 ## Admin surface — `/instances/<id>/…`
 
-Behind the app-level password, then the instance password.
-
-| Route | Does |
-|---|---|
-| `/` | Instance list |
-| `/instances/new` | FR-2 CSV import |
-| `/instances/<id>` | **Instance hub** — every surface in cycle order with its current state (decision 36) |
-| `…/mapping` | Field categories, inclusion, OTHER per-round visibility. **Still reachable after commit** — identity is frozen, the three booleans are not (decision 34) |
-| `…/preview` | FR-3 duplicates, blanks, **two-step commit** (decision 35) |
-| `…/rubric` | FR-4 builder — name, max points, **description** (400 chars). **Locks once any Score exists** |
-| `…/reviewers` | FR-6 roster, paste, removal guard, **access-code card** |
-| `…/assignments` | FR-7 precheck/generate, FR-8 assign/unassign/swap |
-| `…/settings` | FR-5 password reset, instance deletion |
-| `…/unlock` | Instance password, with the FR-5 recovery link (decision 29) |
+Unchanged except `…/assignments`, which now renders **returned rows** under each applicant —
+`Returned · Jane Doe — knows the applicant`, dimmed and with no controls. Decision 39.
 
 ---
 
-## What Slice 5 shipped
+## What Slice 6 shipped
 
-FR-9 clauses 3a, 3b, 4a and 4b. The rubric card stopped being read-only.
+Three commits.
 
-- **Every mutating control is a form submit bound to a server action**, per decision 33. A score is a
-  `<button type="submit" name="points" value="3">` inside `<form action={saveScoreForm}>`, so a tap
-  before React attaches is a completed native POST. After hydration `onSubmit` calls
-  `preventDefault` first, which suppresses React's own dispatch, and the autosave queue sends it —
-  one request rather than a route re-render.
-- **Segmented 0…maxPoints** at `maxPoints ≤ 10`, falling back to a number input above that. `—`
-  clears, sending `points=""`, which is what takes 3/4 back to 2/4.
-- **`lib/autosave.ts`** holds the queue as a pure state machine over an injected clock: debounce,
-  coalescing, one flight per key, backoff, and the in-flight timeout. 22 tests. It never performs a
-  save — `use-autosave.ts` interprets its effects, and that split is what makes the timing testable.
-- **The localStorage mirror** (decisions 26 and 37) is written on every change and cleared only on a
-  confirmed save, on sign-out, or by a 7-day TTL.
-- **`GuardedLink`** holds an in-app navigation up to 1500 ms, then offers Wait / Leave anyway.
+- **`00efdc4` — PRD decisions 38 and 39.** What a return does to the draft mirror; and the return
+  reason that no admin surface rendered.
+- **`17364bb` — return to pool.** Clauses 5a, 5b, 5c. A `<details>` disclosure around a plain form,
+  on every list row and on the detail screen. `validateReturn` in `lib/review.ts` is the server half
+  of "required reason"; `required` on the radios is the browser's. Free text optional for **both**
+  reasons.
+- **`6b16e65` — claim from pool.** Clauses 6a, 6b, 6c. `lib/claim-slot.ts` holds the transaction,
+  which opens with `SELECT … FOR UPDATE` on the applicant. `app/r/[instanceId]/pool-query.ts` is the
+  one definition of "open to me", called by both the pool page and the list header so the count and
+  the rows cannot disagree. Also decision 39's admin rendering, and its second half: **`assign` and
+  `swap` both reactivate a returned row** instead of inserting over it and violating the unique
+  index.
 
-### Verified on a real phone
+### Verified without a browser
 
-Walkthrough steps 4 and 5 both pass: airplane mode shows `Unsaved — will retry` and never `Saved`;
-turning it off resolves cleanly; force-quitting with unsaved work restores it still marked unsaved.
-
-The no-JavaScript path was driven end to end over HTTP as well — score saved, note saved,
-`points=99` refused server-side, both cleared again.
+- `npm run verify` — 369 tests, typecheck, lint.
+- `npm run build` — the "a `use server` file may only export async functions" trap fired once, on
+  `claimMessage`, and moving it to `lib/claim-slot.ts` is why that module owns the message map.
+- `npx tsx prisma/checks/claim-race.ts` — 8 checks, all passing, fixtures cleaned up and verified.
 
 ---
 
 ## Not built yet
 
-- **Return to pool.** Clauses 5a–5c — Slice 6.
-- **Claim from pool.** `/r/<id>/pool` does not exist and 404s. Clauses 6a–6c — Slice 6, including the
-  `SELECT … FOR UPDATE` concurrency case that needs two devices to test.
-- **The board-member run.** Slice 7. It is a gate step, not a demo, and it cannot be run by the owner.
+- **The Slice 6 walkthrough.** Ten steps in `plans/phase-3.md` plus two below. **This is the next
+  thing to do.**
+- **The board-member run.** Slice 7. A gate step, not a demo, and it cannot be run by the owner.
 - **The PRD status line.** Slice 8, and only after the whole gate passes by hand.
-- **First-round and second-round dashboards.** Sign-in offers those rounds and the seed has codes, but
-  no rosters and no dashboards exist behind them. Phases 5 and 6.
+- **First-round and second-round dashboards.** Phases 5 and 6.
 
 ## Still open from the testing pass, and deliberately not code
 
-F-01 (per-point rubric descriptions, a §5 change), F-05 and F-06 (group creation and dissolution
-affordances), F-09 (within-paste duplicate resolution). All four are `preference` — the screen does
-what the requirement says and the owner wants it done differently — so each is a PRD conversation
-first. See `plans/phase-3-test-pass.md`.
+F-01, F-05, F-06, F-09 — all `preference`, each a PRD conversation first. See
+`plans/phase-3-test-pass.md`.
+
+---
+
+## The two walkthrough steps decision 38 added
+
+Beyond the ten in `plans/phase-3.md`:
+
+11. Type a note and, **before it saves**, return the applicant. It leaves the list with no "Still
+    saving" hold. Claim it back from the pool and reopen it: the saved scores are there and the
+    discarded draft is not.
+12. Return an applicant with everything already saved. Nothing is lost and no dialog appears — the
+    common case must not have gained a step.
+
+**Step 6 still needs two devices** signed in as two different reviewers, both eligible for the same
+one-slot applicant, tapping Claim within the same second. `claim-race.ts` is a pre-flight for the
+lock, not a substitute: it skips HTTP, the session, and Next's per-client sequential dispatch, and
+that dispatch is exactly what would hide the race in one browser.
 
 ---
 
 ## Known hazards
 
-Everything from the end of Slice 4 still applies. Added by Slice 5:
+Everything from the end of Slice 5 still applies. Added by Slice 6:
 
-- **An in-flight request needs a deadline, not just a retry.** A `fetch` issued while the radio is
-  down does not reliably reject — it can hang forever. Slice 5 originally had retry-on-failure but no
-  timeout, and the retry path skipped any key already `sending`, so a save caught across an
-  offline→online transition was unreachable by the very code meant to rescue it: stuck on `Saving…`
-  indefinitely. Found on a phone in walkthrough step 4. `KeyState.timeoutAt` and the `attempt`
-  generation are the fix; do not collapse `dueAt` and `timeoutAt` back into one field.
-- **A `"use server"` file may only export async functions.** A `const` export there passes typecheck,
-  lint and all 360 tests, and fails only at `npm run build`. **Run `npm run build`, not just
-  `npm run verify`, on anything touching a server-action module.**
-- **A long-running `next dev` goes stale.** After several hours it served a 3 KB Pages-router error
-  shell for `/r/[instanceId]` with `Failed to generate static paths` and Jest worker crashes in
-  `.next/dev/logs/`, while `npm run build` compiled the same route cleanly. Restart it; the build
-  passing while dev does not is the tell.
-- **`__gcruniqueid` / `__gcrremoteframetoken` hydration warnings are a browser extension**, not this
-  app. React's diff names them on `<html>`, the sign-in `<form>`, the `<select>` and the `<input>`;
-  no application attribute is involved, and the warning is development-only. Confirmed 2026-08-14 by
-  reading the component stack out of the dev log. Do not go looking for an app-side cause.
-- **The controlled/uncontrolled asymmetry is load-bearing in both directions.** The score card's
-  fields are **uncontrolled**, because React overwrites a controlled field with its own empty state at
-  hydration and discards anything typed in that window (decision 33). `sign-in-form.tsx`'s `<select>`
-  is **controlled with a ref write-back**, because a form React *dispatches* is reset when its action
-  settles (F-04). Neither score-card field sits in a dispatched form, which is what makes uncontrolled
-  safe there. Changing either half breaks the other.
+- **A concurrency check that passes may be checking nothing.** Two versions of `claim-race.ts` passed
+  over a deliberately unlocked copy of the claim before the third one caught it. Two concurrent
+  claims serialize on their own often enough to refuse correctly by accident; and "the claim blocks
+  while the row is locked" is true whether or not the claim takes the lock, because inserting an
+  `Assignment` takes a `FOR KEY SHARE` lock on its parent `Applicant` for the foreign key. The
+  version that discriminates takes the last slot **while the claim is waiting**, which is the only
+  thing that separates a fresh eligibility read from a stale one. Before trusting any check here, ask
+  what it would do against the bug.
+- **`redirect()` must be called outside `$transaction`.** It reports by throwing a control-flow
+  error, and thrown inside an interactive transaction that error is a rollback — the claim would be
+  undone and the reviewer would land on an applicant that is not theirs. `claimSlot` captures the
+  outcome and redirects after the transaction closes.
+- **Prisma cannot select the same relation twice** under two different filters, so the admin
+  assignments page reads active and returned rows in one relation query and partitions them in JS.
+- **`assignReviewer` and `swapReviewer` could not previously see a returned row**, because both read
+  only ACTIVE assignments before inserting. Fixed, but the shape is worth remembering: a query that
+  filters `status: ACTIVE` for a *display* purpose is often wrong for a *uniqueness* purpose, and
+  this codebase has that filter in a lot of places.
+- **The `@/` alias does resolve under `tsx`**, verified rather than assumed, which is why
+  `prisma/checks/claim-race.ts` can import `lib/claim-slot.ts` and drive the real transaction instead
+  of a copy of it.
 
 ---
 
-## Commits in this phase
-
-Slices 0–4 and the fix pass are listed in the git log from `14aa534` to `ab79803`. Slice 5:
-
-```
-1cb1803  PRD decision 37 — what clears the offline draft mirror
-ee0687f  Slice 5 — the autosave queue as a pure state machine
-95dd832  Slice 5 — score inputs, the note, and autosave
-707420f  Slice 5 — recover from a save that never answers
-```
-
-All pushed to `origin/main`.
-
-Next: **Slice 6**, clauses 5a–6c. Read `plans/phase-3.md`'s Slice 6 section first — the claim
-concurrency case is the one piece of it that is not obvious, and its walkthrough step 6 needs two
-devices signed in as two different reviewers.
+Next: **run the Slice 6 walkthrough on a phone**, fix what it finds, then Slice 7.
