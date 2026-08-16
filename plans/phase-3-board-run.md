@@ -628,7 +628,11 @@ completed a full review and both pool actions unaided, and found the list row hi
 **Status: nine of ten resolved.** F-10, F-11, F-14, F-15, F-18 and F-19 are fixed and confirmed;
 F-13 is closed as third-party; F-16's hidden risk was measured and ruled out, leaving it a stated
 preference. **F-12 is the only one still live**, downgraded to `cosmetic` — its chaining half is
-fixed and the residual is most likely WebKit. **F-17 is a PRD conversation, not a fix.**
+fixed and the residual is most likely WebKit. **F-17 is recorded as PRD decision 40 and deferred to
+Phase 4.**
+
+**Every fix was verified by the owner, not by a second board member — see "Run 2" below.** The fixes
+work; whether they solve the discoverability problem they were chosen for is untested.
 
 **Clauses 5a and 6a are met.** He used `Return to pool` and `Claim from pool` **without being told
 where either lives** — confirmed by the owner, and corroborated by the log, which shows a
@@ -648,12 +652,49 @@ per the baseline note it is the one this run was *least* able to measure properl
    account creation, no download, no spreadsheet training" premise exists to make unnecessary.
 3. Tick each fix against the FR-9 clause ledger at the top of `plans/phase-3.md` — the ledger itself,
    not a paraphrase of it — before committing.
-4. **Step 8: re-run steps 5 and 6 with a second board member who does not work in design.** This is
-   no longer the formality the step describes. The first run was expert review rather than a naive
-   one — see the baseline — so the gate's actual question, whether someone with no design instinct
-   completes a review unaided, is still unanswered. **F-10 is the specific thing to watch**, and the
-   re-run should happen after it is fixed so the fix is what gets tested. Add the second person to the
-   roster only when that is decided; an unused roster entry consumes assignment slots at the next
-   generation.
+4. **Step 8 — the second-person re-run — was deliberately SKIPPED for this phase.** See below.
 5. Only then Slice 8, the PRD status line. A status line claiming an unverified phase is the one PRD
    edit that must not lead the code.
+
+---
+
+## Run 2 — deliberately skipped, 2026-08-16
+
+**Decided by the owner.** The fixes were verified by the owner's own testing, and no second board
+member ran the screen. Recorded here rather than left as an absence, because the difference between
+"we checked" and "a stranger checked" is the entire point of this instrument, and a reader a year
+from now cannot tell them apart from a doc that simply stops.
+
+### What this does and does not leave confirmed
+
+**BUILD_PLAN's Phase 3 gate clause is met, on its own terms.** It asks for *"one board member who has
+never seen it complete a review without instructions"* — one, and that happened: he signed in, scored
+every category, wrote a note, returned an applicant and claimed another, all unaided. The clause does
+not ask for two, and it does not say anything about who they are.
+
+**What is not confirmed is narrower, and it is worth naming precisely.** Every fix F-10 through F-19
+was verified by the person who chose it. So:
+
+- **The fixes are confirmed to work.** They were exercised on the real device.
+- **They are not confirmed to solve the problem they were chosen for.** F-10 especially: a chevron was
+  added because a designer said the row's affordance was unclear, and the only person to have judged
+  the result is the owner, who now knows exactly where to look. Whether a stranger finds the row
+  faster than Zechariah did is untested and will stay untested.
+
+**The gap this leaves is the naive-user question**, which the first run could not answer either — the
+board member works in app design and probed for problems rather than trying to finish a review. So
+across both runs, **nobody without a design background has ever used this screen.** That is the honest
+summary of Phase 3's user evidence.
+
+### Why this is a reasonable call, and what would change it
+
+Phase 3's reviewer surface is not the last chance to learn this. **Phase 8's gate is the same
+instrument aimed at the whole product** — a board member running a complete mock cycle on the demo
+instance using only `ADMIN_GUIDE.md` — and the reviewer dashboard is part of what that exercises.
+The written round also ships to a real cohort of ~30 reviewers before first and second round are
+built (BUILD_PLAN's Phase 4 milestone note), which is a far larger and more honest sample than one
+person in a room.
+
+**If F-10 was the wrong fix, the signal arrives there**, as reviewers who do not start. It is worth
+watching for on the first live cycle: a cohort where a noticeable share never opens a single
+applicant is this finding coming back.
