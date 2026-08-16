@@ -367,6 +367,11 @@ only when a save has actually failed.** Owner's choice from three options.
   `SEGMENTED_LIMIT` points so the board member could not have reached it — and a defect that is
   merely unreachable today is the kind this project keeps rediscovering.
 
+**Verified by hand on the detail route, signed in.** Scored a category; watched `Save note` disappear
+once hydrated; killed the network and confirmed `Retry now` appears alongside `Unsaved — will retry`.
+All four steps passed. Recorded because `npm run verify` cannot reach this route — it is behind a
+reviewer session — so typecheck passing over it proved only that it compiles.
+
 ---
 
 ### F-12 · `/r/<id>/a/<id>` · the expanded rubric card scrolls the page behind it
@@ -385,6 +390,10 @@ handed to the parent. `overscroll-contain` stops the chain at the card.
 
 This is a phone-only finding by construction: at `lg` the card is `lg:max-h-none lg:overflow-visible`
 and has no scroll region to chain out of.
+
+**Fixed** — `overscroll-contain` on that element. **Needs a phone to confirm**: the symptom is a
+touch-momentum behaviour, and a desktop mouse wheel rarely reproduces it, so `npm run verify` and a
+resized window both say nothing useful here.
 
 ---
 
@@ -480,6 +489,11 @@ sibling. The gap between them is `lg:gap-8` (`page.tsx:161`) — **which does no
 phone the spacing between the two is zero, and the card's `border-t` lands directly under the return
 control.
 
+**Fixed** — `space-y-6 lg:space-y-0` on the wrapper, so the stacked layout gets the gap and the grid
+takes the job back at `lg`. Spacing the two siblings rather than padding the article, because the
+thing that was missing is the gap *between the columns*, which is exactly what `lg:gap-8` provides
+above the breakpoint.
+
 ---
 
 ### F-16 · `/r/<id>/a/<id>`, wide viewports · responses and rubric scroll independently
@@ -553,10 +567,10 @@ answer — a real but slight distinction, and the prompt is the *smaller* of the
 |---|---|---|---|
 | F-10 | defect | `/r/<id>/list` | A row gives no sign it opens the applicant — the first action of the flow. **Fixed** |
 | F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work. **Fixed** |
-| F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it |
+| F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it. **Fixed** |
 | F-13 | not a defect | `/r/<id>/…` | Hydration warning — all four recorded are `__gcr*` injection, none implicating our render |
 | F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight. **Fixed** |
-| F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone |
+| F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone. **Fixed** |
 | F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Check the tall-card case before closing |
 | F-17 | preference | `…/rubric` | 1–4 rather than 0–5. Needs §5 to move first — there is no minimum in the schema |
 | F-18 | preference | `…/a/<id>` | Bold the question prompts |

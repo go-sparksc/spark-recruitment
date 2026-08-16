@@ -158,7 +158,12 @@ export default async function ApplicantDetailPage({
 
       <h1 className="mt-2 text-xl font-semibold tracking-tight">{view.label}</h1>
 
-      <div className="mt-5 lg:grid lg:grid-cols-[1fr_20rem] lg:items-start lg:gap-8">
+      {/* F-15. `lg:gap-8` separates the two columns at lg and does nothing
+          below it, where they simply stack — so on a phone the return control
+          sat flush against the score card's top border with no space at all.
+          space-y-6 supplies that gap below lg and lg:space-y-0 hands the job
+          back to the grid above it. */}
+      <div className="mt-5 space-y-6 lg:grid lg:grid-cols-[1fr_20rem] lg:items-start lg:gap-8 lg:space-y-0">
         <article className="space-y-6">
           {view.fields.length === 0 ? (
             <p className="text-muted-foreground rounded-md border p-4 text-sm">

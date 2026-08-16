@@ -291,7 +291,14 @@ export function ScoreCard({
           into view — which is what stops expanding it from pushing its own
           contents below the fold and forcing a second scroll. */}
       <div
-        className={`${open ? "block" : "hidden"} max-h-[70vh] overflow-y-auto lg:block lg:max-h-none lg:overflow-visible`}
+        // overscroll-contain is F-11's neighbour and F-12 proper: without it
+        // `overflow-y-auto` chains. At a scroll boundary — or while the page
+        // behind is still carrying momentum — the gesture is handed to the
+        // parent, so scrolling the rubric scrolls the essays instead. Found on
+        // a phone by the board member; a desktop mouse wheel rarely produces it.
+        // Irrelevant at lg, where this is `overflow-visible` and has no scroll
+        // region to chain out of.
+        className={`${open ? "block" : "hidden"} max-h-[70vh] overflow-y-auto overscroll-contain lg:block lg:max-h-none lg:overflow-visible`}
       >
         <div className="hidden px-4 pt-4 text-sm font-medium lg:block">Rubric · {summary}</div>
 
