@@ -49,16 +49,18 @@ npm run dev        # http://localhost:3000, and http://<lan-ip>:3000 for a phone
 ```
 
 The LAN address is printed as "Network" in the `next dev` banner — it was `192.168.1.110` on
-2026-08-15, unchanged from the Slice 5 session, but it is DHCP and will move. Phone testing needs
+2026-08-16, unchanged since the Slice 5 session, but it is DHCP and will move. Phone testing needs
 `DEV_ALLOWED_ORIGINS` in `.env` set to that host, or every JS chunk 403s and the page loads but
 nothing works. See `.env.example`.
 
 **If you have pulled a schema change, restart the dev server.** A running server keeps the old Prisma
 client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See
-CLAUDE.md. Slice 6 involved **no schema change and no migration**, so this did not bite here.
+CLAUDE.md. Phase 3 involved **no schema change and no migration** after Phase 0, so this never bit —
+but **decision 40's `minPoints` column is the first migration since**, so the first Phase 4 session to
+run it will be the first exposed to this.
 
-**A dev server is running** on `http://localhost:3000`, `http://192.168.1.110:3000` on the LAN,
-started 2026-08-16 for the Slice 7 setup.
+**No dev server is running.** The one from the Slice 7 session was stopped when the phase closed, so
+port 3000 is free.
 
 ### Credentials
 
