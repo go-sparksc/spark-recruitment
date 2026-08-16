@@ -43,8 +43,8 @@ nothing works. See `.env.example`.
 client in memory and fails with `Unknown field 'x' ...` while `npm run verify` passes completely. See
 CLAUDE.md. Slice 6 involved **no schema change and no migration**, so this did not bite here.
 
-**No dev server is running.** The one from the Slice 6 session was stopped once the walkthrough
-finished, so port 3000 is free.
+**A dev server is running** on `http://localhost:3000`, `http://192.168.1.110:3000` on the LAN,
+started 2026-08-16 for the Slice 7 setup.
 
 ### Credentials
 
@@ -52,39 +52,41 @@ finished, so port 3000 is free.
 |---|---|
 | App-level password | Yours — only its argon2 hash is in `.env`. `npm run hash-secret -- "new password"` to replace. |
 | Instance password | `phase0-dev-password` (`prisma/seed.ts`) |
-| Round codes | **`written-f26`**, `firstround-s26`, `secondround-s26` — the written code was rotated on 2026-08-13 while testing the access-code card. `written-s26` is dead. `prisma/seed.ts` still writes `written-s26`, so `npm run seed` resets it. |
+| Round codes | **`written-s26`**, `firstround-s26`, `secondround-s26` — the seed's own values. `written-f26` was live between 2026-08-13 and the Slice 7 reseed and is now dead. |
 | Seed instance id | `seed_s26_demo` |
 
-### Fixture state — changed by the walkthrough, read this before trusting old numbers
+### Fixture state — rebuilt 2026-08-16 for the Slice 7 board-member run
 
-150 applicants · 30 written reviewers (8 Sparklets) · 4 rubric categories at 5 points each.
+**The Slice 6 walkthrough state is gone**, deliberately. `npm run seed` was run to give the board
+member a clean fixture, which wiped the 427 assignments, the 12 `Score` and 4 `ReviewNote` rows, and
+Fatima Fitzgerald's four `RETURNED_TO_POOL` rows. Everything that state demonstrated is recorded in
+"What Slice 6 shipped" below and in the commits; none of it needed to survive in the database.
 
-**427 written assignments**, no longer the 428 every earlier handoff quotes:
+150 applicants · **31** written reviewers (8 Sparklets) · 4 rubric categories at 5 points each.
+
+The 31st is the board member added for Slice 7, non-Sparklet, carrying 14 assignments. See
+`plans/phase-3-board-run.md`, which is the setup record and the observation sheet both.
 
 | | |
 |---|---|
-| `ACTIVE`, `AUTO` | 422 |
-| `ACTIVE`, `CLAIMED_FROM_POOL` | 1 |
-| `RETURNED_TO_POOL` | 4 |
-| Applicants at 3 reviewers | 123 |
-| Applicants short one | 27 |
+| `ACTIVE`, `AUTO` | 428 |
+| `ACTIVE`, `CLAIMED_FROM_POOL` | 0 |
+| `RETURNED_TO_POOL` | 0 |
+| Applicants at 3 reviewers | 128 |
+| Applicants short one | 22 |
+| Load per reviewer | 13–15 |
 
-The four returned rows all belong to **Fatima Fitzgerald** — applicants 3, 11, 22 and 37, three
-conflict-of-interest and one other, no free text. The count moved from 428 because walkthrough step
-10 regenerated: returned pairs are excluded from generation (decision 23) and the claimed row was
-preserved (decision 21), which is the path working, not drift.
+**Two consequences, the reverse of what the Slice 6 handoff warned about:**
 
-**Two consequences that will surprise the next session:**
-
-- **The rubric is now locked.** Twelve `Score` rows and four `ReviewNote` rows exist, and FR-4 locks
-  `/instances/seed_s26_demo/rubric` the moment any score does. That is correct behaviour and it has
-  never been true on this fixture before. `npm run seed` is the way back.
-- **27 applicants are short, not 22.** The 5% pool plus the four returns, so the pool page has ~27
-  rows for an eligible reviewer without anyone setting anything up.
+- **The rubric is unlocked again.** No `Score` row exists, so FR-4's lock on
+  `/instances/seed_s26_demo/rubric` has disengaged. It re-engages the moment the board member scores
+  anything, which will happen during the run.
+- **22 applicants are short, not 27.** The 5% pool exactly, with no returns on top of it.
 
 `npm run seed` rebuilds everything **and wipes assignments** — regenerate them from
-`/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty. It also resets the
-written access code to the dead `written-s26`; see the credentials table.
+`/instances/seed_s26_demo/assignments` afterwards, or the reviewer list is empty. It also drops the
+board member from the roster, so re-add them *before* regenerating; the ordering matters and failing
+it produces an empty list rather than an error.
 
 ---
 

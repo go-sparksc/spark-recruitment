@@ -18,6 +18,10 @@ goes in the database roster and nowhere in this repository.
 
 ## Part 1 — Fixture setup
 
+> **Done 2026-08-16.** All four steps below were carried out and confirmed on screen. The numbers
+> they produced are in the baseline table. Kept as written rather than collapsed to a tick, because
+> step 8 may need the fixture rebuilt for a second board member.
+
 **The order matters and getting it wrong fails silently.** A guest added to the roster *after*
 generation lands on "Nothing is assigned to you yet" — correct behaviour, and a dead test.
 
@@ -30,9 +34,9 @@ walkthrough.
 
 > ### ⚠ The written access code flips back to `written-s26`
 >
-> `prisma/seed.ts:18` writes `written-s26`. The current live code is `written-f26`, rotated during
-> the 2026-08-13 test pass. **After this reseed that is reversed**: `written-s26` is live and
-> `written-f26` is dead. `plans/phase-3-handoff.md`'s credential table is wrong until it is updated.
+> `prisma/seed.ts:18` writes `written-s26`. The code live before this step was `written-f26`,
+> rotated during the 2026-08-13 test pass. **The reseed reverses that**: `written-s26` is live and
+> `written-f26` is dead. `plans/phase-3-handoff.md`'s credential table was corrected to match.
 
 ### 2. Do not rotate the code
 
@@ -104,17 +108,21 @@ apply — except through item 3, where the restart is for the environment variab
 
 ---
 
-## Baseline — fill in before the run, not after
+## Baseline
+
+Setup values confirmed 2026-08-16, when the fixture was built. The last two rows are filled on the
+day.
 
 | Check | Result |
 |---|---|
-| `git status` | |
-| `npm run verify` | |
-| `next dev` banner — Network | |
-| `DEV_ALLOWED_ORIGINS` | |
-| Applicants · WRITTEN reviewers · rubric categories | |
-| Assignments generated | |
-| The guest's assigned count | |
+| `git status` | clean, `main` at `c6ef3b6` |
+| `npm run verify` | green — 14 files, 369 tests, typecheck and lint clean |
+| `next dev` banner — Network | `http://192.168.1.110:3000`, ready in 8.0s |
+| `DEV_ALLOWED_ORIGINS` | `192.168.1.110` — **matches**, so no change needed. Re-check on the day; it is DHCP |
+| Applicants · WRITTEN reviewers · rubric categories | 150 · 31 (8 Sparklets) · 4 |
+| Assignments generated | **428**, 22 applicants one short, load 13–15. Pre-generate panel matched the expected figures exactly |
+| The guest's assigned count | **14** |
+| Written access code | `written-s26` — reset by the reseed, and `written-f26` is now dead |
 | Their device (OS, browser, anything unusual about text size) | |
 | Date, and how long the run took | |
 
