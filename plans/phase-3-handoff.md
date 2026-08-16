@@ -1,8 +1,22 @@
-# Phase 3 handoff — Slice 6 complete
+# Phase 3 handoff — PHASE COMPLETE
 
-**As of `6b16e65`, 2026-08-15.** Slices 0–6 are committed, pushed, and **verified by hand on real
-hardware**. **The next step is Slice 7, the board-member run.** All the code FR-9 asks for now
-exists.
+**As of `3ddc6ec`, 2026-08-16.** **Phase 3 is done.** All nine slices are committed and pushed, the
+whole BUILD_PLAN gate has been walked by hand, and `PRD.md` reads `v1.6, Phase 0-3 complete, Phase 4
+next`. **The next step is Phase 4 — FR-10 and FR-11, written results and selection.**
+
+**Read `plans/phase-3-board-run.md` before Phase 4.** Slice 7's board-member run produced ten
+findings; nine are resolved, and the file is also explicit about what the gate did *not* establish —
+the board member works in app design, and the second-person re-run was deliberately skipped, so
+nobody without a design background has used the reviewer screen.
+
+**Two things carried out of Phase 3, both deliberate:**
+
+- **F-12**, open at `cosmetic`. The rubric card's scroll chaining is fixed; a residual
+  momentum-capture behaviour on iOS remains and is most likely WebKit's rather than ours. An Android
+  phone is the test that discriminates.
+- **PRD decision 40**, due in Phase 4. `RubricCategory` gains `minPoints Int @default(0)` so the
+  written scale can run 1–4 instead of 0–`maxPoints`. Deferred out of Phase 3 on purpose: the
+  migration would have landed mid-gate. §5 lists the column as planned and not yet built.
 
 This is a resume-point document, not a plan. `plans/phase-3.md` is the plan; this says what actually
 exists, what does not, and what is waiting to be verified.
@@ -55,7 +69,12 @@ started 2026-08-16 for the Slice 7 setup.
 | Round codes | **`written-s26`**, `firstround-s26`, `secondround-s26` — the seed's own values. `written-f26` was live between 2026-08-13 and the Slice 7 reseed and is now dead. |
 | Seed instance id | `seed_s26_demo` |
 
-### Fixture state — rebuilt 2026-08-16 for the Slice 7 board-member run
+### Fixture state — rebuilt 2026-08-16, then used by the board-member run
+
+**The numbers below are the state immediately after the rebuild. The run then moved them:** it added
+scores and a note on one applicant, two `RETURNED_TO_POOL` rows and one `CLAIMED_FROM_POOL`, so the
+rubric is **locked again** and the assignment mix is no longer all-`AUTO`. Exact post-run counts were
+not recorded; `npm run seed` is the reset and the recipe below is the way back.
 
 **The Slice 6 walkthrough state is gone**, deliberately. `npm run seed` was run to give the board
 member a clean fixture, which wiped the 427 assignments, the 12 `Score` and 4 `ReviewNote` rows, and
@@ -143,12 +162,20 @@ Three code commits, then `6e0171c` and this document recording them.
 
 - **The board-member run.** Slice 7, and **the next thing to do.** A gate step, not a demo. It cannot
   be run by the owner and it cannot be run twice on the same person. All eight steps are in
-  `plans/phase-3.md`; steps 5 and 6 are the ones that decide whether clauses 5a and 6a actually
-  shipped, because a control nobody finds is a control that did not ship.
-- **The PRD status line.** Slice 8, and only after the whole BUILD_PLAN gate passes by hand —
-  including Slice 7. A status line claiming an unverified phase is the one PRD edit that must not
-  lead the code.
+  `plans/phase-3.md`. **Done** — 2026-08-16, findings in `plans/phase-3-board-run.md`. Clauses 5a and
+  6a are met: he used return-to-pool and claim-from-pool without being told where either lives.
+- **The PRD status line.** Slice 8. **Done** — `3ddc6ec`, after every gate clause had a record behind
+  it.
+- **Written results and selection.** FR-10 and FR-11, Phase 4, and **the next thing to do.**
 - **First-round and second-round dashboards.** Phases 5 and 6.
+
+### One thing Phase 4 should know about the fixture
+
+FR-10 ranks by average score and variance across three reviewers. **The seed does not generate any
+scores** — every `Score` row in the database was typed by hand during a walkthrough, so there is
+currently about one applicant's worth of real data and nothing for a ranking to rank. Phase 4 will
+want the seed to produce scores, or a script that does, before FR-10 can be looked at rather than
+merely compiled. Worth planning for rather than discovering on the first render.
 
 ## Still open from the testing pass, and deliberately not code
 
