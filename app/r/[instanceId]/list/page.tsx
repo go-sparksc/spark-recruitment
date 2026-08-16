@@ -131,17 +131,39 @@ export default async function ReviewerListPage({
                   href={`/r/${instanceId}/a/${row.id}`}
                   // min-h-14: a full-width row is the tap target, not the text
                   // inside it. This is the control a reviewer hits fifteen times.
-                  className="hover:bg-muted flex min-h-14 items-center justify-between gap-3 px-4 py-3"
+                  //
+                  // active: alongside hover:, because `hover:` never fires on a
+                  // touch screen — without it a tap produces no feedback at all,
+                  // and the row this list is built for is only ever tapped.
+                  className="hover:bg-muted active:bg-muted flex min-h-14 items-center justify-between gap-3 px-4 py-3"
                 >
                   <span className="font-medium">{row.label}</span>
-                  <span
-                    className={
-                      row.completion.complete
-                        ? "text-sm text-emerald-600"
-                        : "text-muted-foreground text-sm"
-                    }
-                  >
-                    {row.completion.scored}/{row.completion.total} categories
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={
+                        row.completion.complete
+                          ? "text-sm text-emerald-600"
+                          : "text-muted-foreground text-sm"
+                      }
+                    >
+                      {row.completion.scored}/{row.completion.total} categories
+                    </span>
+                    {/* F-10, and the whole reason this row now has a third
+                        element. Nothing else on it says "this opens something":
+                        `hover:` does not exist on touch, and a completion count
+                        reads as a status. The disclosure chevron is the native
+                        list idiom on a phone, which is what this is used on.
+                        Text rather than an icon component, matching the ← → ▲ ▼
+                        already used on the detail screen.
+
+                        aria-hidden because the Link's own text is the accessible
+                        label; a screen reader announcing the glyph is noise. */}
+                    <span
+                      aria-hidden
+                      className="text-muted-foreground text-lg leading-none"
+                    >
+                      ›
+                    </span>
                   </span>
                 </Link>
 

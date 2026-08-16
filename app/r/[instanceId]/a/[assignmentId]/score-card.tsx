@@ -62,6 +62,28 @@ function useCardOpen(): [boolean, () => void] {
 }
 
 // ---------------------------------------------------------------------------
+// Whether React has attached
+// ---------------------------------------------------------------------------
+
+/// Nothing to subscribe to: the value changes once, when React hydrates, and the
+/// re-render that follows is the notification.
+const NEVER_CHANGES = () => () => {};
+
+/// F-11. `false` on the server and during the hydration render, `true` after —
+/// which is what lets a control be present before React attaches and absent
+/// afterwards without the two renders disagreeing. Same `useSyncExternalStore`
+/// discipline as `useCardOpen` above, and for the same reason: a `typeof window`
+/// branch read during render is precisely the mismatch F-13 spent an afternoon
+/// ruling out.
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    NEVER_CHANGES,
+    () => true,
+    () => false,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 
@@ -323,6 +345,7 @@ function ScoreRow({
   onPoints: (value: number | null) => void;
 }) {
   const segmented = row.maxPoints <= SEGMENTED_LIMIT;
+  const hydrated = useHydrated();
 
   /// Post-hydration only — this handler does not exist in the markup React
   /// serialises, which is precisely why the native submit works before it.
@@ -407,14 +430,20 @@ function ScoreRow({
             }
             className="border-input h-11 w-24 rounded-md border px-3 text-base"
           />
-          {/* The no-JavaScript path for the fallback control. Harmless after
-              hydration, where `intercept` takes it. */}
-          <button
-            type="submit"
-            className="hover:bg-muted h-11 rounded-md border px-3 text-sm"
-          >
-            Save
-          </button>
+          {/* The no-JavaScript path for the fallback control, on the same rule
+              as the note's button below — see F-11 there for the reasoning.
+              Fixed alongside it rather than left: this branch only renders above
+              `SEGMENTED_LIMIT` points, so the board member could not have
+              reached it on a 5-point rubric, and a defect that is merely
+              unreachable today is the kind this project keeps rediscovering. */}
+          {!hydrated || status === "failed" ? (
+            <button
+              type="submit"
+              className="hover:bg-muted h-11 rounded-md border px-3 text-sm"
+            >
+              {hydrated ? "Retry now" : "Save"}
+            </button>
+          ) : null}
         </div>
       )}
     </form>
@@ -483,6 +512,8 @@ function NoteField({
   status: SaveStatus;
   onBody: (value: string) => void;
 }) {
+  const hydrated = useHydrated();
+
   function intercept(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onBody(ref.current?.value ?? "");
@@ -514,17 +545,32 @@ function NoteField({
         className="mt-2"
       />
 
-      {/* Present at all times rather than hidden once hydrated. Before
-          hydration it is the only way to save a note; after it, it is a
-          redundant but harmless second route that goes through the same queue.
-          A control that is always live is never a dead tap — decision 33's
-          third mitigation, met by not having a control that cannot work. */}
-      <button
-        type="submit"
-        className="hover:bg-muted mt-2 h-11 rounded-md border px-3 text-sm"
-      >
-        Save note
-      </button>
+      {/* F-11, and the reason this is a condition rather than a deletion.
+          Before React attaches, this button is the ONLY way to save a note —
+          the form posts natively to `saveNoteForm` and the server writes it.
+          That is decision 33's third mitigation and removing it outright would
+          reopen the dead-control window the decision exists to close. So the
+          server still renders it and the no-JavaScript path is untouched.
+
+          What it stops being is a permanent second control. Once hydrated the
+          queue owns saving, and a button next to a field reading "Saved" makes
+          two different claims about the same work — which is what confused the
+          board member, and what makes a reviewer tap it after every note.
+
+          It returns for the one state where pressing something helps. The press
+          runs `intercept` -> `onBody` -> `edit`, and the "edit" case in
+          lib/autosave.ts resets `failures` to 0 and re-arms the send without
+          deduplicating on value, so this is a real retry that also clears the
+          backoff — not a button that merely looks like one. */}
+      {!hydrated || status === "failed" ? (
+        <button
+          type="submit"
+          className="hover:bg-muted mt-2 h-11 rounded-md border px-3 text-sm"
+        >
+          {/* "now", against a status line that already says "will retry". */}
+          {hydrated ? "Retry now" : "Save note"}
+        </button>
+      ) : null}
     </form>
   );
 }

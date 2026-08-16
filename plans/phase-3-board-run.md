@@ -312,6 +312,19 @@ the note in the baseline, this run could not produce the second kind. The row is
 the whole flow, so **whether a non-designer finds it is exactly what step 8 needs to answer**, and it
 is currently unknown rather than fine.
 
+**Fixed — a disclosure chevron on every row**, owner's choice from three options. It is the native
+list idiom on the phone this is actually used on, it adds no words and no height, and it leaves the
+`0/4 categories` completion state alone, which clause 1b requires. A text glyph rather than an icon
+component, matching the `←` `→` `▲` `▼` already used on the detail screen.
+
+**One thing was added beyond the chosen option, and it is flagged rather than folded in:**
+`active:bg-muted` alongside the existing `hover:bg-muted`. `hover:` never fires on a touch screen, so
+until now a tap produced no visual feedback whatsoever — the row is only ever tapped, and it was the
+one control giving nothing back. Trivially revertible if unwanted.
+
+**Step 8 still has to answer this one.** The fix is a designer-approved affordance, not evidence that
+a non-designer now finds the row.
+
 ---
 
 ### F-11 · `/r/<id>/a/<id>` · a "Save note" button sits under an autosaving field
@@ -335,6 +348,24 @@ the per-review tax rule 5 is about.
 So the fix has to keep a working pre-hydration path while removing the post-hydration contradiction,
 and "delete the button" is not it. Worth noting the same shape exists on the number-input fallback
 (`score-card.tsx:412-417`), which is unreachable here only because `maxPoints` is 5.
+
+**Fixed — the button is rendered by the server, hidden once hydrated, and returns as `Retry now`
+only when a save has actually failed.** Owner's choice from three options.
+
+- **The pre-hydration guarantee is untouched.** The server still renders it, so a tap before React
+  attaches is still a completed native POST. Decision 33 holds exactly as written.
+- **A new `useHydrated()` hook** does the switching, built on `useSyncExternalStore` with a
+  `getServerSnapshot` of `false` — the same discipline `useCardOpen` already uses in that file, and
+  deliberately not a `typeof window` branch read during render, which is the mismatch F-13 spent an
+  afternoon ruling out.
+- **The retry is real, and this was checked rather than assumed.** Pressing it runs
+  `intercept` → `onBody` → `edit`, and the `"edit"` case in `lib/autosave.ts:244-265` sets
+  `failures: 0` and re-arms the send *without* deduplicating on value. So it retries and clears the
+  backoff. Had that case deduplicated, the button would have looked like a retry and done nothing,
+  which is worse than the dead control it replaces.
+- **The number-input fallback was fixed at the same time**, on the same rule. It renders only above
+  `SEGMENTED_LIMIT` points so the board member could not have reached it — and a defect that is
+  merely unreachable today is the kind this project keeps rediscovering.
 
 ---
 
@@ -520,8 +551,8 @@ answer — a real but slight distinction, and the prompt is the *smaller* of the
 
 | # | Severity | Route | What |
 |---|---|---|---|
-| F-10 | defect | `/r/<id>/list` | A row gives no sign it opens the applicant — the first action of the flow |
-| F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work |
+| F-10 | defect | `/r/<id>/list` | A row gives no sign it opens the applicant — the first action of the flow. **Fixed** |
+| F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work. **Fixed** |
 | F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it |
 | F-13 | not a defect | `/r/<id>/…` | Hydration warning — all four recorded are `__gcr*` injection, none implicating our render |
 | F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight. **Fixed** |
