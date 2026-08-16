@@ -1,6 +1,11 @@
 # Phase 3 Slice 7 — the board-member run
 
-**Prepared 2026-08-16 against `5c34425`. Not yet run.**
+**Prepared 2026-08-16 against `5c34425`. Run 2026-08-16 against `4e74261`. Ten findings, F-10 to
+F-19.**
+
+**The run completed.** The board member got through a full review and both pool actions. Nothing here
+is a report that the surface does not work — it is a report of where it costs a stranger more than it
+should, which is the only thing this instrument was ever going to measure.
 
 BUILD_PLAN's Phase 3 gate ends with *"have one board member who has never seen it complete a review
 without instructions."* This is that step, and it is a gate step rather than a demo. It cannot be run
@@ -123,8 +128,28 @@ day.
 | Assignments generated | **428**, 22 applicants one short, load 13–15. Pre-generate panel matched the expected figures exactly |
 | The guest's assigned count | **14** |
 | Written access code | `written-s26` — reset by the reseed, and `written-f26` is now dead |
-| Their device (OS, browser, anything unusual about text size) | |
-| Date, and how long the run took | |
+| Their device | iPhone, their own, on the LAN |
+| Date, and how long the run took | 2026-08-16. **Duration deliberately not recorded** — see below |
+
+### The instrument was not quite the one this step specifies, and it matters both ways
+
+The board member has a background in app design, and used the time to hunt for problems rather than
+to complete a review the way a reviewer would. Two consequences, both worth being straight about:
+
+- **Every timing signal is void.** The sheet's "hesitation longer than about five seconds" threshold
+  measures someone trying to get a job done. It does not measure someone deliberately probing, and no
+  duration from this run should be read as what a review costs.
+- **The findings are stronger than a naive run's, not weaker.** He could name what was wrong instead
+  of only stalling on it, which is why F-10 to F-16 are specific enough to act on. Expert review is a
+  better instrument for *finding* design defects.
+
+**But it is a worse instrument for the one thing BUILD_PLAN's gate actually asks**, which is whether
+someone with no design instinct and no context can complete a review unaided. A designer finding a
+control and remarking that it is unclear is evidence about the control; it is not evidence that a
+typical reviewer finds it at all.
+
+**So step 8 is now load-bearing rather than a formality.** The re-run should be someone without a
+design background — that is the case this run left untested.
 
 ---
 
@@ -223,6 +248,7 @@ So that fixture artefacts and deliberate design do not get logged as findings.
 | A returned applicant vanishes from the list rather than showing as "returned" | Falls out of the `status: ACTIVE` filter — `plans/phase-3.md` Slice 4 |
 | The pool link renders even when it reads `none open` | Deliberate. A link that disappears at zero is a link nobody can go looking for |
 | Every other reviewer's applicant reads `0/4` | The reseed cleared every score |
+| A hydration warning naming `__gcrremoteframetoken` or `__gcruniqueid` | Injected into the DOM before React hydrates by something in the browser, not rendered by us. Neither string exists in the repo. **F-13** — check the `+`/`-` diff before assuming a repeat is the same thing |
 | The applicant has no name, only `Applicant 47` | §6. The name and email are never selected on the server, so they are not in the payload either |
 
 **The four findings still open from the test pass — F-01, F-05, F-06, F-09 — are all admin
@@ -253,7 +279,262 @@ Expected:
 Observed:
 ```
 
-*(none yet — the run has not happened)*
+**Two groups, and the split is the owner's.** F-10 to F-16 are things the board member hit while
+being watched. F-17 to F-19 are the owner's own design opinions, noticed during the run but not
+things anyone was blocked by.
+
+**Severity follows the vocabulary, not the group.** One observed item (F-16) is a `preference`
+because the screen does exactly what `plans/phase-3.md` specifies — that it was noticed while
+watching does not make it a defect. Recorded that way deliberately.
+
+---
+
+### F-10 · `/r/<id>/list` · nothing shows that a row opens the applicant
+
+**Severity:** defect
+**FR / decision:** FR-9 bullet 1, CLAUDE.md rule 5
+**Did:** Signed in, landed on the list of 14 assigned applicants, opened an applicant.
+**Expected:** The first action of the whole flow is obvious.
+**Observed:** **He found it unaided** and remarked that it was not clear the row was tappable.
+
+**Mechanism.** The row *is* a full-width `<Link>` with a 56px target (`list/page.tsx:130-146`), so the
+tap area is right. What is missing is any signal that it is one: no chevron, no underline, no colour,
+and `hover:bg-muted` is the only affordance — which on a phone does not exist at all. The row reads
+as a status line that happens to say `Applicant 12 · 0/4 categories`, and the only interactive-looking
+thing on the page is the bordered `Claim from pool` link above it.
+
+The tap-target work was done and the affordance work was not — the row was built as if the problem
+were hitting it, when the problem is seeing it.
+
+**Not `blocks-gate`: he got in on his own.** But read the evidence for what it is. It is a designer's
+judgment that the affordance is missing, not an observation of someone failing to find it — and per
+the note in the baseline, this run could not produce the second kind. The row is the first action of
+the whole flow, so **whether a non-designer finds it is exactly what step 8 needs to answer**, and it
+is currently unknown rather than fine.
+
+---
+
+### F-11 · `/r/<id>/a/<id>` · a "Save note" button sits under an autosaving field
+
+**Severity:** defect
+**FR / decision:** FR-9 bullet 4, decision 33, CLAUDE.md rule 5
+**Did:** Wrote a note.
+**Expected:** Autosave is the design; there is no manual save.
+**Observed:** The button confused him.
+
+**It was not left in by accident, and it is not safe to simply delete.** `score-card.tsx:517-527`
+carries the reason: before React attaches, that button is the *only* way to save a note — the form
+posts natively to `saveNoteForm` and the server writes it. It is decision 33's third mitigation, and
+removing it reintroduces the dead-control window the decision exists to close.
+
+**The defect is the pair, not the button.** After hydration the field says `Saved` and a live
+`Save note` button sits underneath it, and those are two different claims about whether the work is
+safe. A reviewer who believes the button is load-bearing taps it after every note — which is exactly
+the per-review tax rule 5 is about.
+
+So the fix has to keep a working pre-hydration path while removing the post-hydration contradiction,
+and "delete the button" is not it. Worth noting the same shape exists on the number-input fallback
+(`score-card.tsx:412-417`), which is unreachable here only because `maxPoints` is 5.
+
+---
+
+### F-12 · `/r/<id>/a/<id>` · the expanded rubric card scrolls the page behind it
+
+**Severity:** defect
+**FR / decision:** FR-9 bullet 2 ("rubric always visible alongside"), CLAUDE.md rule 5
+**Did:** On the phone, opened the score card and scrolled it while the responses behind were still
+carrying scroll momentum.
+**Expected:** Scrolling the rubric scrolls the rubric.
+**Observed:** The written-responses area underneath scrolled instead.
+
+**Mechanism, and it is exact.** `score-card.tsx:272` is
+`max-h-[70vh] overflow-y-auto` with no `overscroll-behavior`. The default is `auto`, which *chains*:
+when the inner scroller is at a boundary — or while the outer one is still animating — the gesture is
+handed to the parent. `overscroll-contain` stops the chain at the card.
+
+This is a phone-only finding by construction: at `lg` the card is `lg:max-h-none lg:overflow-visible`
+and has no scroll region to chain out of.
+
+---
+
+### F-13 · `/r/<id>/…` · hydration warning — **third-party DOM injection, not our render**
+
+**Severity:** not a defect. The vocabulary has no slot for "real warning, someone else's cause", and
+`cosmetic` would misfile it as ours. Recorded as a finding because the investigation is the valuable
+part, and carried into the known-expected table so the next run does not repeat it.
+**FR / decision:** n/a
+**Did:** Used the reviewer surface on an iPhone.
+**Expected:** No hydration error.
+**Observed:** A React hydration error appeared.
+
+**What the dev log actually says.** The server was running throughout, and it captured **four**
+`A tree hydrated but some attributes of the server rendered HTML didn't match` warnings. Every diff
+line in all four — 69 of them — is one of exactly two attributes:
+
+```
+__gcrremoteframetoken="…"     on <html>, once per warning
+__gcruniqueid="1" … "12"      on individual elements
+```
+
+**Not one diff line involves any attribute, text node or element from this codebase**, and neither
+name appears anywhere in the repository. Both are stamped onto the DOM by something in the browser
+before React hydrates, which is the last cause the warning itself lists.
+
+**The warnings are not confined to one session.** Reading the log as a timeline: the first lands on
+the very first `/list` render of the day. The others land **after** a `signOut`, after someone browses
+the `?round=FIRST_ROUND` and `?round=SECOND_ROUND` links, and around two `signIn` calls — which is a
+fresh person arriving on the link and exploring, not the owner's dry run. Warnings occur in both, and
+**all four have the same `__gcr*`-only shape.**
+
+So whichever session the iPhone was, a warning of this shape was already accounted for, and no
+warning anywhere in the log implicates our markup.
+
+**What was checked and did not explain it.** Every browser-state read on this surface runs in an
+effect, an event handler or a server action — `readDraft`, `purgeExpiredDrafts`, the `Date.now()`
+calls in `use-autosave.ts` and `guarded-link.tsx`. The one piece of external state read during render,
+the card's expanded flag, uses `useSyncExternalStore` with a `getServerSnapshot` of `false`
+(`score-card.tsx:49-62`), which is the correct pattern for exactly this hazard and is why it does not
+appear in any diff.
+
+**The text supplied from the phone was the generic preamble**, which is byte-identical for every
+hydration warning React emits. The diagnostic half is the `+`/`-` tree printed underneath it. If this
+is ever revisited, that is the part to capture.
+
+**Residual uncertainty, stated rather than rounded away:** the log cannot attribute a session to a
+device, so "his warning is one of these four" is an inference from shape and timing, not a
+measurement. It is a weak uncertainty — four for four, across two sessions — but it is not zero.
+
+**Dev-only either way.** The overlay does not exist in a production build, so no real reviewer would
+ever see this. **No `suppressHydrationWarning` was added**, and none should be: suppressing here would
+hide a genuine mismatch later for the sake of a warning that is not ours.
+
+---
+
+### F-14 · app-wide · buttons do not show a pointer cursor
+
+**Severity:** cosmetic
+**FR / decision:** CLAUDE.md rule 5
+**Did:** Hovered the rubric scoring buttons.
+**Expected:** A hand cursor, the usual signal that something is clickable.
+**Observed:** The default arrow.
+
+**Mechanism.** **Tailwind v4 removed `button { cursor: pointer }` from Preflight**; v3 set it. This
+project is on Tailwind v4 (`package.json`), and neither `app/globals.css` nor
+`components/ui/button.tsx` restores it — verified, there is no `cursor` declaration in either.
+
+So this is **not** specific to the rubric buttons: every `<button>` in the application has it,
+admin surfaces included. One rule in `globals.css` fixes all of them, and per-component
+`cursor-pointer` classes would be the wrong shape of fix. `cosmetic` because nothing fails — but it
+is the cheapest finding here to resolve and the broadest in reach.
+
+---
+
+### F-15 · `/r/<id>/a/<id>` · "Return to pool" is not separated from the rubric card
+
+**Severity:** cosmetic
+**FR / decision:** FR-9 clause 5a
+**Did:** Scrolled to the bottom of an applicant on the phone.
+**Expected:** Visible separation between the return control and the sticky rubric.
+**Observed:** They read as one crowded block.
+
+**Mechanism.** `ReturnControl` is the last child of `<article>`, and `<ScoreCard>` is its next
+sibling. The gap between them is `lg:gap-8` (`page.tsx:161`) — **which does not apply below `lg`**.
+`article`'s own `space-y-6` spaces its children from each other, not from what follows it. So on a
+phone the spacing between the two is zero, and the card's `border-t` lands directly under the return
+control.
+
+---
+
+### F-16 · `/r/<id>/a/<id>`, wide viewports · responses and rubric scroll independently
+
+**Severity:** preference — the layout does exactly what `plans/phase-3.md` Slice 4 specifies
+**FR / decision:** FR-9 bullet 2, `plans/phase-3.md` Slice 4
+**Did:** Watched on a desktop screen.
+**Expected:** (owner's) One thing to track, not two.
+**Observed:** Two regions moving separately felt awkward.
+
+**One thing to check before treating this as purely a preference.** At `lg` the card is
+`sticky top-6` with `lg:max-h-none lg:overflow-visible` — so there is no second *scroll region*
+there; the rubric is pinned while the page scrolls. Two genuinely independent scrollers only exist
+**below** `lg`, where the card is `max-h-[70vh] overflow-y-auto`. If this was seen in a browser window
+narrower than 1024px, it was the phone layout on a desktop screen, which
+`plans/phase-3.md` warns is not the same surface.
+
+**And a real risk hiding underneath it.** A `sticky` element taller than the viewport pins at the top
+and its lower portion cannot be scrolled into view. The note field is the **last** thing in the card,
+under four categories that each carry a 138–172 character description. On a short laptop viewport
+the note may be unreachable at `lg`. **That would be a `defect`, not a preference** — worth measuring
+before this entry is resolved either way.
+
+---
+
+### F-17 · `…/rubric` · the scoring scale should be 1–4, not 0–5
+
+**Severity:** preference — owner's rubric-design opinion, not an observed problem
+**FR / decision:** FR-4, §5 `RubricCategory`
+**Did:** n/a — noticed while watching.
+**Expected:** (owner's) A 1–4 scale.
+**Observed:** The seed's categories are 5-point, and the segmented row offers `—` plus `0`–`5`.
+
+**This is a PRD conversation and it is a larger one than it looks.** §5's `RubricCategory` carries
+`maxPoints` and **no minimum**, so the control renders `0…maxPoints` inclusive — a 6-value scale for
+`maxPoints: 5` is the schema working as written, not a UI choice. A 1–4 scale is therefore not a seed
+change: it needs either a `minPoints` column or a stated convention that 0 is not offered, and §5 has
+to move before either.
+
+Per CLAUDE.md, that means PRD §5 and FR-4 change first, with the reason recorded, and the code
+follows. **Not a bug fix** — resolving it as one would move the spec out from under the next
+maintainer.
+
+---
+
+### F-18 · `/r/<id>/a/<id>` · bold the question prompts
+
+**Severity:** preference
+**FR / decision:** FR-9 bullet 2
+**Did:** n/a — noticed while watching.
+**Expected:** (owner's) Prompts visually distinct from the applicant's answers.
+**Observed:** `page.tsx:171` renders the prompt as `text-sm font-medium` above a `text-[0.95rem]`
+answer — a real but slight distinction, and the prompt is the *smaller* of the two.
+
+---
+
+### F-19 · `/r/<id>/list` · move sign-out to the top
+
+**Severity:** preference
+**FR / decision:** n/a
+**Did:** n/a — noticed while watching.
+**Expected:** (owner's) Sign-out at the top of the screen.
+**Observed:** `<SignOutButton>` is the last element on the list page (`list/page.tsx:166`), below all
+14 rows.
+
+---
+
+## Result
+
+| # | Severity | Route | What |
+|---|---|---|---|
+| F-10 | defect | `/r/<id>/list` | A row gives no sign it opens the applicant — the first action of the flow |
+| F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work |
+| F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it |
+| F-13 | not a defect | `/r/<id>/…` | Hydration warning — all four recorded are `__gcr*` injection, none implicating our render |
+| F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight |
+| F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone |
+| F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Check the tall-card case before closing |
+| F-17 | preference | `…/rubric` | 1–4 rather than 0–5. Needs §5 to move first — there is no minimum in the schema |
+| F-18 | preference | `…/a/<id>` | Bold the question prompts |
+| F-19 | preference | `/r/<id>/list` | Sign-out to the top |
+
+**Three defects, two cosmetics, four preferences, one closed as not ours. No `blocks-gate`.** He
+completed a full review and both pool actions unaided, and found the list row himself.
+
+**Clauses 5a and 6a are met.** He used `Return to pool` and `Claim from pool` **without being told
+where either lives** — confirmed by the owner, and corroborated by the log, which shows a
+`returnToPool` and a `claimSlot` in the session. Those were the two clauses this step was scheduled
+to decide, and "a control nobody finds is a control that did not ship" is answered: both shipped.
+
+The finding that hurts is F-10, one screen earlier, on the control nobody thought was at risk — and
+per the baseline note it is the one this run was *least* able to measure properly.
 
 ---
 
@@ -265,9 +546,12 @@ Observed:
    account creation, no download, no spreadsheet training" premise exists to make unnecessary.
 3. Tick each fix against the FR-9 clause ledger at the top of `plans/phase-3.md` — the ledger itself,
    not a paraphrase of it — before committing.
-4. **Step 8: re-run steps 5 and 6** with the same person after the fixes, or with a second board
-   member if the first is now contaminated by having seen it work. Add a second person to the roster
-   only when that is decided — an unused roster entry consumes assignment slots at the next
+4. **Step 8: re-run steps 5 and 6 with a second board member who does not work in design.** This is
+   no longer the formality the step describes. The first run was expert review rather than a naive
+   one — see the baseline — so the gate's actual question, whether someone with no design instinct
+   completes a review unaided, is still unanswered. **F-10 is the specific thing to watch**, and the
+   re-run should happen after it is fixed so the fix is what gets tested. Add the second person to the
+   roster only when that is decided; an unused roster entry consumes assignment slots at the next
    generation.
 5. Only then Slice 8, the PRD status line. A status line claiming an unverified phase is the one PRD
    edit that must not lead the code.
