@@ -554,6 +554,20 @@ Per CLAUDE.md, that means PRD §5 and FR-4 change first, with the reason recorde
 follows. **Not a bug fix** — resolving it as one would move the spec out from under the next
 maintainer.
 
+**Recorded as PRD decision 40, and the build is deferred to Phase 4.** The resolution is a
+`minPoints Int @default(0)` column rather than a stated convention: a convention lives in validation
+code and so applies retroactively to every instance ever, which would leave a past cycle's legitimate
+0 scores as values the current scale says cannot exist — bad for FR-10's averages and for FR-20's
+export-and-reimport round trip. A column makes the scale data that travels with the instance that
+used it.
+
+**Deferred deliberately, and the reason is about this gate rather than about the change.** Nothing is
+blocked and no data is wrong, but the migration would land between the board-member run and its step
+8 re-run — risking the thing Phase 3 is trying to close, for a change with no deadline. Phase 4 is
+the natural home: FR-10 is the first requirement that computes on the scale rather than only storing
+it. §5 carries the planned column marked as not yet built, so the document does not claim a field
+the schema lacks.
+
 ---
 
 ### F-18 · `/r/<id>/a/<id>` · bold the question prompts
@@ -604,7 +618,7 @@ position, wrong the moment either changed. Placement is the caller's now.
 | F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight. **Fixed** |
 | F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone. **Fixed** |
 | F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Tall-card risk **measured and ruled out** |
-| F-17 | preference | `…/rubric` | 1–4 rather than 0–5. Needs §5 to move first — there is no minimum in the schema |
+| F-17 | preference | `…/rubric` | 1–4 rather than 0–5. **Decision 40 recorded; `minPoints` column deferred to Phase 4** |
 | F-18 | preference | `…/a/<id>` | Bold the question prompts. **Fixed** |
 | F-19 | preference | `/r/<id>/list` | Sign-out to the top. **Fixed** |
 

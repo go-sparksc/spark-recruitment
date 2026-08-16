@@ -151,6 +151,13 @@ RubricCategory
                                //   place a written reviewer ever sees it. Without
                                //   it the "rubric" a reviewer scores against is
                                //   four bare words. See decision 32.
+  // PLANNED, NOT YET BUILT — Phase 4, decision 40:
+  //   minPoints: int, default 0. The scale's floor, so a category can run 1..4
+  //   rather than 0..maxPoints. Deliberately listed as pending rather than added
+  //   to the field line above: the column does not exist yet, and §5 is the
+  //   document the next maintainer trusts about what does. Invariant
+  //   0 <= minPoints < maxPoints. Until it lands the floor is 0, hardcoded in
+  //   lib/review.ts.
 
 Reviewer
   id, instanceId, firstName, lastName
@@ -316,6 +323,8 @@ An instance accepts exactly one CSV. Commit is final, and a later upload into a 
 **Commit is guarded by a two-step confirmation**, because it is irreversible and it sits on a page whose whole purpose is reviewing and adjusting. Following the primary control renders a panel naming what is about to become final — how many applicants will be created, the one-CSV rule, and the column properties that freeze — and the commit itself is a separate submit inside that panel. Deliberately lighter than FR-5's typed-name gate for deletion, which is rare and destroys existing work, where commit is on the path every instance takes and creates rather than destroys. See decision 35.
 
 **FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category and for describing it. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
+
+**Planned for Phase 4, per decision 40:** the builder collects the scale's *floor* as well as its maximum, so a cycle can run its categories 1–4 rather than 0–`maxPoints`. Not built yet — today every category's floor is 0 and the builder collects one bound.
 
 **Each category carries a description, and it is optional but strongly prompted.** A name and a maximum are a scale, not a rubric: thirty reviewers scoring "Fit with Spark SC" out of 5 with no shared definition of a 4 produce exactly the divergence FR-10 then has to surface as high variance. The description is what FR-9 puts beside the score input. It is nullable because an admin mid-setup should not be blocked by it, and because a cycle that genuinely briefs its reviewers elsewhere is entitled to leave it empty.
 
@@ -674,6 +683,14 @@ These need answers before or during the relevant build phase. They are the place
     Each applicant now shows its returned assignments beneath its active reviewers, dimmed and non-actionable, naming the reviewer, the reason, and the free text where one was written. Non-actionable deliberately: a returned row is the record of a recusal, and an admin who could delete it would be able to let generation re-pair that reviewer with that applicant, which decision 23 forbids. The way to put a reviewer back on an applicant they returned is FR-8's assign.
 
     **FR-8's assign has to be taught about that row, and this is the second half of the same gap.** `assignReviewer` checks only the applicant's *active* reviewers and then inserts, so assigning a reviewer who had returned that applicant violated `UNIQUE (round, applicantId, reviewerId)` and surfaced as a raw database error. It was unreachable until now for the same reason the missing surface was invisible — nothing could create a returned row before FR-9's return-to-pool existed. It reactivates the row as `MANUAL` instead, clearing the return fields, exactly as decision 28 has a reviewer's own re-claim reactivate it as `CLAIMED_FROM_POOL`. Both are a deliberate person overriding a recusal, and neither is generation.
+
+40. **The written scale runs 0 to `maxPoints`, and the rubric it is meant to express runs 1 to 4. RESOLVED: `RubricCategory` gains a `minPoints` column — and the change is deferred to Phase 4.** `maxPoints` is the only bound in §5, and the floor is hardcoded in `lib/review.ts` as "reject anything below zero", so a 5-point category offers six values. The intended instrument is four: fewer options score faster and agree more often across thirty untrained reviewers, and no submitted answer should be scorable as nothing. Raised by the owner during the Slice 7 board-member run; it is a rubric-design decision rather than a defect, and the screen does exactly what FR-4 currently specifies.
+
+    **Why a column rather than a stated convention**, which was the cheaper option and is the wrong one. A convention — "scales run 1 to `maxPoints`, 0 is never offered" — is a change to validation code, so it applies to every instance that has ever existed. Instances here are per-semester and are kept: a past cycle whose reviewers legitimately recorded a 0 would suddenly hold scores the current scale says cannot exist, which FR-10 would then average and FR-20's export-and-reimport round trip would fail to validate. A column makes the scale *data*, so it travels with the instance that used it and history stays coherent. The cost is honest and accepted: per-category configuration that no admin will ever vary between categories, and a second field on the FR-4 builder, which decision F-01 already finds fiddly.
+
+    **`minPoints Int @default(0)`**, so the migration changes the meaning of no existing row and new rubrics opt in. Invariant `0 ≤ minPoints < maxPoints`, enforced in `validateRubric` beside the existing bounds. `validateScore` takes the floor as a parameter instead of assuming zero; the segmented row and the number-input fallback both render from it. `null` continues to mean *clear this score* and is untouched — **"unscored" is the absence of a `Score` row, not a zero**, which is what makes dropping 0 from the offered values cost nothing semantically. It is also why the obvious shortcut of storing 0–3 and displaying 1–4 is refused: the stored number must be the number the reviewer saw, or FR-10 computes variance over values nobody chose.
+
+    **Why it is deferred, which is the part a later reader will want.** Nothing about it is urgent — no reviewer is blocked and no data is wrong — and the migration would land between the board-member run and its step 8 re-run, which is the gate Phase 3 is actually trying to close. A schema change in that window risks the thing being verified for a change with no deadline. Phase 4 is the natural home: FR-10 is the first requirement that computes on the scale rather than only storing it. **Existing scores need no migration regardless** — FR-4 locks the rubric once any `Score` exists, so changing a scale already requires the reset that discards them.
 
 ## 11. Out of scope for v1, worth noting for v2
 
