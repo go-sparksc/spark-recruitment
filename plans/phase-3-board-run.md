@@ -427,6 +427,12 @@ admin surfaces included. One rule in `globals.css` fixes all of them, and per-co
 `cursor-pointer` classes would be the wrong shape of fix. `cosmetic` because nothing fails — but it
 is the cheapest finding here to resolve and the broadest in reach.
 
+**Fixed.** One rule in the `@layer base` block of `app/globals.css`, restoring
+`cursor: pointer` on `button:not(:disabled)` and `[role="button"]:not(:disabled)`. The absence was
+confirmed by reading `node_modules/tailwindcss/preflight.css` at the installed 4.3.3 rather than from
+the changelog. Deliberately not a per-component class: the next button anyone adds would be missing
+it again.
+
 ---
 
 ### F-15 · `/r/<id>/a/<id>` · "Return to pool" is not separated from the rubric card
@@ -518,7 +524,7 @@ answer — a real but slight distinction, and the prompt is the *smaller* of the
 | F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work |
 | F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it |
 | F-13 | not a defect | `/r/<id>/…` | Hydration warning — all four recorded are `__gcr*` injection, none implicating our render |
-| F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight |
+| F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight. **Fixed** |
 | F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone |
 | F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Check the tall-card case before closing |
 | F-17 | preference | `…/rubric` | 1–4 rather than 0–5. Needs §5 to move first — there is no minimum in the schema |

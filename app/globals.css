@@ -127,4 +127,22 @@
   html {
     @apply font-sans;
   }
+
+  /* Tailwind v4's Preflight dropped v3's `button { cursor: pointer }`, so every
+     button in this app renders with the default arrow and reads as inert.
+     Verified absent from node_modules/tailwindcss/preflight.css at 4.3.3 rather
+     than taken from the changelog.
+
+     Found by the Slice 7 board-member run on the rubric scoring buttons
+     (plans/phase-3-board-run.md, F-14), but it was never specific to those: it
+     is one rule here rather than a `cursor-pointer` class on each control,
+     because the next button someone adds would be missing it again.
+
+     `:not(:disabled)` so a control that cannot be actioned does not claim it
+     can. `[role="button"]` matches nothing today and is here so it keeps
+     holding if one appears — `<summary>` already sets its own. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
