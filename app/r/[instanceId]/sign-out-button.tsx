@@ -28,7 +28,9 @@ export function SignOutButton({ instanceId }: { instanceId: string }) {
         // same reason.
         clearAllDrafts();
       }}
-      className="mt-8"
+      // No margin: placement belongs to the caller. This carried `mt-8` while it
+      // sat at the foot of the list, which was the list's spacing living in the
+      // wrong file — F-19 moved it into the header and the margin went with it.
     >
       <input type="hidden" name="instanceId" value={instanceId} />
       <Button type="submit" variant="outline" size="sm">

@@ -173,7 +173,14 @@ export default async function ApplicantDetailPage({
           ) : (
             view.fields.map((field) => (
               <section key={field.fieldId} className="space-y-1.5">
-                <h2 className="text-sm font-medium">
+                {/* F-18. Was `text-sm font-medium`, which made the question
+                    both lighter and *smaller* than the answer under it — so a
+                    screen of essays read as one undifferentiated column. Same
+                    size as the answer now, separated by weight alone: enough to
+                    find the question when skimming, without a 200-character
+                    essay prompt shouting over the response a reviewer is
+                    actually there to read. */}
+                <h2 className="text-[0.95rem] font-semibold">
                   {field.groupDisplayName ? `${field.groupDisplayName} — ` : ""}
                   {field.displayName}
                 </h2>

@@ -88,11 +88,17 @@ export default async function ReviewerListPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Your applicants</h1>
-        <p className="text-muted-foreground text-sm">
-          {reviewer.firstName} {reviewer.lastName} · {instance.name}
-        </p>
+      {/* F-19. Sign-out sits beside the reviewer's own name rather than at the
+          foot of the list: that is where it is looked for, and at the bottom it
+          was fourteen rows of scrolling away from the identity it acts on. */}
+      <header className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold tracking-tight">Your applicants</h1>
+          <p className="text-muted-foreground text-sm">
+            {reviewer.firstName} {reviewer.lastName} · {instance.name}
+          </p>
+        </div>
+        <SignOutButton instanceId={instanceId} />
       </header>
 
       {/* Clause 6a. Outside the empty-list branch on purpose: a reviewer who has
@@ -184,8 +190,6 @@ export default async function ReviewerListPage({
           </ul>
         </>
       )}
-
-      <SignOutButton instanceId={instanceId} />
     </main>
   );
 }

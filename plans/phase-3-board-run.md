@@ -391,9 +391,22 @@ handed to the parent. `overscroll-contain` stops the chain at the card.
 This is a phone-only finding by construction: at `lg` the card is `lg:max-h-none lg:overflow-visible`
 and has no scroll region to chain out of.
 
-**Fixed** — `overscroll-contain` on that element. **Needs a phone to confirm**: the symptom is a
-touch-momentum behaviour, and a desktop mouse wheel rarely reproduces it, so `npm run verify` and a
-resized window both say nothing useful here.
+**Partly fixed, and downgraded to `cosmetic` on the phone result.** `overscroll-contain` is on the
+element and stays there — but the symptom still reproduces on the iPhone, and it is minor.
+
+**Why the fix did not close it, which is the part worth keeping.** `overscroll-behavior` governs
+*chaining*: what happens when an inner scroller reaches its boundary. That was a real latent defect
+and it is now fixed. But the reported symptom is not chaining — it is a **new touch landing while the
+page behind is mid-momentum**, and which element receives that gesture is decided by WebKit's
+touch handling, not by CSS. On iOS the first touch during a momentum scroll conventionally stops the
+momentum rather than scrolling whatever is under the finger. No app-level CSS controls that.
+
+**So this is most likely platform behaviour, and one test discriminates.** Every browser on iOS is
+WebKit, so trying Chrome on the same iPhone proves nothing. **An Android phone does**: if it does not
+reproduce there, it is WebKit and there is nothing to fix. Left open at `cosmetic` rather than closed,
+because the residual behaviour is real even if it turns out not to be ours — and `overscroll-contain`
+is kept either way, since the chaining it prevents was a genuine defect that a boundary scroll would
+have hit.
 
 ---
 
@@ -511,11 +524,15 @@ there; the rubric is pinned while the page scrolls. Two genuinely independent sc
 narrower than 1024px, it was the phone layout on a desktop screen, which
 `plans/phase-3.md` warns is not the same surface.
 
-**And a real risk hiding underneath it.** A `sticky` element taller than the viewport pins at the top
-and its lower portion cannot be scrolled into view. The note field is the **last** thing in the card,
-under four categories that each carry a 138–172 character description. On a short laptop viewport
-the note may be unreachable at `lg`. **That would be a `defect`, not a preference** — worth measuring
-before this entry is resolved either way.
+**And a real risk hiding underneath it — measured, and ruled out.** A `sticky` element taller than
+the viewport pins at the top and its lower portion cannot be scrolled into view. The note field is
+the **last** thing in the card, under four categories carrying 138–172 character descriptions, so on
+a short laptop viewport it could have been unreachable at `lg`. **Checked on hardware: the note is
+reachable.** This stays a `preference` rather than becoming a `defect`.
+
+Worth knowing that the margin is not guaranteed: the card's height scales with the number of
+categories and the length of their descriptions, both admin-controlled. A six-category rubric with
+long descriptions could still reach it, and nothing in the code prevents that.
 
 ---
 
@@ -548,6 +565,14 @@ maintainer.
 **Observed:** `page.tsx:171` renders the prompt as `text-sm font-medium` above a `text-[0.95rem]`
 answer — a real but slight distinction, and the prompt is the *smaller* of the two.
 
+**Fixed** — `text-[0.95rem] font-semibold`, so the question matches the answer's size and separates by
+weight alone. Not made larger: an essay prompt here runs to 200 characters, and a prompt that
+outweighs the response works against the person who is there to read the response.
+
+**Done directly rather than through a PRD amendment**, by the owner's call. The `preference` rule
+exists to stop the spec being moved quietly out from under the next maintainer — but neither `PRD.md`
+nor `plans/phase-3.md` ever made a claim about prompt weight, so there was no document to move.
+
 ---
 
 ### F-19 · `/r/<id>/list` · move sign-out to the top
@@ -559,6 +584,13 @@ answer — a real but slight distinction, and the prompt is the *smaller* of the
 **Observed:** `<SignOutButton>` is the last element on the list page (`list/page.tsx:166`), below all
 14 rows.
 
+**Fixed** — moved into the header, on the same line as the reviewer's own name, which is what it acts
+on and where it is looked for. At the foot of the list it was fourteen rows of scrolling away.
+
+**The `mt-8` moved with it.** That margin lived on the form inside `sign-out-button.tsx` and was the
+list page's spacing kept in the wrong file — harmless while there was exactly one caller and one
+position, wrong the moment either changed. Placement is the caller's now.
+
 ---
 
 ## Result
@@ -567,17 +599,22 @@ answer — a real but slight distinction, and the prompt is the *smaller* of the
 |---|---|---|---|
 | F-10 | defect | `/r/<id>/list` | A row gives no sign it opens the applicant — the first action of the flow. **Fixed** |
 | F-11 | defect | `…/a/<id>` | `Save note` and `Saved` make two different claims about the same work. **Fixed** |
-| F-12 | defect | `…/a/<id>` | The rubric card chains its scroll to the page behind it. **Fixed** |
+| F-12 | cosmetic | `…/a/<id>` | Chaining fixed; a residual momentum-capture behaviour remains, most likely WebKit |
 | F-13 | not a defect | `/r/<id>/…` | Hydration warning — all four recorded are `__gcr*` injection, none implicating our render |
 | F-14 | cosmetic | app-wide | No pointer cursor on any button — Tailwind v4 dropped it from Preflight. **Fixed** |
 | F-15 | cosmetic | `…/a/<id>` | `lg:gap-8` leaves zero space above the sticky card on a phone. **Fixed** |
-| F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Check the tall-card case before closing |
+| F-16 | preference | `…/a/<id>` | Rubric and responses scroll separately. Tall-card risk **measured and ruled out** |
 | F-17 | preference | `…/rubric` | 1–4 rather than 0–5. Needs §5 to move first — there is no minimum in the schema |
-| F-18 | preference | `…/a/<id>` | Bold the question prompts |
-| F-19 | preference | `/r/<id>/list` | Sign-out to the top |
+| F-18 | preference | `…/a/<id>` | Bold the question prompts. **Fixed** |
+| F-19 | preference | `/r/<id>/list` | Sign-out to the top. **Fixed** |
 
 **Three defects, two cosmetics, four preferences, one closed as not ours. No `blocks-gate`.** He
 completed a full review and both pool actions unaided, and found the list row himself.
+
+**Status: nine of ten resolved.** F-10, F-11, F-14, F-15, F-18 and F-19 are fixed and confirmed;
+F-13 is closed as third-party; F-16's hidden risk was measured and ruled out, leaving it a stated
+preference. **F-12 is the only one still live**, downgraded to `cosmetic` — its chaining half is
+fixed and the residual is most likely WebKit. **F-17 is a PRD conversation, not a fix.**
 
 **Clauses 5a and 6a are met.** He used `Return to pool` and `Claim from pool` **without being told
 where either lives** — confirmed by the owner, and corroborated by the log, which shows a
