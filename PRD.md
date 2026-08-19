@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.6, Phase 0-3 complete, Phase 4 next
+**Status:** v1.7, Phase 0-3 complete, decisions 40-41 recorded, Phase 4 next
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -137,7 +137,7 @@ Applicant
   email                        // promoted out of data for matching
   displayName                  // promoted out of data for display
   data: jsonb                  // { fieldId: value }
-  status: ACTIVE | ADVANCED | REJECTED | SPARKLET
+  status: ACTIVE | REJECTED | SPARKLET
   stageReached: WRITTEN | FIRST_ROUND | SECOND_ROUND
   UNIQUE (instanceId, email)   // makes FR-3 duplicate resolution a database
                                //   guarantee, not a UI convention. Blank emails
@@ -405,6 +405,10 @@ A regeneration that preserves manual overrides treats them as consumed capacity 
 **How a reviewer gets here, since the six bullets above assume it and no requirement stated it.** Reviewers do not pass the §8 app-level gate and never see the instance list. They arrive on a per-instance link shared in the club Slack, pick the round, pick their name, and enter that round's access code — one screen, one submit, per decision 30. Verifying the code starts a reviewer session held in its own signed cookie, separate from the admin session so that neither confers the other, and carrying the instance, the round, and the reviewer id. Every reviewer page and every reviewer action re-checks it; an assignment id in a URL is an untrusted reference until it has been confirmed to belong to the session's reviewer. The code itself is set by an admin, per decision 31.
 
 **FR-10 Written results dashboard.** Applicants ranked by average score descending, then by variance ascending. Each row shows: rank, name, average, variance, review count (2/3, 3/3), and demographic fields inline. Filters for "high variance" and "incomplete." Admin can open any applicant to read the full profile and all three reviewers' scores and notes.
+
+Variance is population variance (divide by review count, not review count minus one) across each reviewer's own category average — these three or two numbers are the entire set being measured, not a sample standing in for a larger one, so no bias correction applies. An applicant with fewer than 3 reviews still gets a computed average and variance over what exists; the review-count cell itself carries a visual marker (not row-level) when under 3/3, so "trust this number less" reads on the number and not on the applicant as a whole.
+
+The "high variance" filter's threshold is admin-set at view time — a numeric input, off by default — rather than a fixed or persisted value. Variance itself is always shown for every applicant regardless of filter state, since E-board reviews high-variance cases by eye and the filter is a convenience for finding them, not the only way to see the number.
 
 **FR-11 Selection.** Admin checkboxes select applicants to advance. A live panel shows the demographic breakdown of the current selection against the applicant pool, so composition is visible during selection rather than audited after. Finalizing writes `Decision` records and populates the First Round tab.
 
@@ -691,6 +695,12 @@ These need answers before or during the relevant build phase. They are the place
     **`minPoints Int @default(0)`**, so the migration changes the meaning of no existing row and new rubrics opt in. Invariant `0 ≤ minPoints < maxPoints`, enforced in `validateRubric` beside the existing bounds. `validateScore` takes the floor as a parameter instead of assuming zero; the segmented row and the number-input fallback both render from it. `null` continues to mean *clear this score* and is untouched — **"unscored" is the absence of a `Score` row, not a zero**, which is what makes dropping 0 from the offered values cost nothing semantically. It is also why the obvious shortcut of storing 0–3 and displaying 1–4 is refused: the stored number must be the number the reviewer saw, or FR-10 computes variance over values nobody chose.
 
     **Why it is deferred, which is the part a later reader will want.** Nothing about it is urgent — no reviewer is blocked and no data is wrong — and the migration would land between the board-member run and its step 8 re-run, which is the gate Phase 3 is actually trying to close. A schema change in that window risks the thing being verified for a change with no deadline. Phase 4 is the natural home: FR-10 is the first requirement that computes on the scale rather than only storing it. **Existing scores need no migration regardless** — FR-4 locks the rubric once any `Score` exists, so changing a scale already requires the reset that discards them.
+
+41. **`Applicant.status` carries an `ADVANCED` value with no reader. RESOLVED: drop it, three-state enum.** `ADVANCED` appears only in the §5 schema block, never in §7 prose. FR-17 defines second-round pass membership as "every applicant with `status = ACTIVE`" with no round qualifier, which means by the time an applicant reaches second round they must already be back to `ACTIVE` — so a state that means "selected, not yet active in the next round" has nothing downstream that reads it or clears it. `Applicant.status` becomes `ACTIVE | REJECTED | SPARKLET`.
+
+    **FR-11 finalize, made explicit:** for every applicant in the pool, write a `Decision` row with `stage = WRITTEN`. Selected: `outcome = ADVANCE`, `status` stays `ACTIVE`, `stageReached → FIRST_ROUND`. Not selected: `outcome = REJECT`, `status → REJECTED`, `stageReached` stays `WRITTEN`. This is a decision for every applicant looked at, not just the ones who advance — the record of "we reviewed X and passed on them" is as real as the record of advancing someone, and it's what the `UNIQUE (applicantId, stage)` constraint is there to hold one of.
+
+    "Populates the First Round tab" (FR-11) means `stageReached` moving forward on the advanced applicants and nothing more. Standing up first-round roster or reviewer state is FR-12 onward, Phase 5's job.
 
 ## 11. Out of scope for v1, worth noting for v2
 
