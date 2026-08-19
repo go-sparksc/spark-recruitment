@@ -410,7 +410,11 @@ Variance is population variance (divide by review count, not review count minus 
 
 The "high variance" filter's threshold is admin-set at view time — a numeric input, off by default — rather than a fixed or persisted value. Variance itself is always shown for every applicant regardless of filter state, since E-board reviews high-variance cases by eye and the filter is a convenience for finding them, not the only way to see the number.
 
+Two applicants tied on both stated keys are ordered by `sourceRowIndex` ascending, per decision 42. "Review count" counts **completed** reviews — every live rubric category scored — which is the sense decision 1 already uses when it requires this dashboard warn on applicants with fewer than three of them.
+
 **FR-11 Selection.** Admin checkboxes select applicants to advance. A live panel shows the demographic breakdown of the current selection against the applicant pool, so composition is visible during selection rather than audited after. Finalizing writes `Decision` records and populates the First Round tab.
+
+The confirmation before finalizing names any applicant with zero completed reviews, per decision 44 — rejecting someone nobody read is the failure decision 1's warning exists to prevent, and finalize is the last moment it can be prevented. Once the round is finalized this screen keeps its ranking, its filters and its per-applicant profiles and loses the checkboxes and the finalize control, since it is then a record of a decision rather than a surface for making one.
 
 ### 7.3 First round
 
@@ -701,6 +705,20 @@ These need answers before or during the relevant build phase. They are the place
     **FR-11 finalize, made explicit:** for every applicant in the pool, write a `Decision` row with `stage = WRITTEN`. Selected: `outcome = ADVANCE`, `status` stays `ACTIVE`, `stageReached → FIRST_ROUND`. Not selected: `outcome = REJECT`, `status → REJECTED`, `stageReached` stays `WRITTEN`. This is a decision for every applicant looked at, not just the ones who advance — the record of "we reviewed X and passed on them" is as real as the record of advancing someone, and it's what the `UNIQUE (applicantId, stage)` constraint is there to hold one of.
 
     "Populates the First Round tab" (FR-11) means `stageReached` moving forward on the advanced applicants and nothing more. Standing up first-round roster or reviewer state is FR-12 onward, Phase 5's job.
+
+42. **Two applicants tied on both of FR-10's sort keys. RESOLVED: `sourceRowIndex` ascending as a third key.** FR-10 names average descending and variance ascending and stops, so an exact tie renders in whatever order Postgres happened to return and can differ between two loads of the same page. It is not a rare case: on a four-category 1–4 rubric, three reviewers all scoring straight 3s and a single reviewer scoring a 3 both produce average 3.0000 and variance 0.0000, and any applicant whose reviewers agreed exactly ties every other such applicant at the same average.
+
+    `sourceRowIndex` is stable, exists on every applicant, and is never renumbered (decision 11). **The alternative worth naming is sorting by name, and it is rejected on fairness rather than on taste:** it would systematically advantage applicants early in the alphabet on every exact tie, across every cycle, in a list an E-board reads top-down. That is a real if small thumb on the scale, chosen by nobody, and invisible precisely because it looks like ordinary alphabetical ordering. Row index is arbitrary with respect to the applicant, which is the property wanted here.
+
+43. **Whether finalizing the written round moves `Instance.currentStage`. RESOLVED: yes, to `FIRST_ROUND`.** Decision 41 bounds "populates the First Round tab" to `stageReached` "and nothing more", which is a statement about *applicant* state and leaves the instance-level field unaddressed. `Instance.currentStage` is what FR-1's list renders beside each instance and what the hub uses to say where the cycle is; leaving it on `WRITTEN` after the written round has been decided makes both surfaces report a stage the cycle has left.
+
+    This is one field on `Instance`. It creates no first-round roster, no reviewer assignments and no access code, so it stays inside decision 41's boundary rather than reaching past it — the sentence exists to stop Phase 5 work migrating into Phase 4, and this is not that.
+
+    **It is also load-bearing, which is the part worth writing down.** FR-11's post-finalize read-only state is decided from this field: once `currentStage` is not `WRITTEN`, the results screen drops its checkboxes and its finalize control. If this decision were reversed the field would never move, that gate would never fire, and the screen would go on offering to finalize an already-finalized round. Reversing it therefore requires choosing a different signal for "the written round is over" — the obvious one being the existence of any `Decision` row at `stage = WRITTEN` — and not simply deleting the write.
+
+44. **Applicants with zero completed reviews when the admin finalizes. RESOLVED: finalize proceeds, and the confirmation names them.** Decision 41 requires a `Decision` row for every applicant in the pool, so an applicant nobody reviewed receives `outcome = REJECT` and `status = REJECTED` along with everyone else who was not selected. Read together with decision 1 — which requires FR-10 warn on applicants with fewer than three completed reviews, because returns add pool slots throughout the round — that produces the one outcome this system exists to make impossible: a rejection recorded against an applicant no reviewer ever read.
+
+    The confirmation panel therefore lists them by name and count above the confirm button, phrased as what it is: rejecting them records a decision nobody made. **Blocking finalize outright was the stronger guarantee and is rejected**, because a reviewer who never showed up is exactly the situation the unassigned pool exists to absorb, and a hard block hands a deadline-bound E-board a screen they cannot get past. **Silence was the PRD-literal reading and is rejected** for the reason above. Naming them puts the fact in front of the one person who can act on it, at the one moment acting on it is still possible, and leaves the choice theirs.
 
 ## 11. Out of scope for v1, worth noting for v2
 
