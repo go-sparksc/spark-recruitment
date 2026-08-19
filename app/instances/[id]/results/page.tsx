@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 
 import { InstanceCrumbs } from "../instance-crumbs";
 import { ResultsTable, type ResultRow } from "./results-table";
-import { AssignmentStatus, Round } from "@/generated/prisma/enums";
+import { ApplicantStatus, AssignmentStatus, InstanceStage, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
-import { applicantDemographics, demographicColumns } from "@/lib/demographics";
+import { applicantDemographics, columnLabels, demographicColumns } from "@/lib/demographics";
 import type { ApplicantData } from "@/lib/field-groups";
 import { planShape } from "@/lib/assignment";
 import { prisma } from "@/lib/prisma";
@@ -166,17 +166,58 @@ export default async function ResultsPage({
   const ranked = rankApplicants(rows).map((row, index) => ({ ...row, rank: index + 1 }));
   const visible = applyResultFilters(ranked, filters, target);
 
+  // Clause 11e, decided here rather than in the client.
+  //
+  // **Server-side because the client's copy of the stage is only as fresh as the
+  // payload it arrived in.** A second tab left open across a finalize would go
+  // on offering checkboxes over a decision that has already been made. The
+  // action re-checks the same field for the same reason, since a stale tab can
+  // still submit.
+  //
+  // `!== WRITTEN` rather than an ordering comparison: InstanceStage is not an
+  // ordered type in TypeScript, and `>` over its string values would work by
+  // alphabetical accident and break the first time a value is added.
+  const selectable = instance.currentStage === InstanceStage.WRITTEN;
+
+  // Everyone still in the written round — **the same predicate `finalizeWritten`
+  // recomputes server-side**, so the panel's denominator and the set that
+  // actually receives Decision rows cannot drift apart.
+  const byId = new Map(ranked.map((row) => [row.id, row]));
+  const pool = applicants
+    .filter(
+      (applicant) =>
+        applicant.status === ApplicantStatus.ACTIVE && applicant.stageReached === Round.WRITTEN,
+    )
+    .map((applicant) => {
+      const row = byId.get(applicant.id);
+      return {
+        id: applicant.id,
+        displayName: applicant.displayName,
+        sourceRowIndex: applicant.sourceRowIndex,
+        completedCount: row?.completedCount ?? 0,
+        selections: Object.fromEntries(
+          Object.entries(row?.demographics ?? {}).map(([key, cell]) => [key, cell.selected]),
+        ),
+      };
+    });
+
   return (
     <main className={shell}>
       {header}
       <ResultsTable
         rows={visible}
-        columns={columns.map(({ key, label }) => ({ key, label }))}
+        pool={pool}
+        columns={columns.map((column) => ({
+          key: column.key,
+          label: column.label,
+          labels: columnLabels(column),
+        }))}
         target={target}
         totalCount={ranked.length}
         incompleteCount={ranked.filter((row) => row.completedCount < target).length}
         filters={{ ...filters, basePath: `/instances/${id}/results` }}
         instanceId={id}
+        selectable={selectable}
       />
     </main>
   );

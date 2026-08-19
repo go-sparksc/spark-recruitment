@@ -1,5 +1,13 @@
+"use client";
+
 import Link from "next/link";
 
+import {
+  SelectionPanel,
+  useSelection,
+  type SelectionApplicant,
+  type SelectionColumn,
+} from "./selection-panel";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -9,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { ApplicantDemographic } from "@/lib/demographics";
 import { formatAverage, formatVariance, isUnderTarget } from "@/lib/results";
 
 export interface ResultRow {
@@ -19,7 +28,7 @@ export interface ResultRow {
   variance: number | null;
   completedCount: number;
   /// Keyed by `DemographicColumn.key`.
-  demographics: Record<string, string>;
+  demographics: Record<string, ApplicantDemographic>;
 }
 
 export interface RankedRow extends ResultRow {
@@ -32,27 +41,46 @@ export interface ResultsFilters {
   basePath: string;
 }
 
-/// A server component. Nothing here is interactive — both filters are links and
-/// a GET form, so the whole page works before hydration and a filtered view is
-/// linkable and survives a revalidate. FR-11's checkbox column arrives in slice 4
-/// and is the first thing on this page that needs the client.
+/// FR-10's table and FR-11's selection, on one screen.
+///
+/// One page rather than two because an admin checking a box has to see the
+/// variance and the review count on the row they are checking. A separate
+/// selection screen would either repeat those columns or ask for the decision
+/// without the numbers that inform it.
+///
+/// A client component because FR-11's panel must be live. The filters inside it
+/// are still a plain GET form and plain links, so a filtered view is linkable
+/// and survives the revalidate that follows finalize.
 export function ResultsTable({
   rows,
+  pool,
   columns,
   target,
   totalCount,
   incompleteCount,
   filters,
   instanceId,
+  selectable,
 }: {
+  /// The filtered, ranked view — what the table draws.
   rows: readonly RankedRow[];
-  columns: readonly { key: string; label: string }[];
+  /// The whole pool, unfiltered. FR-11's breakdown compares the selection
+  /// "against the applicant pool", and a filtered denominator would not be one.
+  pool: readonly SelectionApplicant[];
+  columns: readonly SelectionColumn[];
   target: number;
   totalCount: number;
   incompleteCount: number;
   filters: ResultsFilters;
   instanceId: string;
+  /// Clause 11e, decided on the server from `Instance.currentStage`. False once
+  /// the round is finalized: the checkbox column and the panel are **not
+  /// rendered**, rather than rendered disabled, so there is no control to
+  /// re-enable and no selection state to submit.
+  selectable: boolean;
 }) {
+  const { selected, toggle, clear } = useSelection();
+
   // Omits defaults so a URL stays clean and an unfiltered view has no query
   // string at all. Same shape as assignment-controls.tsx's href builder.
   const href = (over: Partial<{ only: string; minVar: string }>) => {
@@ -73,7 +101,29 @@ export function ResultsTable({
         <Stat label="Applicants" value={totalCount} />
         <Stat label={`Under ${target}/${target}`} value={incompleteCount} />
         <Stat label="Showing" value={filtered ? `${rows.length} of ${totalCount}` : totalCount} />
+        {selectable ? <Stat label="Selected" value={selected.size} /> : null}
       </dl>
+
+      {selectable ? (
+        <SelectionPanel
+          instanceId={instanceId}
+          applicants={pool}
+          columns={columns}
+          selected={selected}
+          onClear={clear}
+          target={target}
+        />
+      ) : (
+        // Clause 11e. The ranking, the filters and the profiles stay; only the
+        // affordances for making a decision go, because the decision is made.
+        <p className="rounded-md border p-4 text-sm">
+          <span className="font-medium">Written round finalized.</span>{" "}
+          <span className="text-muted-foreground">
+            These results are kept as the record of that decision. Ranking, filters and applicant
+            profiles all still work; selection does not, because there is nothing left to select.
+          </span>
+        </p>
+      )}
 
       <div className="flex flex-wrap items-end gap-3">
         <Link
@@ -87,10 +137,10 @@ export function ResultsTable({
           Incomplete
         </Link>
 
-        {/* A plain GET form, so the threshold survives the revalidate that
-            follows finalize and can be linked. It is still "not persisted" in
-            FR-10's sense: nothing writes it to the instance, a cookie, or
-            localStorage — it lives only in the URL the admin is looking at. */}
+        {/* A plain GET form, so the threshold survives a revalidate and can be
+            linked. Still "not persisted" in FR-10's sense: nothing writes it to
+            the instance, a cookie, or localStorage — it lives only in the URL
+            the admin is currently looking at. */}
         <form method="get" action={filters.basePath} className="flex items-end gap-2">
           <div className="space-y-1">
             <label htmlFor="minVar" className="text-muted-foreground block text-xs">
@@ -132,6 +182,7 @@ export function ResultsTable({
         <Table>
           <TableHeader>
             <TableRow>
+              {selectable ? <TableHead className="w-10" /> : null}
               <TableHead className="w-12 text-right">#</TableHead>
               <TableHead>Applicant</TableHead>
               <TableHead className="text-right">Average</TableHead>
@@ -144,7 +195,18 @@ export function ResultsTable({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} data-state={selected.has(row.id) ? "selected" : undefined}>
+                {selectable ? (
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggle(row.id)}
+                      aria-label={`Advance ${row.displayName}`}
+                      className="border-input size-4 rounded"
+                    />
+                  </TableCell>
+                ) : null}
                 <TableCell className="text-muted-foreground text-right tabular-nums">
                   {row.rank}
                 </TableCell>
@@ -171,13 +233,7 @@ export function ResultsTable({
                     number. */}
                 <ReviewCountCell completedCount={row.completedCount} target={target} />
                 {columns.map((column) => (
-                  <TableCell
-                    key={column.key}
-                    className="text-muted-foreground max-w-[16rem] truncate text-sm"
-                    title={row.demographics[column.key] || undefined}
-                  >
-                    {row.demographics[column.key] || "—"}
-                  </TableCell>
+                  <DemographicCell key={column.key} cell={row.demographics[column.key]} />
                 ))}
               </TableRow>
             ))}
@@ -188,13 +244,37 @@ export function ResultsTable({
   );
 }
 
-function ReviewCountCell({
-  completedCount,
-  target,
-}: {
-  completedCount: number;
-  target: number;
-}) {
+function DemographicCell({ cell }: { cell: ApplicantDemographic | undefined }) {
+  const selected = cell?.selected ?? [];
+  const writeIn = cell?.writeIn ?? "";
+
+  if (selected.length > 0) {
+    const text = selected.join(", ");
+    return (
+      <TableCell className="text-muted-foreground max-w-[16rem] truncate text-sm" title={text}>
+        {text}
+      </TableCell>
+    );
+  }
+
+  // §10.7: a write-in author has given a real answer the count cannot read.
+  // Shown in italics so it does not look like a selected option, since it is
+  // not one and is not counted as one.
+  if (writeIn !== "") {
+    return (
+      <TableCell
+        className="text-muted-foreground max-w-[16rem] truncate text-sm italic"
+        title={writeIn}
+      >
+        {writeIn}
+      </TableCell>
+    );
+  }
+
+  return <TableCell className="text-muted-foreground text-sm">—</TableCell>;
+}
+
+function ReviewCountCell({ completedCount, target }: { completedCount: number; target: number }) {
   const short = isUnderTarget(completedCount, target);
   const label = `${completedCount}/${target}`;
 
@@ -205,7 +285,7 @@ function ReviewCountCell({
   return (
     <TableCell className="text-right">
       <span
-        className="bg-amber-100 text-amber-900 rounded px-1.5 py-0.5 text-sm tabular-nums dark:bg-amber-950 dark:text-amber-200"
+        className="rounded bg-amber-100 px-1.5 py-0.5 text-sm tabular-nums text-amber-900 dark:bg-amber-950 dark:text-amber-200"
         title={
           completedCount === 0
             ? "Nobody has completed a review of this applicant."
