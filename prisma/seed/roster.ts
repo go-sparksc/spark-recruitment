@@ -68,8 +68,17 @@ export function buildReviewerSpecs(rng: Rng): ReviewerSpec[] {
   }));
 }
 
-/// FR-4: admin sets the number of categories and max points, then names them.
-/// Four categories at 5 points each matches FR-9's "0/4 scored, 4/4 scored".
+/// FR-4: admin sets the number of categories and both bounds, then names them.
+/// Four categories at 1-4 matches FR-9's "0/4 scored, 4/4 scored" and is the
+/// instrument PRD decision 40 exists to make expressible — four options score
+/// faster and agree more often across thirty untrained reviewers, and no
+/// submitted answer should be scorable as nothing.
+///
+/// This used to be 0-5. It moved with decision 40, and the descriptions moved
+/// with it: each one names the top of the scale, and a description saying what
+/// a 5 looks like beside a control that stops at 4 is worse than no description
+/// at all.
+///
 /// Descriptions are seeded, not left null, because they are what a written
 /// reviewer scores against (PRD decision 32) and the seed is the fixture every
 /// walkthrough runs on. A seeded rubric with empty descriptions would make the
@@ -78,30 +87,34 @@ export function buildReviewerSpecs(rng: Rng): ReviewerSpec[] {
 export const RUBRIC_CATEGORIES = [
   {
     name: "Entrepreneurial Drive",
-    maxPoints: 5,
+    minPoints: 1,
+    maxPoints: 4,
     ordinal: 0,
     description:
-      "Appetite for building rather than joining. A 5 has started something unprompted and can say what it cost them; a 1 describes ambition with nothing attached to it.",
+      "Appetite for building rather than joining. A 4 has started something unprompted and can say what it cost them; a 1 describes ambition with nothing attached to it.",
   },
   {
     name: "Initiative and Follow-Through",
-    maxPoints: 5,
+    minPoints: 1,
+    maxPoints: 4,
     ordinal: 1,
     description:
-      "Evidence of finishing, not just starting. A 5 ran something end to end past the point it stopped being exciting; a 1 lists projects with no outcome.",
+      "Evidence of finishing, not just starting. A 4 ran something end to end past the point it stopped being exciting; a 1 lists projects with no outcome.",
   },
   {
     name: "Communication and Clarity",
-    maxPoints: 5,
+    minPoints: 1,
+    maxPoints: 4,
     ordinal: 2,
     description:
-      "Whether the writing makes the thinking legible. A 5 is specific and ordered and would be understood by someone outside their field; a 1 needs re-reading to extract a claim.",
+      "Whether the writing makes the thinking legible. A 4 is specific and ordered and would be understood by someone outside their field; a 1 needs re-reading to extract a claim.",
   },
   {
     name: "Fit with Spark SC",
-    maxPoints: 5,
+    minPoints: 1,
+    maxPoints: 4,
     ordinal: 3,
     description:
-      "What they would actually do here, beyond wanting to belong. A 5 names the unglamorous half of the work; a 1 could be applying to any club.",
+      "What they would actually do here, beyond wanting to belong. A 4 names the unglamorous half of the work; a 1 could be applying to any club.",
   },
 ] as const;

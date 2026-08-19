@@ -220,9 +220,90 @@ async function main() {
   }
   console.log("");
   console.log(
-    `  Rubric: ${instance.rubricCategories.map((c) => `${c.name} (${c.maxPoints})`).join(", ")}`,
+    `  Rubric: ${instance.rubricCategories
+      .map((c) => `${c.name} (${c.minPoints}–${c.maxPoints})`)
+      .join(", ")}`,
   );
+
+  await reportWrittenReviews(instance.id, instance.rubricCategories.length);
   console.log(RULE);
+}
+
+// ---------------------------------------------------------------------------
+// Written assignments and scores — the FR-10 fixture, checkable without the UI
+// ---------------------------------------------------------------------------
+
+/// BUILD_PLAN's Phase 4 gate is "ranking matches a hand calculation on ten
+/// synthetic applicants". This prints those ten with the arithmetic done here
+/// rather than by lib/results.ts, so the gate is a comparison between two
+/// independent computations instead of a function agreeing with itself.
+async function reportWrittenReviews(instanceId: string, categoryCount: number) {
+  const assignments = await prisma.assignment.findMany({
+    where: { instanceId, round: "WRITTEN", status: "ACTIVE" },
+    select: {
+      applicant: { select: { sourceRowIndex: true } },
+      scores: { select: { points: true } },
+    },
+  });
+
+  if (assignments.length === 0) {
+    console.log("");
+    console.log("  No written assignments. Run `npm run seed`.");
+    return;
+  }
+
+  // sourceRowIndex -> the average each reviewer gave, for complete reviews only.
+  // PRD decision 1: review count counts *completed* reviews.
+  const averagesByRow = new Map<number, number[]>();
+  for (const assignment of assignments) {
+    const row = assignment.applicant.sourceRowIndex;
+    if (!averagesByRow.has(row)) averagesByRow.set(row, []);
+    if (assignment.scores.length !== categoryCount) continue;
+    const total = assignment.scores.reduce((sum, score) => sum + score.points, 0);
+    averagesByRow.get(row)!.push(total / categoryCount);
+  }
+
+  const summarise = (averages: number[]) => {
+    if (averages.length === 0) return { average: null, variance: null };
+    const average = averages.reduce((a, b) => a + b, 0) / averages.length;
+    // Population variance: divide by k, not k-1. These two or three numbers are
+    // the entire set being measured, not a sample of a larger one.
+    const variance =
+      averages.reduce((sum, value) => sum + (value - average) ** 2, 0) / averages.length;
+    return { average, variance };
+  };
+
+  const complete = [...averagesByRow.values()].filter((a) => a.length === 3).length;
+  const short = [...averagesByRow.values()].filter((a) => a.length > 0 && a.length < 3).length;
+  const none = [...averagesByRow.values()].filter((a) => a.length === 0).length;
+
+  console.log("");
+  console.log(
+    `  Written reviews: ${assignments.length} assignments · ` +
+      `${complete} applicants at 3/3, ${short} short, ${none} with none complete`,
+  );
+
+  console.log("");
+  console.log("  The ten fixture applicants, ranked (average desc, variance asc, row asc):");
+  const fixture = [...averagesByRow.entries()]
+    .filter(([row]) => row >= 1 && row <= 10)
+    .map(([row, averages]) => ({ row, count: averages.length, ...summarise(averages) }))
+    .sort(
+      (a, b) =>
+        (b.average ?? -1) - (a.average ?? -1) ||
+        (a.variance ?? Infinity) - (b.variance ?? Infinity) ||
+        a.row - b.row,
+    );
+
+  console.log("    rank  row   average   variance   count");
+  fixture.forEach((entry, index) => {
+    const average = entry.average === null ? "     —" : entry.average.toFixed(4).padStart(6);
+    const variance = entry.variance === null ? "     —" : entry.variance.toFixed(4).padStart(6);
+    console.log(
+      `    ${String(index + 1).padStart(4)}  ${String(entry.row).padStart(3)}   ` +
+        `${average}    ${variance}     ${entry.count}/3`,
+    );
+  });
 }
 
 main()

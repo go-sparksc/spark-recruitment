@@ -1,9 +1,16 @@
 import { hashSecret } from "../lib/password";
-import { InstanceStage, Round } from "../generated/prisma/enums";
+import { AssignmentOrigin, InstanceStage, Round } from "../generated/prisma/enums";
 import { buildApplicantData, buildApplicantProfiles } from "./seed/applicants";
 import { SEED_INSTANCE_ID, createSeedClient } from "./seed/client";
 import { ETHNICITY_GROUP, buildFieldSpecs } from "./seed/fields";
 import { createRng } from "../lib/rng";
+import {
+  buildAssignments,
+  buildScores,
+  createScoresRng,
+  fullTargetRowIndexes,
+  planShape,
+} from "./seed/reviews";
 import { RUBRIC_CATEGORIES, SPARKLET_COUNT, buildReviewerSpecs } from "./seed/roster";
 
 const RNG_SEED = 20260805;
@@ -36,6 +43,20 @@ function seedId(kind: string, index: number, width = 3): string {
 /// @default(cuid()) client-side, so none of them conflict — but never validate
 /// one of these ids by length or pattern.
 const ETHNICITY_GROUP_ID = `${SEED_INSTANCE_ID}_group_ethnicity`;
+
+/// A review is complete when every live rubric category is scored, which is the
+/// sense PRD decision 1 uses and the one FR-10's review count reports. Counted
+/// here only so the seed can print it; the app reads it through `completionOf`.
+function countCompleteAssignments(
+  scores: readonly { assignmentId: string }[],
+  categoryCount: number,
+): number {
+  const byAssignment = new Map<string, number>();
+  for (const score of scores) {
+    byAssignment.set(score.assignmentId, (byAssignment.get(score.assignmentId) ?? 0) + 1);
+  }
+  return [...byAssignment.values()].filter((count) => count === categoryCount).length;
+}
 
 async function main() {
   const rng = createRng(RNG_SEED);
@@ -174,18 +195,82 @@ async function main() {
     })),
   });
 
-  // Assignments, scores, votes, passes, and decisions are deliberately absent.
-  // They belong to phases 2, 3, and 6; inventing them now would let a wrong
-  // shape harden before those phases specify one.
+  // Votes, passes and decisions are still deliberately absent — they belong to
+  // phases 5 and 6, and inventing them now would let a wrong shape harden before
+  // those phases specify one. Assignments and scores were absent for the same
+  // reason until phases 2 and 3 shipped, and FR-10 needs something to rank.
+
+  // The written roster, not every reviewer. FR-7 is explicit that a reviewer
+  // serving only the second round is not capacity for the written one.
+  const writtenReviewers = reviewers
+    .map((reviewer, index) => ({ id: seedId("reviewer", index, 2), ...reviewer }))
+    .filter((reviewer) => reviewer.rounds.includes(Round.WRITTEN))
+    .map((reviewer) => ({ id: reviewer.id, isSparklet: reviewer.isSparklet }));
+
+  const applicantIds = profiles.map((profile) => seedId("applicant", profile.sourceRowIndex));
+  // The pool must not land on a fixture applicant whose worked case needs three
+  // reviewer averages — see plans/phase-4.md's FR-10 table.
+  const requireFullTarget = new Set(
+    fullTargetRowIndexes().map((rowIndex) => seedId("applicant", rowIndex)),
+  );
+  const {
+    rows: assignmentRows,
+    pooledApplicantIds,
+    seed: assignmentSeed,
+  } = buildAssignments(
+    applicantIds,
+    writtenReviewers,
+    (index) => seedId("assignment", index),
+    requireFullTarget,
+  );
+
+  await prisma.assignment.createMany({
+    data: assignmentRows.map((row) => ({
+      ...row,
+      instanceId: SEED_INSTANCE_ID,
+      round: Round.WRITTEN,
+      // What FR-7's Generate button writes. A seeded row that claimed to be
+      // MANUAL would be preserved capacity under decision 21 and would survive
+      // a regeneration the admin expected to replace everything.
+      origin: AssignmentOrigin.AUTO,
+    })),
+  });
+
+  const rowIndexByApplicantId = new Map(
+    profiles.map((profile) => [seedId("applicant", profile.sourceRowIndex), profile.sourceRowIndex]),
+  );
+  const rubricForScoring = RUBRIC_CATEGORIES.map((category) => ({
+    id: seedId("rubric", category.ordinal, 1),
+    minPoints: category.minPoints,
+    maxPoints: category.maxPoints,
+  }));
+
+  const scoreRows = buildScores(
+    assignmentRows,
+    rowIndexByApplicantId,
+    rubricForScoring,
+    createScoresRng(createRng),
+  );
+  await prisma.score.createMany({ data: scoreRows });
 
   const sparklets = reviewers.filter((reviewer) => reviewer.isSparklet).length;
+  const shape = planShape(profiles.length, writtenReviewers.length);
+  const completeAssignments = countCompleteAssignments(scoreRows, RUBRIC_CATEGORIES.length);
 
   console.log("");
   console.log(`Seeded instance "${SEED_INSTANCE_NAME}"`);
   console.log(`  fields             ${fieldSpecs.length}`);
   console.log(`  applicants         ${profiles.length}`);
   console.log(`  reviewers          ${reviewers.length} (${sparklets} Sparklets)`);
-  console.log(`  rubric categories  ${RUBRIC_CATEGORIES.length}`);
+  console.log(`  rubric categories  ${RUBRIC_CATEGORIES.length} (scored 1-4)`);
+  console.log(
+    `  assignments        ${assignmentRows.length} of ${shape.totalSlots} slots ` +
+      `(${pooledApplicantIds.length} held open in the pool, seed ${assignmentSeed})`,
+  );
+  console.log(
+    `  scores             ${scoreRows.length} across ${completeAssignments} complete ` +
+      `and ${assignmentRows.length - completeAssignments} incomplete reviews`,
+  );
   console.log("");
   console.log("Development credentials (synthetic data only, stored as argon2id hashes):");
   console.log(`  instance password  ${DEV_INSTANCE_PASSWORD}`);
