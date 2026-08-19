@@ -167,6 +167,19 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       waiting: counts.applicants === 0 || activeAssignments === 0,
     },
     {
+      href: `/instances/${id}/results`,
+      title: "Written results",
+      state:
+        instance.currentStage !== InstanceStage.WRITTEN
+          ? "written round finalized"
+          : scoreCount === 0
+            ? "no scores yet"
+            : `${plural(scoreCount, "score")} recorded`,
+      // A page of em-dashes is not worth a click. Scores arrive one reviewer at
+      // a time, so this stops being "waiting" as soon as anybody has graded.
+      waiting: scoreCount === 0,
+    },
+    {
       href: `/instances/${id}/settings`,
       title: "Settings",
       state: "instance password and deletion",
