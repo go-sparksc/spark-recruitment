@@ -12,6 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 export interface RubricRow {
   id: string;
   name: string;
+  /// The scale's floor, per PRD decision 40. Both controls render from it, so a
+  /// 1-4 category never draws a 0 — and the stored number stays the number the
+  /// reviewer actually saw, which is what FR-10 then computes variance over.
+  minPoints: number;
   maxPoints: number;
   /// What the reviewer is actually scoring against, per PRD decision 32. Null
   /// where the admin left it blank, which FR-4 permits.
@@ -22,6 +26,10 @@ export interface RubricRow {
 /// Above this, a segmented row stops being a control and becomes a wall of
 /// buttons — `MAX_POINTS_CEILING` is 1000, so a 100-point category is legal.
 /// Ten is the point at which the row still fits a phone without wrapping.
+///
+/// Measured against the **span**, not the maximum: since decision 40 a 90-100
+/// category is eleven buttons, and choosing the fallback for it on the strength
+/// of its maximum would hand a reviewer a number box for a scale that fits.
 const SEGMENTED_LIMIT = 10;
 
 const scoreKey = (categoryId: string) => `score:${categoryId}`;
@@ -351,7 +359,8 @@ function ScoreRow({
   status: SaveStatus;
   onPoints: (value: number | null) => void;
 }) {
-  const segmented = row.maxPoints <= SEGMENTED_LIMIT;
+  const segmented = row.maxPoints - row.minPoints <= SEGMENTED_LIMIT;
+  const scaleLabel = `${row.minPoints} to ${row.maxPoints}`;
   const hydrated = useHydrated();
 
   /// Post-hydration only — this handler does not exist in the markup React
@@ -400,7 +409,7 @@ function ScoreRow({
         // under the reviewer's thumb mid-tap.
         <div
           role="group"
-          aria-label={`${row.name}, out of ${row.maxPoints}`}
+          aria-label={`${row.name}, ${scaleLabel}`}
           className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1"
         >
           <SegmentButton
@@ -410,14 +419,21 @@ function ScoreRow({
             selected={points === null}
             muted
           />
-          {Array.from({ length: row.maxPoints + 1 }, (_, value) => (
-            <SegmentButton
-              key={value}
-              label={String(value)}
-              value={String(value)}
-              selected={points === value}
-            />
-          ))}
+          {/* Drawn from the floor, per decision 40: a 1-4 category offers four
+              buttons and no 0. The `—` above stays regardless — clearing a
+              score is the absence of a Score row, not a zero, so it survives
+              the floor rising off zero. */}
+          {Array.from({ length: row.maxPoints - row.minPoints + 1 }, (_, offset) => {
+            const value = row.minPoints + offset;
+            return (
+              <SegmentButton
+                key={value}
+                label={String(value)}
+                value={String(value)}
+                selected={points === value}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="mt-2 flex items-center gap-2">
@@ -427,11 +443,11 @@ function ScoreRow({
             // Uncontrolled, for the same reason the note is: React must not
             // overwrite a value typed before it attached.
             defaultValue={points ?? ""}
-            min={0}
+            min={row.minPoints}
             max={row.maxPoints}
             step={1}
             inputMode="numeric"
-            aria-label={`${row.name}, out of ${row.maxPoints}`}
+            aria-label={`${row.name}, ${scaleLabel}`}
             onChange={(event) =>
               onPoints(event.target.value === "" ? null : Number(event.target.value))
             }

@@ -100,14 +100,31 @@ export type ScoreValidation =
 /// what takes an applicant from 3/4 back to 2/4, and FR-9 needs that to be
 /// expressible — a reviewer who mis-taps must be able to undo it without an
 /// admin resetting the rubric.
-export function validateScore(points: number | null, maxPoints: number): ScoreValidation {
+///
+/// **The floor is a parameter rather than a hardcoded zero, per decision 40.**
+/// It used to be `points < 0`, which is correct only for a category whose scale
+/// starts at zero. A 1–4 category has to refuse a 0, and it has to refuse it
+/// here: the segmented row simply does not draw one, and "the client did not
+/// offer it" is not a constraint on what a POST can carry.
+///
+/// `null` is deliberately untouched by the floor. "Unscored" is the absence of a
+/// `Score` row, never a zero — which is exactly what makes dropping 0 from the
+/// offered values cost nothing semantically.
+export function validateScore(
+  points: number | null,
+  minPoints: number,
+  maxPoints: number,
+): ScoreValidation {
   if (points === null) return { ok: true, points: null };
 
   if (!Number.isInteger(points)) {
     return { ok: false, reason: "A score has to be a whole number." };
   }
-  if (points < 0) {
-    return { ok: false, reason: "A score cannot be negative." };
+  if (points < minPoints) {
+    // Naming the floor rather than saying "cannot be negative": on a 1–4 scale
+    // the refused value is usually 0, which is not negative, and a message that
+    // says it is would send the reader looking for the wrong bug.
+    return { ok: false, reason: `This category's lowest score is ${minPoints}.` };
   }
   if (points > maxPoints) {
     return { ok: false, reason: `This category is out of ${maxPoints}.` };

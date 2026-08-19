@@ -46,6 +46,7 @@ export default async function RubricPage({ params }: { params: Promise<{ id: str
             instanceId={instance.id}
             initial={instance.rubricCategories.map((c) => ({
               name: c.name,
+              minPoints: c.minPoints,
               maxPoints: c.maxPoints,
               // The column is nullable; the form field is a controlled textarea
               // and must never receive null.

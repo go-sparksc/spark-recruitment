@@ -151,13 +151,12 @@ RubricCategory
                                //   place a written reviewer ever sees it. Without
                                //   it the "rubric" a reviewer scores against is
                                //   four bare words. See decision 32.
-  // PLANNED, NOT YET BUILT — Phase 4, decision 40:
-  //   minPoints: int, default 0. The scale's floor, so a category can run 1..4
-  //   rather than 0..maxPoints. Deliberately listed as pending rather than added
-  //   to the field line above: the column does not exist yet, and §5 is the
-  //   document the next maintainer trusts about what does. Invariant
-  //   0 <= minPoints < maxPoints. Until it lands the floor is 0, hardcoded in
-  //   lib/review.ts.
+  minPoints                    // default 0. The scale's floor, so a category can
+                               //   run 1..4 rather than 0..maxPoints. Invariant
+                               //   0 <= minPoints < maxPoints, enforced in
+                               //   validateRubric; validateScore takes the floor
+                               //   as a parameter rather than assuming zero.
+                               //   See decision 40.
 
 Reviewer
   id, instanceId, firstName, lastName
@@ -324,7 +323,7 @@ An instance accepts exactly one CSV. Commit is final, and a later upload into a 
 
 **FR-4 Rubric builder.** Admin enters number of categories and max points per category. System generates the grid for naming each category and for describing it. Store as `RubricCategory`. Rubric is locked once any Score exists; changing it after grading has started requires an explicit "reset written scores" action with a confirmation.
 
-**Planned for Phase 4, per decision 40:** the builder collects the scale's *floor* as well as its maximum, so a cycle can run its categories 1–4 rather than 0–`maxPoints`. Not built yet — today every category's floor is 0 and the builder collects one bound.
+**Per decision 40:** the builder collects the scale's *floor* as well as its maximum, so a cycle can run its categories 1–4 rather than 0–`maxPoints`. A new category starts at 1–4; an existing rubric that predates the column keeps a floor of 0 until an admin changes it, which is what makes the change silent for cycles already run.
 
 **Each category carries a description, and it is optional but strongly prompted.** A name and a maximum are a scale, not a rubric: thirty reviewers scoring "Fit with Spark SC" out of 5 with no shared definition of a 4 produce exactly the divergence FR-10 then has to surface as high variance. The description is what FR-9 puts beside the score input. It is nullable because an admin mid-setup should not be blocked by it, and because a cycle that genuinely briefs its reviewers elsewhere is entitled to leave it empty.
 

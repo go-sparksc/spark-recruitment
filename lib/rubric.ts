@@ -7,6 +7,9 @@
 
 export interface RubricCategoryInput {
   name: string;
+  /// The scale's floor, per PRD decision 40. 0 for rubrics built before the
+  /// column existed; 1 for anything FR-4's builder creates now.
+  minPoints: number;
   maxPoints: number;
   /// What this category asks for and what the top of its scale means. Optional
   /// per FR-4, and the only thing a written reviewer has to score against beyond
@@ -50,6 +53,26 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
       errors.push(`Category ${position} is capped at ${MAX_POINTS_CEILING} points.`);
     }
 
+    // Decision 40's invariant: 0 <= minPoints < maxPoints.
+    //
+    // Strictly less than, not less than or equal: a category whose floor equals
+    // its ceiling offers the reviewer exactly one value, which is not a scale
+    // and would make every applicant's variance on it zero by construction.
+    //
+    // Guarded on maxPoints being an integer so a category with a garbage
+    // maximum reports one problem rather than two — the floor cannot be
+    // meaningfully compared against NaN, and saying so twice helps nobody.
+    if (!Number.isInteger(category.minPoints)) {
+      errors.push(`Category ${position}'s lowest score needs to be a whole number.`);
+    } else if (category.minPoints < 0) {
+      errors.push(`Category ${position}'s lowest score cannot be negative.`);
+    } else if (Number.isInteger(category.maxPoints) && category.minPoints >= category.maxPoints) {
+      errors.push(
+        `Category ${position}'s lowest score (${category.minPoints}) has to be below its ` +
+          `highest (${category.maxPoints}).`,
+      );
+    }
+
     // Absent is fine — FR-4 makes the description optional. Only its length is
     // validated, because it renders inside a card that has to share a phone
     // screen with the score input it explains.
@@ -77,11 +100,22 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
   return errors;
 }
 
-/// The total a single reviewer can award. Shown while building so the scale is
-/// visible before grading starts rather than discovered from the first results.
-export function rubricTotal(categories: readonly RubricCategoryInput[]): number {
-  return categories.reduce(
-    (sum, category) => sum + (Number.isFinite(category.maxPoints) ? category.maxPoints : 0),
-    0,
-  );
+/// The range a single reviewer can award across the whole rubric. Shown while
+/// building so the scale is visible before grading starts rather than discovered
+/// from the first results.
+///
+/// A range rather than a single total since decision 40: with a floor, the
+/// lowest possible score is no longer zero, and "16 points per reviewer" would
+/// describe a 4–16 instrument as though 0 were reachable.
+export function rubricRange(categories: readonly RubricCategoryInput[]): {
+  min: number;
+  max: number;
+} {
+  const sum = (pick: (category: RubricCategoryInput) => number) =>
+    categories.reduce((total, category) => {
+      const value = pick(category);
+      return total + (Number.isFinite(value) ? value : 0);
+    }, 0);
+
+  return { min: sum((category) => category.minPoints), max: sum((category) => category.maxPoints) };
 }

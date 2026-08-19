@@ -6,13 +6,19 @@ import { resetWrittenScores, saveRubric, type RubricState } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_DESCRIPTION_LENGTH, rubricTotal, validateRubric } from "@/lib/rubric";
+import { MAX_DESCRIPTION_LENGTH, rubricRange, validateRubric } from "@/lib/rubric";
 
 export interface RubricRow {
   name: string;
+  minPoints: number;
   maxPoints: number;
   description: string;
 }
+
+/// What a new category starts as, per decision 40: the 1-4 instrument, not the
+/// 0-5 one the builder used to default to. An existing rubric loaded from the
+/// database keeps whatever floor it was saved with, including 0.
+const NEW_CATEGORY: RubricRow = { name: "", minPoints: 1, maxPoints: 4, description: "" };
 
 export function RubricBuilder({
   instanceId,
@@ -25,7 +31,7 @@ export function RubricBuilder({
   lockedByScoreCount: number;
 }) {
   const [rows, setRows] = useState<RubricRow[]>(
-    initial.length > 0 ? initial : [{ name: "", maxPoints: 5, description: "" }],
+    initial.length > 0 ? initial : [NEW_CATEGORY],
   );
   const [state, setState] = useState<RubricState>({});
   const [pending, start] = useTransition();
@@ -35,6 +41,7 @@ export function RubricBuilder({
   // The same validator the server runs, so the two cannot disagree about what
   // is valid — the server is still the one that decides.
   const localErrors = validateRubric(rows);
+  const range = rubricRange(rows);
 
   const update = (index: number, patch: Partial<RubricRow>) =>
     setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -102,9 +109,31 @@ export function RubricBuilder({
                 className="h-9 w-64"
               />
             </div>
+            {/* Both bounds, per decision 40. The floor is first because that is
+                the order the scale reads in — "1 to 4", not "4 from 1" — and
+                because an admin who only glances at one field should see the
+                one that changed. */}
+            <div className="space-y-1.5">
+              <Label htmlFor={`min-points-${index}`} className="text-xs">
+                Lowest score
+              </Label>
+              <Input
+                id={`min-points-${index}`}
+                type="number"
+                min={0}
+                value={Number.isFinite(row.minPoints) ? row.minPoints : ""}
+                disabled={locked || pending}
+                onChange={(e) =>
+                  update(index, {
+                    minPoints: e.target.value === "" ? Number.NaN : Number(e.target.value),
+                  })
+                }
+                className="h-9 w-24"
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor={`points-${index}`} className="text-xs">
-                Max points
+                Highest score
               </Label>
               <Input
                 id={`points-${index}`}
@@ -147,7 +176,7 @@ export function RubricBuilder({
                 onChange={(e) => update(index, { description: e.target.value })}
                 rows={2}
                 maxLength={MAX_DESCRIPTION_LENGTH}
-                placeholder="e.g. Evidence of starting something and seeing it through. A 5 is a project they ran end to end; a 1 is an idea never acted on."
+                placeholder="e.g. Evidence of starting something and seeing it through. A 4 is a project they ran end to end; a 1 is an idea never acted on."
                 className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
               />
               <p className="text-muted-foreground text-xs tabular-nums">
@@ -163,13 +192,13 @@ export function RubricBuilder({
           size="sm"
           variant="outline"
           disabled={locked || pending}
-          onClick={() => setRows((current) => [...current, { name: "", maxPoints: 5, description: "" }])}
+          onClick={() => setRows((current) => [...current, NEW_CATEGORY])}
         >
           Add category
         </Button>
         <span className="text-muted-foreground text-sm">
-          {rows.length} categor{rows.length === 1 ? "y" : "ies"} · {rubricTotal(rows)} points per
-          reviewer
+          {rows.length} categor{rows.length === 1 ? "y" : "ies"} · {range.min}–{range.max} points
+          per reviewer
         </span>
       </div>
 

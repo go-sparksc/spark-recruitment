@@ -42,6 +42,7 @@ export async function saveRubric(
 
   const cleaned = categories.map((category, ordinal) => ({
     name: category.name.trim(),
+    minPoints: category.minPoints,
     maxPoints: category.maxPoints,
     // Empty and whitespace-only both store as null rather than "". A blank
     // string would render as an empty paragraph under the category name and

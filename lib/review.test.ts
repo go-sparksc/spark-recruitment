@@ -154,15 +154,15 @@ describe("completionOf — the FR-4 reset path moves the denominator", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateScore", () => {
-  it("accepts both ends of the scale", () => {
-    expect(validateScore(0, 5)).toEqual({ ok: true, points: 0 });
-    expect(validateScore(5, 5)).toEqual({ ok: true, points: 5 });
+  it("accepts both ends of a zero-floored scale", () => {
+    expect(validateScore(0, 0, 5)).toEqual({ ok: true, points: 0 });
+    expect(validateScore(5, 0, 5)).toEqual({ ok: true, points: 5 });
   });
 
   it("accepts null, which is how a score is cleared", () => {
     // 3/4 back to 2/4. A reviewer who mis-taps must be able to undo it without
     // an admin resetting the whole rubric.
-    expect(validateScore(null, 5)).toEqual({ ok: true, points: null });
+    expect(validateScore(null, 0, 5)).toEqual({ ok: true, points: null });
   });
 
   it("refuses a value above the category maximum", () => {
@@ -170,26 +170,65 @@ describe("validateScore", () => {
     // the category maximum by editing the request. It must be refused
     // server-side." The segmented control never draws a 6, which is exactly why
     // this has to be checked where the request arrives.
-    const result = validateScore(6, 5);
+    const result = validateScore(6, 0, 5);
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ reason: expect.stringContaining("out of 5") });
   });
 
   it("refuses a negative score", () => {
-    expect(validateScore(-1, 5).ok).toBe(false);
+    expect(validateScore(-1, 0, 5).ok).toBe(false);
   });
 
   it("refuses a fraction", () => {
     // Score is an Int in §5. Accepting 2.5 here would fail at the database with
     // a message no reviewer could act on.
-    expect(validateScore(2.5, 5).ok).toBe(false);
+    expect(validateScore(2.5, 0, 5).ok).toBe(false);
   });
 
   it("bounds against the category's own maximum, not a hardcoded 5", () => {
     // Goal 5: the rubric is reconfigurable between cycles. A 10-point category
     // is legal and a 5-point ceiling would silently refuse half its range.
-    expect(validateScore(9, 10)).toEqual({ ok: true, points: 9 });
-    expect(validateScore(9, 5).ok).toBe(false);
+    expect(validateScore(9, 0, 10)).toEqual({ ok: true, points: 9 });
+    expect(validateScore(9, 0, 5).ok).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // The floor is a parameter — PRD decision 40
+  // -------------------------------------------------------------------------
+
+  it("refuses a 0 on a 1-4 category", () => {
+    // The case decision 40 exists for. The segmented row does not draw a 0, so
+    // this is the only thing standing between a hand-made POST and a score no
+    // reviewer could have chosen — which FR-10 would then average.
+    const result = validateScore(0, 1, 4);
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ reason: expect.stringContaining("lowest score is 1") });
+  });
+
+  it("accepts both ends of a 1-4 category", () => {
+    expect(validateScore(1, 1, 4)).toEqual({ ok: true, points: 1 });
+    expect(validateScore(4, 1, 4)).toEqual({ ok: true, points: 4 });
+  });
+
+  it("still accepts null on a floored category", () => {
+    // "Unscored" is the absence of a Score row, never a zero. This is what
+    // makes dropping 0 from the offered values cost nothing semantically — a
+    // reviewer on a 1-4 scale can still clear a mis-tap.
+    expect(validateScore(null, 1, 4)).toEqual({ ok: true, points: null });
+  });
+
+  it("bounds against the category's own floor, not a hardcoded 0", () => {
+    // The mirror of the maximum case above. A 90-100 category is legal under
+    // MAX_POINTS_CEILING, and a hardcoded floor would accept a 3 on it.
+    expect(validateScore(95, 90, 100)).toEqual({ ok: true, points: 95 });
+    expect(validateScore(3, 90, 100).ok).toBe(false);
+  });
+
+  it("does not call a refused 0 negative", () => {
+    // On a 1-4 scale the value actually refused is 0, which is not negative.
+    // A message saying it is would send the reader after the wrong bug.
+    const result = validateScore(0, 1, 4);
+    expect(result).not.toMatchObject({ reason: expect.stringContaining("negative") });
   });
 });
 

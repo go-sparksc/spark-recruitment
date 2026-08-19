@@ -137,11 +137,11 @@ async function applyScore(formData: FormData): Promise<void> {
   const owned = await ownedAssignmentId(instanceId, assignmentId);
 
   // Scoped to the instance: a category id from another cycle is not a category
-  // this reviewer may write against, and the maximum has to come from the row
+  // this reviewer may write against, and both bounds have to come from the row
   // rather than from the request.
   const category = await prisma.rubricCategory.findFirst({
     where: { id: rubricCategoryId, instanceId },
-    select: { id: true, maxPoints: true },
+    select: { id: true, minPoints: true, maxPoints: true },
   });
   if (!category) refuse("That rubric category no longer exists. Reload the page.");
 
@@ -150,7 +150,7 @@ async function applyScore(formData: FormData): Promise<void> {
   const points = text === "" ? null : Number(text);
   if (points !== null && !Number.isFinite(points)) refuse("That is not a score.");
 
-  const verdict = validateScore(points, category.maxPoints);
+  const verdict = validateScore(points, category.minPoints, category.maxPoints);
   if (!verdict.ok) refuse(verdict.reason);
 
   if (verdict.points === null) {

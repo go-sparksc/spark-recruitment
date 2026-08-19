@@ -94,7 +94,7 @@ export default async function ApplicantDetailPage({
     prisma.rubricCategory.findMany({
       where: { instanceId },
       orderBy: { ordinal: "asc" },
-      select: { id: true, name: true, maxPoints: true, description: true },
+      select: { id: true, name: true, minPoints: true, maxPoints: true, description: true },
     }),
     // Prev/next, so a reviewer working through fifteen never returns to the list.
     prisma.assignment.findMany({
@@ -128,6 +128,7 @@ export default async function ApplicantDetailPage({
   const rubric: RubricRow[] = categories.map((category) => ({
     id: category.id,
     name: category.name,
+    minPoints: category.minPoints,
     maxPoints: category.maxPoints,
     description: category.description,
     points: pointsByCategory.get(category.id) ?? null,

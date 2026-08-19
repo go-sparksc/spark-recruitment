@@ -78,9 +78,15 @@ enum PromotedRole {
 /// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
 /// second copy of that fact with no rule for which one wins when they disagree.
 /// FR-19, FR-20 and archive-and-purge read the pass row, never this column.
+/// There was also an ADVANCED here, dropped per PRD decision 41. It meant
+/// "selected, not yet active in the next round" and nothing downstream read it
+/// or cleared it: FR-17 defines second-round pass membership as every applicant
+/// with `status = ACTIVE` and no round qualifier, so an applicant reaching the
+/// second round must already be ACTIVE. FR-11's finalize therefore leaves an
+/// advanced applicant ACTIVE and moves `stageReached`, which is the field that
+/// actually carries how far they have got.
 enum ApplicantStatus {
   ACTIVE
-  ADVANCED
   REJECTED
   SPARKLET
 }
@@ -317,6 +323,21 @@ model RubricCategory {
   name       String
   maxPoints  Int
   ordinal    Int
+
+  /// The floor of this category's scale, so a rubric can run 1..4 rather than
+  /// 0..maxPoints. See PRD decision 40. Invariant `0 <= minPoints < maxPoints`,
+  /// enforced in `validateRubric` beside the existing bounds.
+  ///
+  /// A column rather than a convention because instances are per-semester and
+  /// are kept: a past cycle whose reviewers legitimately recorded a 0 must keep
+  /// holding scores its own scale says are legal, which a global rule would
+  /// retroactively invalidate. The scale travels with the instance that used it.
+  ///
+  /// Defaults to 0 so the migration changes the meaning of no existing row.
+  /// `null` on a Score is unaffected — "unscored" is the absence of a Score row,
+  /// never a zero, which is what makes dropping 0 from the offered values cost
+  /// nothing semantically.
+  minPoints  Int      @default(0)
 
   /// What this category is asking for, and what the top of its scale means.
   /// FR-9 renders it beside the score input, which is the only place a written
