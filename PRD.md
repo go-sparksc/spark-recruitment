@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.10, Phase 0-4 complete, decisions 42-49 recorded, Phase 5 next
+**Status:** v1.11, Phase 0-4 complete, FR-12a added, decisions 50-54 recorded, Phase 5 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -200,9 +200,28 @@ InterviewNotes                 // one row per applicant; only one interviewer of
   interviewerName              //   column records which
   UNIQUE (applicantId)
 
+InterviewImport                // FR-12 staging header. One row per sheet, deleted
+  id, instanceId               //   at that sheet's commit, taking its rows with it.
+  sheet: SCORES | NOTES
+  headers: jsonb               // the source file's header row, verbatim
+  mapping: jsonb               // { columnIndex: role }, role being APPLICANT_EMAIL |
+                               //   APPLICANT_NAME | INTERVIEWER_NAME | AVERAGE |
+                               //   NOTES | CATEGORY:<interviewCategoryId> | IGNORED
+  uploadedAt
+  UNIQUE (instanceId, sheet)   // A re-upload replaces this row and cascades its
+                               //   staged rows away, which is FR-12's "accepts
+                               //   repeated uploads" without a second staging set.
+                               //   Row existence is also the answer to "is this
+                               //   sheet staged?", the question importCommittedAt
+                               //   answers for FR-3 — decision 47 gives the two
+                               //   sheets independent lifecycles, and a shared
+                               //   nullable column on Instance would make each
+                               //   commit responsible for clearing half of it.
+
 InterviewImportRow             // FR-12/13 staging. Exists only between upload
   id, instanceId               //   and commit for each sheet, and is deleted
                                //   at that sheet's commit.
+  importId                     // the InterviewImport this row was staged by
   sheet: SCORES | NOTES        // which of FR-12's two uploads this row came from
   rowIndex                     // 1-based position in its source file
   cells: jsonb                 // { columnIndex: verbatim value }, same
@@ -212,7 +231,20 @@ InterviewImportRow             // FR-12/13 staging. Exists only between upload
   matchTier: EMAIL | NAME | FUZZY | MANUAL   // nullable until resolved
   matchConfidence               // nullable; the similarity score, set only
                                //   when matchTier = FUZZY. See decision 45.
+  skipped                      // bool, default false. Decision 51's third
+                               //   outcome: the admin has said this row matches
+                               //   nobody in the pool. A decision that was made,
+                               //   recorded, rather than a row silently dropped.
   UNIQUE (instanceId, sheet, rowIndex)
+  CHECK ((matchedApplicantId IS NULL) = (matchTier IS NULL))
+                               // resolved means both or neither
+  CHECK ((matchTier = 'FUZZY') = (matchConfidence IS NOT NULL))
+                               // "set only when matchTier = FUZZY", enforced
+  CHECK (NOT (skipped AND matchedApplicantId IS NOT NULL))
+                               // a skipped row is not also a matched one
+                               // All three live in raw migration SQL — Prisma
+                               //   cannot express a CHECK — and are asserted by
+                               //   prisma/checks/, same posture as Field's.
 
 FirstRoundVote
   id, applicantId, reviewerId, value: YES | NO | SKIP
@@ -434,6 +466,10 @@ The confirmation before finalizing names any applicant with zero completed revie
 
 ### 7.3 First round
 
+**FR-12a Interview rubric builder.** Before FR-12's score sheet can be mapped, the instance needs configured `InterviewCategory` rows — the interview rubric is its own instrument per decision 6, not shared with `RubricCategory`. Admin enters number of categories and max points per category, on its own page at `/instances/[id]/interview-rubric`, modelled on FR-4's builder. Store as `InterviewCategory`. The rubric locks once any `InterviewCategoryScore` exists — a distinct lock condition from FR-4's, since the two rubrics are different instruments scored at different times.
+
+FR-12 presupposed these rows and named no surface that creates them, which left the only screen that can produce a mappable score sheet as work no requirement asked for. See decision 54 for why it is its own page rather than a second section of FR-4's.
+
 **FR-12 Score and notes import.** Two uploads with a defined contract:
 
 *First Round Scores* — required columns: `Applicant Email` (or `Applicant Name` if email is unavailable), `Interviewer Name`, one column per configured `InterviewCategory`, and `Average`. Two rows per applicant expected, one per interviewer.
@@ -446,7 +482,7 @@ Each sheet is staged, previewed, and committed on its own schedule, per decision
 
 **FR-13 Name reconciliation.** The current `1R Notes` sheet keys on free-text applicant names typed by interviewers, which will not match cleanly. On import: exact email match first, then exact name match, then fuzzy name match above a similarity threshold presented for confirmation, then an unresolved queue the admin maps by hand. Nothing imports silently under a guessed match.
 
-**Matching is scoped to applicants who reached first round** — `stageReached != WRITTEN` — not the full applicant pool. A fuzzy match against a written-round rejection is a wrong match this scoping removes for free, since nobody outside that set can legitimately appear in an interview sheet. See decision 45 for the algorithm, threshold, and the double-match case.
+**Matching is scoped to applicants who reached first round** — `stageReached != WRITTEN` — not the full applicant pool. A fuzzy match against a written-round rejection is a wrong match this scoping removes for free, since nobody outside that set can legitimately appear in an interview sheet. See decision 45 for the normalization and the double-match case, decision 52 for the algorithm and threshold that supersede 45's, and decision 53 for why a single fuzzy candidate is still confirmed by hand.
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
@@ -748,6 +784,8 @@ These need answers before or during the relevant build phase. They are the place
 
     0.85 is a starting point, not a derivation, and the deliberately messy fixture data BUILD_PLAN calls for is what actually tests it — trailing whitespace, a middle initial present in one file only, and the Cici/Cecilia pair should clear it, while two genuinely different short names should not.
 
+    > **Superseded on the comparison basis and the threshold by decision 52.** Building that fixture data is exactly what tested it, and it failed: whole-string Jaro-Winkler scores the Cici/Cecilia pair at 0.842 and the Mia/Nia pair at 0.917, so the rule above rejects the example it was written for and admits the one it was written against. **The normalization in this decision stands unchanged and is still what tiers 2 and 3 both run on.** What changes is what the score is computed over. See 52.
+
     **A row where more than one applicant clears the threshold is not auto-resolved to the closest one.** An ambiguous fuzzy match is worse than an unresolved one, same reasoning as decision 12's stance on group detection — a wrong silent guess costs a cycle, and a row that simply waits for a human costs a minute.
 
 46. **FR-15 ranking: the tiebreak, and how a zero-vote applicant renders. RESOLVED: raw non-skip vote count descending, then `sourceRowIndex` ascending; zero votes marked on the count cell, not hidden or blocked.** Yes-percentage ties are common at low reviewer counts — 2/2 and 6/6 both read 100% — and FR-15 named no tiebreak. Vote count first, because a 6/6 unanimous yes is a stronger signal than a 2/2 one at the same percentage and the ranking should say so before falling back to the arbitrary key; `sourceRowIndex` last, same reasoning as decision 42 — it is arbitrary with respect to the applicant, which is what makes it fair as a last resort.
@@ -760,7 +798,39 @@ These need answers before or during the relevant build phase. They are the place
 
 48. **Reconciliation is scoped to applicants who reached first round, not the full pool. RESOLVED.** FR-13 says nothing about which applicants a name or fuzzy match is allowed to resolve to, and matching against the full 150 includes applicants FR-11 already rejected — nobody outside `stageReached != WRITTEN` can legitimately appear in an interview sheet, so widening the match pool only manufactures wrong matches for free. Scoping the comparison set to the applicants who actually advanced removes that failure mode rather than relying on the admin to catch it in the manual queue.
 
-49. **Two rows in the same upload resolving to the same applicant. RESOLVED: warned at preview, not silently upserted.** Decision 47's upsert on `(applicantId, interviewerName)` for scores and `applicantId` for notes handles a *re-upload* correctly, but says nothing about two rows inside one file landing on the same applicant — accidentally pasted notes twice, or two sheet rows both resolving to one person through different tiers. Committing silently would let the second row overwrite the first with nothing telling the admin it happened, the same failure decision 35 found in FR-3's unguarded commit. The preview screen surfaces any applicant with more than one resolved row in the batch before commit is offered, same posture as FR-3's duplicate-email warning.
+49. **Two rows in the same upload resolving to the same applicant. RESOLVED: warned at preview, not silently upserted.** *(Collision key refined by decision 50 — read them together.)* Decision 47's upsert on `(applicantId, interviewerName)` for scores and `applicantId` for notes handles a *re-upload* correctly, but says nothing about two rows inside one file landing on the same applicant — accidentally pasted notes twice, or two sheet rows both resolving to one person through different tiers. Committing silently would let the second row overwrite the first with nothing telling the admin it happened, the same failure decision 35 found in FR-3's unguarded commit. The preview screen surfaces any applicant with more than one resolved row in the batch before commit is offered, same posture as FR-3's duplicate-email warning.
+
+50. **Decision 49's collision key is the sheet's upsert key, not `applicantId`. RESOLVED.** Read literally, 49 flags "any applicant with more than one resolved row in the batch" — but FR-12 *expects* two scores rows per applicant, one per interviewer, so the literal reading fires on every correctly imported applicant and the warning becomes something to click through. **The flagged set is exactly the set where a second row would overwrite a first:** `(applicantId, interviewerName)` on the scores sheet, `applicantId` on the notes sheet. That is 49's own stated reasoning — "the second row overwriting the first with nothing telling the admin it happened" — applied to the key the upsert actually uses, rather than to a coarser one that also covers the case the requirement is built around. Interviewer names are compared case-folded and whitespace-collapsed, so "Alex Kim" and "alex  kim" collide.
+
+51. **Rows still unresolved when the admin commits. RESOLVED: commit is blocked until every staged row is either matched or explicitly skipped.** §5 says `InterviewImportRow` "is deleted at that sheet's commit", which is only true if nothing is left in the queue at that moment; a partial commit would leave the staging table outliving the commit it was defined to end at, and a commit that silently discarded the remainder is the exact behavior FR-13's "nothing imports silently" exists to forbid.
+
+    This adds one outcome to the reconciliation screen — *not an applicant in this pool, skip this row* — for rows that legitimately match nobody: a header row pasted twice, a candidate who withdrew, a written-round rejection appearing in an interview sheet by mistake. A skipped row is a decision an admin made and a state the schema records (`InterviewImportRow.skipped`), which is what distinguishes it from a row that quietly vanished.
+
+52. **The fuzzy tier's comparison basis and threshold, amending decision 45. RESOLVED: exact normalized surname, matching given-name initial, Jaro-Winkler ≥ 0.78 over the given-name remainder.** Decision 45 specified Jaro-Winkler over the full normalized name at 0.85, and that rule rejects decision 45's own worked example while admitting the example it names as a counter-case. Measured, with an implementation validated against the published reference pairs (`MARTHA`/`MARHTA` 0.961, `DWAYNE`/`DUANE` 0.840, `DIXON`/`DICKSONX` 0.813, `CRATE`/`TRACE` 0.733):
+
+    | Pair, normalized | Whole-string Jaro-Winkler | Decision 45 requires |
+    |---|---|---|
+    | `cici fang` / `cecilia fang` | **0.842** | clears 0.85 — it does not |
+    | `mia chen` / `nia chen` | **0.917** | scores below 0.85 — it does not |
+    | `cecelia fang` / `cecilia fang` | 0.940 | clears ✓ |
+    | `meagan woods` / `megan woods` | 0.954 | clears ✓ |
+    | `meagan woods` / `maegan woods` | 0.975 | clears ✓ |
+
+    **No threshold fixes this, because the pair that must match scores strictly lower than the pair that must not.** There is no number between 0.842 and 0.917 in the required direction. Decision 45's stated rationale — "'Cici Fang' against 'Cecilia Fang' is a whole-string near-miss, not a token-level one" — is the sentence that is wrong: split token-wise the pair is a *certainty* on one half and a near-miss on the other (`fang` = `fang` exactly, `cici`/`cecilia` at 0.796), and whole-string scoring averages the half it knows into the half it does not. That is what pushes the pair under the bar while `mia`/`nia`, three characters riding on an identical surname, floats over it.
+
+    The replacement rule, applied after decision 45's normalization, which is unchanged:
+
+    1. The **surname** — the last token — must be exactly equal. A fuzzy surname is a different family, and the surname is the half an interviewer copies off a form rather than recalls.
+    2. The **given-name remainder must share its first character.** A difference at the initial is a different person (`mia`/`nia`, `sam`/`pam`, `jon`/`ron`); a difference after it is a spelling variant (`cecelia`/`cecilia`, `meagan`/`megan`, `cici`/`cecilia`). This gate carries the Mia/Nia case structurally rather than by a threshold that happens to land right.
+    3. **Jaro-Winkler ≥ 0.78 over the given-name remainder.** `matchConfidence` records this number.
+
+    0.78 is still a starting point rather than a derivation, but the gate above now carries the discrimination the threshold was being asked to carry alone. The rejected alternative was keeping whole-string scoring at 0.84 with the same initial gate: it satisfies the same cases, but `cici`/`cecilia` would clear by 0.002, and a threshold tuned to two thousandths of margin is a number nobody can maintain.
+
+53. **A single fuzzy candidate is confirmed by an admin, not auto-committed. RESOLVED.** FR-13 already says "presented for confirmation"; decision 45 says only what happens when *multiple* candidates clear, leaving the single-candidate path to be assumed. It cannot be assumed, because the arithmetic forbids the obvious reading: a nickname is less similar to its own given name than two different people's names are to each other. Given-name Jaro-Winkler against an identical surname — `cici`/`cecilia` **0.796**, `jason`/`jasmine` **0.853**, `chris`/`christina` **0.911**, `alexandra`/`alexander` **0.956**.
+
+    No similarity function reorders that list; there is no signal in the strings to reorder it by. So any rule that auto-commits the case decision 45 wants auto-committed also auto-commits two different people onto one applicant record — the precise defect this system exists to remove, arrived at by a different route. A fuzzy row is therefore staged as resolved (`matchedApplicantId`, `matchTier = FUZZY`, `matchConfidence`) and appears in a confirm list; commit is not offered while any fuzzy row is unticked. One tick box is the whole cost of never doing that.
+
+54. **Where the interview rubric builder lives. RESOLVED: its own page, `/instances/[id]/interview-rubric`, not a second section of `/rubric`.** FR-12 presupposes configured `InterviewCategory` rows and named no surface for them, which is what FR-12a now fixes. A second section on the existing rubric page would put two instruments, two lock rules, and two "once any score exists" conditions on one screen — decision 6 already treats the written and interview rubrics as separate instruments precisely so they do not tangle, and a shared page reintroduces the tangle at the UI layer. Its own page, modelled on the existing builder and reusing `validateRubric`'s shape, keeps FR-4's lock semantics separate from the interview instrument's, which locks on `InterviewCategoryScore` rows rather than `Score` rows.
 
 ## 11. Out of scope for v1, worth noting for v2
 
