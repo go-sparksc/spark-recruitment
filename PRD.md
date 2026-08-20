@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.8, Phase 0-4 complete, decisions 42-44 recorded, Phase 5 next
+**Status:** v1.9, Phase 0-4 complete, decisions 42-48 recorded, Phase 5 next
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -187,6 +187,9 @@ InterviewResult                // first round, imported. Two rows per applicant.
   score                        // the average as it appears in the source sheet,
                                //   imported verbatim. Never recomputed from the
                                //   category rows. See open decision 6.
+  UNIQUE (applicantId, interviewerName)
+                               // makes a re-upload an upsert rather than a
+                               //   duplicate. See decision 47.
 
 InterviewCategoryScore         // one per category per InterviewResult
   id, interviewResultId, interviewCategoryId, points
@@ -196,6 +199,20 @@ InterviewNotes                 // one row per applicant; only one interviewer of
   id, applicantId, body        //   the pair writes them, and the "Your Name"
   interviewerName              //   column records which
   UNIQUE (applicantId)
+
+InterviewImportRow             // FR-12/13 staging. Exists only between upload
+  id, instanceId               //   and commit for each sheet, and is deleted
+                               //   at that sheet's commit.
+  sheet: SCORES | NOTES        // which of FR-12's two uploads this row came from
+  rowIndex                     // 1-based position in its source file
+  cells: jsonb                 // { columnIndex: verbatim value }, same
+                               //   verbatim-preview reasoning as ImportRow
+  matchedApplicantId           // nullable; set once the row is resolved to
+                               //   an Applicant, by any tier
+  matchTier: EMAIL | NAME | FUZZY | MANUAL   // nullable until resolved
+  matchConfidence               // nullable; the similarity score, set only
+                               //   when matchTier = FUZZY. See decision 45.
+  UNIQUE (instanceId, sheet, rowIndex)
 
 FirstRoundVote
   id, applicantId, reviewerId, value: YES | NO | SKIP
@@ -425,13 +442,19 @@ The category columns are matched to `InterviewCategory` rows by the same mapping
 
 *First Round Notes* — required columns: `Applicant Email` (or `Applicant Name`), `Notes`. One row per applicant.
 
+Each sheet is staged, previewed, and committed on its own schedule, per decision 47 — scores and notes need not arrive together, and the dashboard renders whichever half exists. A sheet accepts repeated uploads; re-committing upserts on `(applicantId, interviewerName)` for scores and on `applicantId` for notes, rather than refusing a second file the way FR-3 refuses a second applicant CSV.
+
 **FR-13 Name reconciliation.** The current `1R Notes` sheet keys on free-text applicant names typed by interviewers, which will not match cleanly. On import: exact email match first, then exact name match, then fuzzy name match above a similarity threshold presented for confirmation, then an unresolved queue the admin maps by hand. Nothing imports silently under a guessed match.
+
+**Matching is scoped to applicants who reached first round** — `stageReached != WRITTEN` — not the full applicant pool. A fuzzy match against a written-round rejection is a wrong match this scoping removes for free, since nobody outside that set can legitimately appear in an interview sheet. See decision 45 for the algorithm, threshold, and the double-match case.
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
 **FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
 
-**FR-15 First-round results.** Applicants ranked by yes percentage descending, where `yes% = yes / (yes + no)`, skips excluded from both numerator and denominator. Show raw counts alongside the percentage; 2/2 and 14/14 are not the same signal. Selection and demographic-breakdown behavior mirrors FR-11.
+**FR-15 First-round results.** Applicants ranked by yes percentage descending, where `yes% = yes / (yes + no)`, skips excluded from both numerator and denominator. Show raw counts alongside the percentage; 2/2 and 14/14 are not the same signal. An applicant with zero non-skip votes carries no real percentage; the count cell — not the row — carries a visual marker the same way FR-10's under-3/3 marker works, per decision 46. Two applicants tied on yes percentage are ordered by raw non-skip vote count descending, then `sourceRowIndex` ascending, per decision 46.
+
+Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semantics, stated explicitly rather than left to the word "mirrors": for every applicant in the first-round pool (`status = ACTIVE`, `stageReached = FIRST_ROUND`), write one `Decision` row at `stage = FIRST_ROUND`. Selected: `outcome = ADVANCE`, `status` stays `ACTIVE`, `stageReached → SECOND_ROUND`. Not selected: `outcome = REJECT`, `status → REJECTED`, `stageReached` stays `FIRST_ROUND`. Finalizing moves `Instance.currentStage → SECOND_ROUND`, load-bearing for this screen's post-finalize read-only state exactly as decision 43 made it load-bearing for `/results`. The confirmation panel names any applicant with zero non-skip votes before finalizing, same reasoning as decision 44 — there is no fixed review-count target here to fall short of, so the flag is literal zero rather than "under some threshold."
 
 ### 7.4 Second round and passes
 
@@ -720,6 +743,22 @@ These need answers before or during the relevant build phase. They are the place
 44. **Applicants with zero completed reviews when the admin finalizes. RESOLVED: finalize proceeds, and the confirmation names them.** Decision 41 requires a `Decision` row for every applicant in the pool, so an applicant nobody reviewed receives `outcome = REJECT` and `status = REJECTED` along with everyone else who was not selected. Read together with decision 1 — which requires FR-10 warn on applicants with fewer than three completed reviews, because returns add pool slots throughout the round — that produces the one outcome this system exists to make impossible: a rejection recorded against an applicant no reviewer ever read.
 
     The confirmation panel therefore lists them by name and count above the confirm button, phrased as what it is: rejecting them records a decision nobody made. **Blocking finalize outright was the stronger guarantee and is rejected**, because a reviewer who never showed up is exactly the situation the unassigned pool exists to absorb, and a hard block hands a deadline-bound E-board a screen they cannot get past. **Silence was the PRD-literal reading and is rejected** for the reason above. Naming them puts the fact in front of the one person who can act on it, at the one moment acting on it is still possible, and leaves the choice theirs.
+
+45. **The fuzzy-match algorithm, threshold, and what happens when two applicants both clear it. RESOLVED: Jaro-Winkler over the full normalized name at a 0.85 threshold; more than one match above threshold routes to the manual queue.** FR-13 names a fuzzy tier without an algorithm or a number, and BUILD_PLAN's own gate depends on one — "Cici Fang" against "Cecilia Fang" is a whole-string near-miss, not a token-level one, which is why this compares the full trimmed, case-folded, whitespace-collapsed name rather than splitting into first and last halves the way the FR-6 roster comparison does. That split solves a different problem — telling two people with a shared token apart — and buys nothing here.
+
+    0.85 is a starting point, not a derivation, and the deliberately messy fixture data BUILD_PLAN calls for is what actually tests it — trailing whitespace, a middle initial present in one file only, and the Cici/Cecilia pair should clear it, while two genuinely different short names should not.
+
+    **A row where more than one applicant clears the threshold is not auto-resolved to the closest one.** An ambiguous fuzzy match is worse than an unresolved one, same reasoning as decision 12's stance on group detection — a wrong silent guess costs a cycle, and a row that simply waits for a human costs a minute.
+
+46. **FR-15 ranking: the tiebreak, and how a zero-vote applicant renders. RESOLVED: raw non-skip vote count descending, then `sourceRowIndex` ascending; zero votes marked on the count cell, not hidden or blocked.** Yes-percentage ties are common at low reviewer counts — 2/2 and 6/6 both read 100% — and FR-15 named no tiebreak. Vote count first, because a 6/6 unanimous yes is a stronger signal than a 2/2 one at the same percentage and the ranking should say so before falling back to the arbitrary key; `sourceRowIndex` last, same reasoning as decision 42 — it is arbitrary with respect to the applicant, which is what makes it fair as a last resort.
+
+    Zero non-skip votes should not happen but is not blocked from happening — a reviewer roster that never got to an applicant is a process failure, not a data integrity one. It gets FR-10's under-3/3 treatment: a marker on the review-count cell, not a row-level flag and not an exclusion from the ranked list, so it is visible without being treated as broken.
+
+47. **The two FR-12 sheets commit independently, and a re-upload upserts rather than being refused. RESOLVED.** Interview data arrives while interviews are still being conducted, not all at once the way the FR-2 applicant roster does, so gating one sheet on the other — or refusing a corrected re-upload the way FR-3 refuses a second applicant CSV — is friction with no payoff and would block voting on data that's actually ready. Each sheet stages, previews, and commits on its own schedule; the dashboard renders whichever half exists and treats the other as absent rather than blocking.
+
+    This is why `InterviewResult` gains `UNIQUE (applicantId, interviewerName)` — a constraint that didn't need to exist when the only import path was a single commit-once CSV. A re-committed scores sheet upserts on that key instead of creating a duplicate row. `InterviewNotes`'s existing `UNIQUE (applicantId)` already gives notes the same behavior for free.
+
+48. **Reconciliation is scoped to applicants who reached first round, not the full pool. RESOLVED.** FR-13 says nothing about which applicants a name or fuzzy match is allowed to resolve to, and matching against the full 150 includes applicants FR-11 already rejected — nobody outside `stageReached != WRITTEN` can legitimately appear in an interview sheet, so widening the match pool only manufactures wrong matches for free. Scoping the comparison set to the applicants who actually advanced removes that failure mode rather than relying on the admin to catch it in the manual queue.
 
 ## 11. Out of scope for v1, worth noting for v2
 
