@@ -73,6 +73,32 @@ enum PromotedRole {
   NAME
 }
 
+/// Which of FR-12's two uploads a staged row came from. The two sheets stage,
+/// preview and commit on their own schedules (PRD decision 47), so this is what
+/// keeps one sheet's staging set from being read as the other's.
+enum ImportSheet {
+  SCORES
+  NOTES
+}
+
+/// How an FR-13 row was resolved to an applicant. The cascade runs in this
+/// order and stops at the first tier that produces exactly one candidate.
+///
+/// MANUAL is the admin mapping a row by hand out of the unresolved queue. It is
+/// deliberately a tier rather than a flag: "who decided this row points here"
+/// is the question a successor asks when a score looks wrong, and a boolean
+/// beside three automatic tiers would answer it only by omission.
+///
+/// FUZZY is the only tier that carries a matchConfidence, enforced by a CHECK.
+/// It is also the only tier that is never committed without a human tick —
+/// see PRD decisions 52 and 53.
+enum MatchTier {
+  EMAIL
+  NAME
+  FUZZY
+  MANUAL
+}
+
 /// There is deliberately no UNRESOLVED here. An applicant left undecided when the
 /// second round closes is identified by `PassApplicant.resolution = NEEDS_ADMIN` on
 /// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
@@ -177,16 +203,19 @@ model Instance {
   /// successor and could contradict the FieldGroup rows beside them.
   importProposals   Json?
 
-  applicants       Applicant[]
-  assignments      Assignment[]
-  auditLogs        AuditLog[]
-  fieldGroups      FieldGroup[]
-  fields           Field[]
-  importRows       ImportRow[]
-  passes           Pass[]
-  reviewers        Reviewer[]
-  roundAccessCodes RoundAccessCode[]
-  rubricCategories RubricCategory[]
+  applicants          Applicant[]
+  assignments         Assignment[]
+  auditLogs           AuditLog[]
+  fieldGroups         FieldGroup[]
+  fields              Field[]
+  importRows          ImportRow[]
+  interviewCategories InterviewCategory[]
+  interviewImports    InterviewImport[]
+  interviewImportRows InterviewImportRow[]
+  passes              Pass[]
+  reviewers           Reviewer[]
+  roundAccessCodes    RoundAccessCode[]
+  rubricCategories    RubricCategory[]
 }
 
 /// Several CSV columns forming one logical question — the ten one-hot ethnicity
@@ -337,7 +366,7 @@ model RubricCategory {
   /// `null` on a Score is unaffected — "unscored" is the absence of a Score row,
   /// never a zero, which is what makes dropping 0 from the offered values cost
   /// nothing semantically.
-  minPoints  Int      @default(0)
+  minPoints Int @default(0)
 
   /// What this category is asking for, and what the top of its scale means.
   /// FR-9 renders it beside the score input, which is the only place a written
@@ -408,14 +437,15 @@ model Applicant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  assignments      Assignment[]
-  conflicts        ConflictOfInterest[]
-  decisions        Decision[]
-  firstRoundVotes  FirstRoundVote[]
-  interviewNotes   InterviewNotes?
-  interviewResults InterviewResult[]
-  passMemberships  PassApplicant[]
-  passVotes        PassVote[]
+  assignments         Assignment[]
+  conflicts           ConflictOfInterest[]
+  decisions           Decision[]
+  firstRoundVotes     FirstRoundVote[]
+  interviewImportRows InterviewImportRow[]
+  interviewNotes      InterviewNotes?
+  interviewResults    InterviewResult[]
+  passMemberships     PassApplicant[]
+  passVotes           PassVote[]
 
   /// FR-3 makes the admin resolve duplicate emails before commit. This makes that
   /// a database guarantee rather than a UI convention. Postgres permits many nulls
@@ -522,25 +552,172 @@ model ReviewNote {
 // First round
 // ---------------------------------------------------------------------------
 
-/// Imported per FR-12. Two rows per applicant expected, one per interviewer.
-/// No uniqueness: interviewer names are free text and two interviewers can share one.
+/// The first-round interview rubric, per FR-12a. Instance-scoped and
+/// admin-configured, per goal 5.
 ///
-/// NOTE for Phase 5: PRD open decision 6 is resolved on the facts — the S26
-/// `1R Scores` sheet carries four category scores plus an average per interviewer,
-/// not the single score modeled here. This needs a category dimension before the
-/// FR-12 import contract is written.
+/// **Deliberately not RubricCategory.** The written rubric and the interview
+/// rubric are different instruments with different categories, scored at
+/// different times by different people, and goal 5 requires both be
+/// reconfigurable between cycles — which rules out sharing rows and rules out
+/// fixed columns. They also lock on different conditions: FR-4 locks the written
+/// rubric once any Score exists, and this one locks once any
+/// InterviewCategoryScore exists. See PRD decision 54 for why that keeps them on
+/// separate screens too.
+model InterviewCategory {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  name       String
+  maxPoints  Int
+  ordinal    Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categoryScores InterviewCategoryScore[]
+
+  @@unique([instanceId, ordinal])
+}
+
+/// Imported per FR-12. Two rows per applicant expected, one per interviewer.
+///
+/// PRD open decision 6, settled: the S26 `1R Scores` sheet carries one score per
+/// configured category plus an average per interviewer, so the categories live
+/// in InterviewCategoryScore and `score` holds the average.
 model InterviewResult {
   id              String    @id @default(cuid())
   applicantId     String
   applicant       Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  /// Free text from the sheet. Never a Reviewer id — interviewers are not
+  /// necessarily on any round's roster, and FR-12's contract is a name column.
   interviewerName String
-  /// Float, not Int, so it survives whichever shape open decision 6 settles on.
+  /// The average **exactly as the source sheet carries it**, imported verbatim
+  /// and never recomputed from the category rows. If it disagrees with their
+  /// mean, the sheet wins — interviewers sometimes adjust it deliberately, and
+  /// that number is the one they actually recorded. FR-12 flags the
+  /// disagreement in the preview rather than resolving it.
+  ///
+  /// Float because an average of integers is not one.
   score           Float
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  categoryScores InterviewCategoryScore[]
+
+  /// Makes a re-upload an upsert rather than a duplicate, per PRD decision 47.
+  /// A constraint that did not need to exist when the only import path was a
+  /// single commit-once CSV; FR-12 accepts repeated uploads, so it does now.
+  ///
+  /// Two interviewers sharing a name would collide here and merge into one row.
+  /// That is the accepted cost: the sheet gives no other key, and the failure is
+  /// visible at preview through decision 49's collision warning rather than
+  /// silent at commit.
+  @@unique([applicantId, interviewerName])
   @@index([applicantId])
+}
+
+/// One per configured category per InterviewResult, per FR-12.
+model InterviewCategoryScore {
+  id                  String            @id @default(cuid())
+  interviewResultId   String
+  interviewResult     InterviewResult   @relation(fields: [interviewResultId], references: [id], onDelete: Cascade)
+  interviewCategoryId String
+  interviewCategory   InterviewCategory @relation(fields: [interviewCategoryId], references: [id], onDelete: Cascade)
+  points              Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([interviewResultId, interviewCategoryId])
+  @@index([interviewCategoryId])
+}
+
+/// FR-12 staging header. One row per sheet, deleted at that sheet's commit and
+/// taking its staged rows with it.
+///
+/// A table rather than a column on Instance because decision 47 gives the two
+/// sheets genuinely independent lifecycles: row existence is the answer to "is
+/// this sheet staged?", the question `importCommittedAt` answers for FR-3, and a
+/// shared nullable column would make each sheet's commit responsible for
+/// clearing half of it without disturbing the other.
+model InterviewImport {
+  id         String      @id @default(cuid())
+  instanceId String
+  instance   Instance    @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  sheet      ImportSheet
+
+  /// The source file's header row, verbatim — same reasoning as
+  /// Field.sourceHeader. The mapping table renders these, and a header that has
+  /// been cleaned before the admin sees it is a header they cannot match against
+  /// the file on their screen.
+  headers Json
+  /// { columnIndex: role }, role being one of APPLICANT_EMAIL, APPLICANT_NAME,
+  /// INTERVIEWER_NAME, AVERAGE, NOTES, CATEGORY:<interviewCategoryId>, IGNORED.
+  ///
+  /// JSON rather than a table: the vocabulary is closed but the category half is
+  /// keyed by a row id, so a Postgres enum could not express it and a join table
+  /// would be four columns to say what one object says. The role union is a
+  /// TypeScript type in the import module, which is where it is parsed.
+  mapping Json
+
+  uploadedAt DateTime @default(now())
+
+  rows InterviewImportRow[]
+
+  /// A re-upload replaces this row and cascades its staged rows away, which is
+  /// FR-12's "accepts repeated uploads" without ever holding two staging sets
+  /// for one sheet.
+  @@unique([instanceId, sheet])
+}
+
+/// FR-12/FR-13 staging. Exists only between upload and commit for each sheet.
+///
+/// Same reasoning as ImportRow for living in the database rather than the
+/// browser or a temp file, and the same verbatim-cells rule: the preview reports
+/// what the file actually said.
+model InterviewImportRow {
+  id         String          @id @default(cuid())
+  instanceId String
+  instance   Instance        @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  importId   String
+  import     InterviewImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  /// Denormalized from the parent so the unique constraint below can be stated
+  /// per instance and sheet, which is the shape PRD §5 specifies and the shape
+  /// the preview queries by.
+  sheet      ImportSheet
+
+  /// 1-based position in its source file.
+  rowIndex Int
+  /// { columnIndex: verbatim value }.
+  cells    Json
+
+  /// Set once the row is resolved to an applicant, by any tier.
+  ///
+  /// Cascade rather than SetNull: SetNull would clear this while leaving
+  /// matchTier set, which the CHECK below forbids, so a deleted applicant would
+  /// surface as a constraint violation at an unrelated moment. In practice both
+  /// sides cascade from Instance together anyway.
+  matchedApplicantId String?
+  matchedApplicant   Applicant? @relation(fields: [matchedApplicantId], references: [id], onDelete: Cascade)
+  /// Null until resolved. Paired with matchedApplicantId by a CHECK.
+  matchTier          MatchTier?
+  /// The similarity score, set only when matchTier = FUZZY. See PRD decisions
+  /// 45 and 52. Held to that by a CHECK, since a confidence beside an EMAIL
+  /// match would read as meaningful.
+  matchConfidence    Float?
+
+  /// PRD decision 51's third outcome: the admin has said this row matches nobody
+  /// in the scoped pool. A decision that was made and recorded, which is what
+  /// distinguishes it from a row that quietly vanished at commit.
+  skipped Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([instanceId, sheet, rowIndex])
+  @@index([importId, rowIndex])
+  @@index([matchedApplicantId])
 }
 
 /// One row per applicant. Only one interviewer of each pair writes the notes;
@@ -692,7 +869,7 @@ model AuditLog {
   entityType    String
   entityId      String
   previousValue Json?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
 
   @@index([instanceId, createdAt])
 }
