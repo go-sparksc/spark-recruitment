@@ -121,25 +121,38 @@ export async function finalizeWritten(
       },
     });
 
-    for (const applicantId of pool.map((a) => a.id)) {
-      const advancing = selected.has(applicantId);
-      // Upsert rather than create, so a submit retried after a dropped
-      // connection is idempotent rather than a unique-constraint error the
-      // admin cannot act on. A reversal updates this row, per §5.
-      await tx.decision.upsert({
-        where: { applicantId_stage: { applicantId, stage: Round.WRITTEN } },
-        create: {
-          applicantId,
-          stage: Round.WRITTEN,
-          outcome: advancing ? DecisionOutcome.ADVANCE : DecisionOutcome.REJECT,
-          actor: DecisionActor.ADMIN,
-        },
-        update: {
-          outcome: advancing ? DecisionOutcome.ADVANCE : DecisionOutcome.REJECT,
-          actor: DecisionActor.ADMIN,
-        },
-      });
-    }
+    // **Two bulk statements rather than one upsert per applicant.**
+    //
+    // The per-applicant upsert was correct and unshippable: 150 sequential
+    // round trips to a pooled Postgres took 5112 ms against Prisma's 5000 ms
+    // interactive-transaction limit, so finalize failed with P2028 on a
+    // realistic cohort. The transaction rolled back cleanly and wrote nothing,
+    // which is the one good thing about how it failed. Found by clicking
+    // through, not by a test — `npm run verify` has no database.
+    //
+    // The fix is to do less work in the transaction rather than to raise the
+    // timeout: a timeout raised to cover 150 round trips would still be holding
+    // a write transaction open for seconds on every finalize.
+    //
+    // Delete-then-insert is still idempotent — re-running produces the same end
+    // state — and it costs nothing here that upsert was buying. A *second*
+    // finalize is already refused above by the stage guard, so the only way to
+    // reach existing rows is a retry after a failure, and a failure rolled back.
+    // Same "replace rather than diff" shape `saveRubric` uses, for the same
+    // reason: the statement count is the thing that matters.
+    await tx.decision.deleteMany({
+      where: { stage: Round.WRITTEN, applicant: { instanceId } },
+    });
+    await tx.decision.createMany({
+      data: pool.map((applicant) => ({
+        applicantId: applicant.id,
+        stage: Round.WRITTEN,
+        outcome: selected.has(applicant.id)
+          ? DecisionOutcome.ADVANCE
+          : DecisionOutcome.REJECT,
+        actor: DecisionActor.ADMIN,
+      })),
+    });
 
     if (advanceIds.length > 0) {
       await tx.applicant.updateMany({
@@ -166,6 +179,14 @@ export async function finalizeWritten(
       where: { id: instanceId },
       data: { currentStage: InstanceStage.FIRST_ROUND },
     });
+  }, {
+    // Six statements now rather than a hundred and fifty, so the default 5000 ms
+    // is already generous. Raised anyway, and only to this: an admin on hotel
+    // wifi against a pooled database in another region is the case that made the
+    // original version fail, and a finalize that times out halfway through a
+    // cycle costs more than holding a short write transaction open a little
+    // longer. Not a substitute for the statement count above — that was the fix.
+    timeout: 20000,
   });
 
   revalidatePath(path(instanceId));

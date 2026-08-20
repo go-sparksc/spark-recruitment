@@ -25,6 +25,11 @@ export interface ScoreRow {
   points: number;
 }
 
+export interface NoteRow {
+  assignmentId: string;
+  body: string;
+}
+
 /// Its own seed rather than a draw from the shared `rng`.
 ///
 /// prisma/seed.ts threads one generator through applicant generation and then
@@ -287,6 +292,73 @@ export function buildScores(
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
+}
+
+// ---------------------------------------------------------------------------
+// Review notes
+// ---------------------------------------------------------------------------
+
+/// Illustrative synthetic prose. Deliberately in the register a real reviewer
+/// writes in — a clause about the application and a clause about the doubt —
+/// rather than lorem ipsum, because FR-10's admin view is read by a person
+/// deciding whether the score in front of them is trustworthy, and placeholder
+/// text cannot show whether that screen works.
+const NOTE_OPENERS = [
+  "Strong on the founding story",
+  "Clear writing throughout",
+  "Genuinely unusual project",
+  "Good energy, thin on specifics",
+  "Solid all round",
+  "Answers the question asked",
+  "Real follow-through here",
+  "Interesting background",
+] as const;
+
+const NOTE_CLOSERS = [
+  "but the Spark fit answer could be any club.",
+  "and they name the unglamorous half of the work.",
+  "though nothing they list has an outcome attached.",
+  "so I would want to hear them talk it through.",
+  "and the timeline holds up on a second read.",
+  "but I could not tell what they actually did.",
+  "— scored down on clarity, not on substance.",
+  "and I would be glad to interview them.",
+] as const;
+
+/// How often a completed review carries a note.
+///
+/// **Not 100%.** FR-9 makes the note optional and `ReviewNote` is a separate
+/// row, so "this reviewer scored but did not write" is a state the admin view
+/// has to render — and a fixture where every review has a note would never show
+/// it. Not 0% either, which is what the seed did before this and which left
+/// FR-10's "scores **and** notes" clause rendering an empty state on every card.
+const P_HAS_NOTE = 0.72;
+
+export function buildNotes(
+  scores: readonly ScoreRow[],
+  categoryCount: number,
+  rng: Rng,
+): NoteRow[] {
+  // Only completed reviews get notes. A reviewer who stopped halfway has not
+  // reached the note, which sits under the score inputs on FR-9's screen.
+  const scoredByAssignment = new Map<string, number>();
+  for (const score of scores) {
+    scoredByAssignment.set(
+      score.assignmentId,
+      (scoredByAssignment.get(score.assignmentId) ?? 0) + 1,
+    );
+  }
+
+  const rows: NoteRow[] = [];
+  for (const assignmentId of [...scoredByAssignment.keys()].sort()) {
+    if (scoredByAssignment.get(assignmentId) !== categoryCount) continue;
+    if (!rng.chance(P_HAS_NOTE)) continue;
+    rows.push({
+      assignmentId,
+      body: `${rng.pick(NOTE_OPENERS)} ${rng.pick(NOTE_CLOSERS)}`,
+    });
+  }
+  return rows;
 }
 
 export function createScoresRng(createRng: (seed: number) => Rng): Rng {

@@ -6,6 +6,7 @@ import { ETHNICITY_GROUP, buildFieldSpecs } from "./seed/fields";
 import { createRng } from "../lib/rng";
 import {
   buildAssignments,
+  buildNotes,
   buildScores,
   createScoresRng,
   fullTargetRowIndexes,
@@ -245,13 +246,20 @@ async function main() {
     maxPoints: category.maxPoints,
   }));
 
+  // One generator for scores and the notes that go with them, threaded in that
+  // order — the notes draw after the scores because they are decided per
+  // completed review, and a completed review is not known until it is scored.
+  const reviewsRng = createScoresRng(createRng);
   const scoreRows = buildScores(
     assignmentRows,
     rowIndexByApplicantId,
     rubricForScoring,
-    createScoresRng(createRng),
+    reviewsRng,
   );
   await prisma.score.createMany({ data: scoreRows });
+
+  const noteRows = buildNotes(scoreRows, RUBRIC_CATEGORIES.length, reviewsRng);
+  await prisma.reviewNote.createMany({ data: noteRows });
 
   const sparklets = reviewers.filter((reviewer) => reviewer.isSparklet).length;
   const shape = planShape(profiles.length, writtenReviewers.length);
@@ -268,7 +276,8 @@ async function main() {
       `(${pooledApplicantIds.length} held open in the pool, seed ${assignmentSeed})`,
   );
   console.log(
-    `  scores             ${scoreRows.length} across ${completeAssignments} complete ` +
+    `  review notes       ${noteRows.length} of ${completeAssignments} complete reviews\n` +
+      `  scores             ${scoreRows.length} across ${completeAssignments} complete ` +
       `and ${assignmentRows.length - completeAssignments} incomplete reviews`,
   );
   console.log("");
