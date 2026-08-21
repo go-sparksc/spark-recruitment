@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { openPoolFor } from "../pool-query";
 import { ReturnControl } from "../return-control";
 import { SignOutButton } from "../sign-out-button";
-import { AssignmentStatus } from "@/generated/prisma/enums";
+import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { completionOf } from "@/lib/review";
@@ -29,6 +29,16 @@ export default async function ReviewerListPage({
 }) {
   const { instanceId } = await params;
   const { session, reviewer } = await requireReviewerOnRoster(instanceId);
+
+  // FR-14's "Round → First Round, then name" lands here, because every reviewer
+  // entry point does — sign-in, claim-from-pool and return-to-pool all redirect
+  // to `/list`. Branching here rather than changing each of them keeps one place
+  // that decides which dashboard a round gets, so a new entry point cannot miss
+  // the rule.
+  //
+  // A first-round reviewer has no assignments at all — nothing below this line
+  // would find anything to show them.
+  if (session.rd === Round.FIRST_ROUND) redirect(`/r/${instanceId}/first-round`);
 
   const [instance, categories, assignments] = await Promise.all([
     prisma.instance.findUnique({
