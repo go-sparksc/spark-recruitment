@@ -319,7 +319,10 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 | OTHER | Configurable, default hidden | Configurable, default hidden | Visible | Visible |
 | Interview scores | Hidden | Visible | Visible | Visible |
 | Interview notes | Hidden | Visible | Visible | Visible |
-| Other reviewers' scores/votes | Hidden | Hidden | Hidden until pass closes | Visible |
+| Written rubric scores and review notes, from other reviewers | Hidden | Hidden | Visible | Visible |
+| Round votes — first-round votes and pass votes | Hidden | Hidden | **Hidden** | Visible |
+
+**The last two rows were one row, and it was carrying two questions.** It read "Other reviewers' scores/votes — Hidden until pass closes" for a second-round reviewer, which refused FR-16's own list of what that reviewer sees. Prior-round evidence is what a deliberation is conducted on; the votes being cast now are what anchoring is about. See decision 77, and decision 74 for why "until pass closes" became plain Hidden. Written scores and review notes are attributed to the reviewer who gave them, the same way FR-14 attributes an interview score to its interviewer.
 
 **Where "configurable" is configured, and for how long.** The OTHER row's two toggles live on the FR-2 mapping table, and they stay editable there after the import commits — along with the include/exclude checkbox, and unlike everything else on that table. See decision 34. Visibility is a per-round control and rounds run weeks after a CSV is imported, so freezing it at commit would close the only window in which it can be set before anyone has a reason to open it.
 
@@ -494,7 +497,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 
 ### 7.4 Second round and passes
 
-**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: demographics, written responses, written scores, interview scores, interview notes. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: demographics, written responses, written scores, written review notes, interview scores, interview notes. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
 
 **FR-17 Passes.** The admin creates sequential passes. This is the most intricate piece of the system, so the state machine is specified explicitly:
 
@@ -507,11 +510,12 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
   - All NO → `resolution = REJECTED`, `status = REJECTED`, excluded from future passes
   - Mixed → `resolution = CARRIED`, stays ACTIVE, carries into the next pass
 - An admin can manually reject any applicant within a pass, excluding them from future passes.
-- Closing a pass without full votes leaves unvoted applicants ACTIVE and carried forward.
+- Closing a pass without full votes leaves unvoted applicants ACTIVE and carried forward. Their row on that pass stays `resolution = NULL` — the close itself writes nothing, per decision 72.
+- A vote can be changed until that applicant resolves, per decision 75. Resolution closes the window on its own, since it requires every eligible reviewer to have submitted.
 
 **`PassApplicant.resolution` records what happened to an applicant *in that pass*. It does not control membership in the next one.** Membership is recomputed at each pass creation from `Applicant.status`, so an applicant can carry a terminal-looking `NEEDS_ADMIN` on pass 1 and still appear in pass 2. These are separate questions and the schema keeps them separate deliberately.
 
-**Closing the second round.** Passes do not end on their own — an admin ends them with an explicit "Close second round" action, which is what moves `Instance.currentStage` to `COMPLETE`. That action writes `resolution = NEEDS_ADMIN` onto the final pass's rows for every applicant still unresolved, and is the *only* thing that produces FR-19's Unresolved group. Three properties it must have:
+**Closing the second round.** Passes do not end on their own — an admin ends them with an explicit "Close second round" action, which is what moves `Instance.currentStage` to `COMPLETE`. That action writes `resolution = NEEDS_ADMIN` onto the final pass's rows for every applicant still unresolved — `NULL` or `CARRIED`, per decision 73 — and is the *only* thing that produces FR-19's Unresolved group. It also closes the final pass if it is still open, so a `COMPLETE` instance cannot hold an `OPEN` one. Three properties it must have:
 
 - **Idempotent.** Running it twice writes the same rows and changes nothing the second time.
 - **Blocked when no pass exists.** An admin who reaches the second round, creates no pass, and closes the round would otherwise leave every applicant unresolved with no `PassApplicant` row to find them by, and FR-19 would render an empty Unresolved group over a live pool. Tell the admin to create a pass first.
@@ -525,12 +529,15 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 |---|---|
 | All reviewers have COI on an applicant | Cannot resolve. `resolution = NEEDS_ADMIN` on that pass. Do not treat as unanimous. The applicant stays ACTIVE and **carries into the next pass**, where a reviewer without a conflict may yet be added — `NEEDS_ADMIN` describes the pass, not the applicant. |
 | Pass created with zero ACTIVE applicants | Block creation, tell the admin the pool is resolved. |
-| A reviewer is added mid-round | They vote only in passes created after they are added. Existing open pass treats them as SKIP. |
+| Pass created with zero reviewers on the second-round roster | Block creation, per decision 79. Every member would resolve `NEEDS_ADMIN` at creation — a pass that decides nothing and flags everyone. |
+| A reviewer is added or withdrawn mid-round | Cannot happen. Decisions 66 and 78 fix the second-round roster once `Instance.currentStage` reaches `SECOND_ROUND`, in both directions. This replaces the earlier "they vote only in passes created after they are added", which described a situation the roster page no longer permits. |
 | Admin reopens a closed pass | Not supported in v1. Corrections happen via manual override on the applicant. |
 | Passes end with an applicant still unresolved | The "Close second round" action writes `resolution = NEEDS_ADMIN` on their final pass row. They are neither SPARKLET nor REJECTED, and FR-19 lists them under Unresolved rather than defaulting them either way. |
 | Second round closed with no pass ever created | Block the close. See "Closing the second round" above. |
 
-**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes.
+**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes. Decision 74 extends that to a *closed* pass as well and amends §6's matrix accordingly: FR-18's admin-only grid is the only surface in the product that renders a pass vote.
+
+**FR-16's conflict flag is one-way for the reviewer and removable by an admin**, per decision 76. Flagging deletes any vote that reviewer had already cast in the open pass (decision 68) and that vote does not come back; an admin removing the flag returns the reviewer to the denominator as outstanding. The control lives on FR-18's grid, on the `skip` cell that shows the conflict, and is audited.
 
 **FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained. This is only accessible by admin.
 
@@ -907,6 +914,24 @@ These need answers before or during the relevant build phase. They are the place
 70. **NEEDS_ADMIN writes no `Decision` row. RESOLVED.** Nothing has been decided yet — that is the entire meaning of NEEDS_ADMIN. A `Decision` row is written only later, whenever an admin actually resolves that applicant, at whatever stage that resolution happens.
 
 71. **Admin's manual reject during an open pass writes `PassApplicant.resolution = REJECTED` on the current pass row immediately, in the same transaction as decision 69's `Decision` row. RESOLVED.** Any other reviewer's vote still in flight on that applicant becomes moot — not blocked, just no longer read by anything, since the applicant is already excluded from future passes.
+
+72. **Closing a pass writes no resolution; an unvoted row stays `NULL`. RESOLVED.** §7.4 says only that closing "leaves unvoted applicants ACTIVE and carried forward" and does not say what the row records. `CARRIED` keeps FR-17's own meaning — a *completed* mixed vote — and `NULL` keeps §5's, "null until the applicant resolves within this pass". Writing `CARRIED` over an applicant nobody voted on would overload one value with two facts and make the word untrue of half the rows carrying it. The distinction is recoverable either way, since FR-19 keeps the underlying votes visible, but only one of the two readings leaves `resolution` meaning one thing.
+
+73. **"Still unresolved", in the close-second-round action, means `NULL` **or** `CARRIED`. RESOLVED.** FR-19 finds its Unresolved group by `resolution = NEEDS_ADMIN` and by nothing else, so a `CARRIED` row on the *final* pass — an applicant whose votes were mixed and who had no next pass to carry into — would otherwise be invisible to the only screen obliged to show them. `SPARKLET` and `REJECTED` are never overwritten, which is also what makes the action idempotent as §7.4 requires: the second run matches no rows.
+
+74. **Second-round reviewers never see other reviewers' pass votes, closed pass or not. RESOLVED.** §6's matrix said "Hidden until pass closes"; §7.4's resolved open decision says counts are never revealed to reviewers. The latter wins, and §6 is amended by decision 77 below. FR-18 is admin-only and is the only vote-visibility surface any requirement describes; a reviewer-facing closed-pass tally would be a screen nothing asks for and an anchoring vector for the pass that follows it.
+
+75. **A submitted pass vote is changeable until that applicant resolves. RESOLVED.** Resubmitting updates the existing row through `UNIQUE (passId, applicantId, reviewerId)`. The window shuts on its own: an applicant resolves only once every eligible reviewer has submitted, and from that point the control is gone. §7.4's rule against reopening is scoped to a closed *pass*, and decision 26's reasoning about misclicks applies here exactly as it did in the written round.
+
+76. **An admin can remove a conflict of interest, audited. RESOLVED.** Reviewer flags stay one-way — FR-16 says "sticky", and decision 68 has already deleted the vote, which does not come back. Removing the flag returns the reviewer to the denominator as *outstanding*, so the applicant needs a vote they did not need a moment ago. This is what makes an all-COI `NEEDS_ADMIN` recoverable inside the open pass rather than only in the next one, and it is why `NEEDS_ADMIN` is recomputed while a pass is open instead of being treated as final. A terminal row is never reopened by it: an applicant who resolved SPARKLET with two conflicts on the board stays SPARKLET when one is removed, the same rule that protects a manual reject. The control lives on FR-18's grid and nowhere else — the grid is the only surface that renders conflicts at all, and it renders them exactly where the question gets asked, on a `skip` cell in a row that will not resolve.
+
+77. **§6's "Other reviewers' scores/votes" row splits in two. RESOLVED.** FR-16 lists "written scores" among what a second-round reviewer sees, and §6's single row hid "other reviewers' scores" from everyone but an admin — the same rows, granted by one sentence and refused by a table two sections above it. The row was carrying two different questions at once. Split, both are answerable: prior-round evidence is visible to a second-round reviewer, and the votes being cast *now* are not. The anchoring risk decision 3 named is about the latter. The existing "Interview scores" and "Interview notes" rows already answer the interview half and are untouched, so nothing in the matrix says two things about one field.
+
+    Two consequences the split settles. **Written review notes are visible**, which FR-16's list omitted: `ReviewNote` holds a written reviewer's reasoning, and "the complete applicant profile" opens that list rather than closing it. And **the scores are attributed, not anonymized.** Both surfaces that already render someone else's evaluation name its author — FR-14 gives a first-round reviewer "the average interview score per interviewer", and FR-11's admin applicant view names the written reviewer beside both their average and their note. An anonymized second-round profile would be the only place in the product that hides a scorer, and the argument for hiding it — social pressure, with the scorer sitting in the room — is the wrong way round for this round specifically. The second round is a deliberation: the value of knowing who gave the 2 is that they are present and can be asked why. Anonymity is the written round's rule, and it protects the applicant, not the reviewer.
+
+78. **A reviewer cannot be withdrawn from the second round once it has started, the symmetric half of decision 66. RESOLVED.** 66 blocks the add and says nothing about the removal, and `removeReviewer(..., SECOND_ROUND)` works today. Withdrawing a reviewer mid-round shrinks the unanimity denominator retroactively and cascade-deletes their `PassVote` rows: an applicant sitting at 10 YES and one outstanding becomes unanimous the instant the outstanding reviewer is withdrawn — silently, from a screen that mentions no passes. Same rule, same page, same reasoning as 66. Removing them from the written or first round is unaffected; those rounds are over and nothing recomputes over them.
+
+79. **Pass creation is blocked against an empty second-round roster. RESOLVED.** §7.4 blocks creation with zero ACTIVE applicants and is silent on zero reviewers. With no electorate, every member has no eligible reviewer, so the pass resolves wholly to `NEEDS_ADMIN` the moment it is created — a pass that decides nothing and flags everyone, which is indistinguishable at a glance from the all-COI case it is not. Blocked, with the same shape of message as the zero-applicant block: name the fix, which is the reviewer roster.
 
 ## 11. Out of scope for v1, worth noting for v2
 
