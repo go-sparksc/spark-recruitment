@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.20, Phases 0-5 complete, decisions 50-71 recorded, Phase 6 (second round and passes) in progress
+**Status:** v1.21, Phases 0-5 complete, decisions 50-80 recorded, Phase 6 (second round and passes) in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -932,6 +932,13 @@ These need answers before or during the relevant build phase. They are the place
 78. **A reviewer cannot be withdrawn from the second round once it has started, the symmetric half of decision 66. RESOLVED.** 66 blocks the add and says nothing about the removal, and `removeReviewer(..., SECOND_ROUND)` works today. Withdrawing a reviewer mid-round shrinks the unanimity denominator retroactively and cascade-deletes their `PassVote` rows: an applicant sitting at 10 YES and one outstanding becomes unanimous the instant the outstanding reviewer is withdrawn — silently, from a screen that mentions no passes. Same rule, same page, same reasoning as 66. Removing them from the written or first round is unaffected; those rounds are over and nothing recomputes over them.
 
 79. **Pass creation is blocked against an empty second-round roster. RESOLVED.** §7.4 blocks creation with zero ACTIVE applicants and is silent on zero reviewers. With no electorate, every member has no eligible reviewer, so the pass resolves wholly to `NEEDS_ADMIN` the moment it is created — a pass that decides nothing and flags everyone, which is indistinguishable at a glance from the all-COI case it is not. Blocked, with the same shape of message as the zero-applicant block: name the fix, which is the reviewer roster.
+
+80. A reviewer who stops voting mid-round has no removal path. RECORDED
+as a consequence of decision 78, not fixed. Every applicant they haven't
+voted on stays outstanding under them until they vote, the admin manually
+rejects that applicant (17l), or the round closes into NEEDS_ADMIN. This
+is decision 78 working as intended — the alternative is the silent
+unanimity shift 78 exists to prevent. No tool is added for it in v1.
 
 ## 11. Out of scope for v1, worth noting for v2
 
