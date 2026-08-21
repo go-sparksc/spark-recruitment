@@ -149,14 +149,25 @@ export function normalizeMatchName(raw: string | null | undefined): string {
     .join(" ");
 }
 
-/// Interviewer names, for PRD decision 50's collision key only.
+/// Interviewer names, for PRD decision 50's collision key AND for decision 47's
+/// upsert.
 ///
 /// Deliberately NOT `normalizeMatchName`: this is a grouping key, not a person
 /// being identified against a pool, and dropping single-letter tokens from it
 /// would merge "Alex K" and "Alex" into one interviewer. Case and whitespace are
 /// folded because "Alex Kim" and "alex  kim" typed into two rows of the same
 /// sheet are one person, and the upsert key would treat them as two.
-function normalizeInterviewerName(raw: string | null | undefined): string {
+///
+/// **Exported because the commit has to fold the same way the preview does.**
+/// `InterviewResult` is keyed on the stored `interviewerName`, so a re-upload
+/// that spells an interviewer "alex kim" where the first said "Alex Kim" would
+/// insert a second result rather than replacing the first — a duplicate the
+/// in-batch collision check cannot see, because the two rows are in different
+/// batches. The commit compares through this function instead of through the
+/// raw string. Two normalizers for one key is how the preview and the commit end
+/// up disagreeing, which is the same reasoning that keeps `normalizeEmail` in
+/// one place.
+export function normalizeInterviewerName(raw: string | null | undefined): string {
   if (typeof raw !== "string") return "";
   return raw.normalize("NFC").toLowerCase().replace(WHITESPACE, " ").trim();
 }

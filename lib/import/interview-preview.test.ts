@@ -425,3 +425,78 @@ describe("the notes sheet", () => {
     expect(notesPreview([notesRow()]).rows[0].notes).toBe("SYNTHETIC: good interview.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Blockers the schema forces rather than the requirement choosing
+// ---------------------------------------------------------------------------
+
+describe("rows that cannot become an InterviewResult", () => {
+  it("blocks a row with no readable Average, naming it", () => {
+    // InterviewResult.score is a non-null Float and FR-12 forbids recomputing
+    // the average from the categories, so there is nothing to store. Blocking
+    // rather than skipping: silently dropping an interview is what FR-13's
+    // "nothing imports silently" rules out.
+    const findings = preview([row({ rowIndex: 4, cells: { "5": "" } })]);
+
+    expect(findings.rows[0].unreadableAverage).toBe(true);
+    expect(findings.canCommit).toBe(false);
+    expect(findings.blockers.join(" ")).toContain("row 4");
+    expect(findings.blockers.join(" ")).toContain("never recomputed");
+  });
+
+  it("blocks a non-numeric Average too", () => {
+    expect(preview([row({ cells: { "5": "n/a" } })]).canCommit).toBe(false);
+  });
+
+  it("blocks a row with no interviewer name — clause 12b", () => {
+    // Half of (applicantId, interviewerName). A blank one would merge every
+    // unnamed interviewer's rows into a single result at commit.
+    const findings = preview([row({ rowIndex: 7, cells: { "2": "  " } })]);
+
+    expect(findings.rows[0].missingInterviewerName).toBe(true);
+    expect(findings.canCommit).toBe(false);
+    expect(findings.blockers.join(" ")).toContain("row 7");
+  });
+
+  it("does not block on either when the row is skipped", () => {
+    const findings = preview([
+      row({ rowIndex: 1, cells: { "5": "", "2": "" }, skipped: true }),
+      row({ rowIndex: 2, cells: { "2": "Alex Kim" } }),
+      row({ rowIndex: 3, cells: { "2": "Robin Diaz" } }),
+    ]);
+
+    expect(findings.canCommit).toBe(true);
+  });
+
+  it("does not apply either rule to the notes sheet", () => {
+    // No average, and InterviewNotes.interviewerName is nullable — only one
+    // interviewer of the pair writes them.
+    const headers = ["Applicant Email", "Notes"];
+    const columns = resolveMapping(
+      proposeMapping(headers, CATEGORIES, "NOTES"),
+      new Set(CATEGORIES.map((c) => c.id)),
+    );
+
+    const findings = buildInterviewPreview({
+      sheet: "NOTES",
+      rows: [
+        {
+          rowIndex: 1,
+          cells: { "0": "cecilia.fang@example.com", "1": "SYNTHETIC: note." },
+          matchedApplicantId: "app-1",
+          matchTier: "EMAIL",
+          matchConfidence: null,
+          skipped: false,
+        },
+      ],
+      columns,
+      categories: CATEGORIES,
+      mappingErrors: [],
+      applicantNames: NAMES,
+    });
+
+    expect(findings.rows[0].unreadableAverage).toBe(false);
+    expect(findings.rows[0].missingInterviewerName).toBe(false);
+    expect(findings.canCommit).toBe(true);
+  });
+});

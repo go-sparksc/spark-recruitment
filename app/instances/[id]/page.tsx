@@ -73,6 +73,9 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
     activeAssignments,
     interviewCategoryCount,
     interviewScoreCount,
+    interviewResultCount,
+    interviewNotesCount,
+    stagedSheetCount,
   ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
@@ -92,6 +95,9 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       // Same path the interview rubric page and its action use, so the hub's
       // "locked" and the builder's cannot disagree.
       prisma.interviewCategoryScore.count({ where: { interviewCategory: { instanceId: id } } }),
+      prisma.interviewResult.count({ where: { applicant: { instanceId: id } } }),
+      prisma.interviewNotes.count({ where: { applicant: { instanceId: id } } }),
+      prisma.interviewImport.count({ where: { instanceId: id } }),
     ]);
 
   // "Applicants short one reviewer" is a count over a relation, which Prisma
@@ -207,6 +213,25 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       // for. Same reasoning as the pool link on the reviewer list.
       waiting:
         interviewCategoryCount === 0 && instance.currentStage === InstanceStage.WRITTEN,
+    },
+    {
+      href: `/instances/${id}/interviews`,
+      title: "Interview import",
+      state:
+        stagedSheetCount > 0
+          ? `${plural(stagedSheetCount, "sheet")} staged, not imported`
+          : interviewResultCount === 0 && interviewNotesCount === 0
+            ? "nothing imported yet"
+            : [
+                interviewResultCount > 0 ? `${plural(interviewResultCount, "score row")}` : null,
+                interviewNotesCount > 0 ? `${plural(interviewNotesCount, "set")} of notes` : null,
+              ]
+                .filter((part) => part !== null)
+                .join(" · "),
+      // Decision 47: either half is useful on its own, so this stops being
+      // "waiting" as soon as one sheet lands.
+      waiting:
+        stagedSheetCount === 0 && interviewResultCount === 0 && interviewNotesCount === 0,
     },
     {
       href: `/instances/${id}/settings`,

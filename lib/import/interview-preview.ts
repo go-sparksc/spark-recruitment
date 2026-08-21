@@ -67,6 +67,18 @@ export interface PreviewRow {
   /// The sheet's own number, parsed but never recomputed.
   average: number | null;
   rawAverage: string;
+  /// `InterviewResult.score` is a non-null Float and FR-12 forbids recomputing
+  /// the average from the categories, so a row whose Average cannot be read
+  /// cannot become a result at all. Blocking rather than skipped — silently
+  /// dropping an interview is what FR-13's "nothing imports silently" rules out,
+  /// and the admin can fix the file or mark the row as not importing.
+  ///
+  /// Scores sheet only; the notes sheet has no average.
+  unreadableAverage: boolean;
+  /// Clause 12b. Half of `(applicantId, interviewerName)`, which is what makes a
+  /// re-upload an upsert rather than a duplicate under decision 47 — a blank one
+  /// would silently merge every unnamed interviewer's rows into a single result.
+  missingInterviewerName: boolean;
   /// Set only when every configured category produced a storable value and the
   /// stated average disagrees with their mean. See `averageDisagreement`.
   averageDisagrees: { stated: number; computed: number } | null;
@@ -231,6 +243,9 @@ export function buildInterviewPreview(
       issues,
       average,
       rawAverage,
+      unreadableAverage: sheet === "SCORES" && average === null,
+      missingInterviewerName:
+        sheet === "SCORES" && cell(row, columns.interviewerColumn).trim() === "",
       averageDisagrees: averageDisagreement(
         average,
         categoryPoints.map((p) => p.points),
@@ -284,6 +299,32 @@ export function buildInterviewPreview(
         unresolved.length === 1 ? "is" : "are"
       } not matched to an applicant. Map each one by hand, or mark it as not an applicant in ` +
         `this pool.`,
+    );
+  }
+
+  // Two per-row blockers the schema forces rather than the requirement choosing.
+  // Both name the row, because "some row is wrong" in a 160-row file is not
+  // something an admin can act on.
+  const noAverage = live.filter((row) => row.unreadableAverage);
+  if (noAverage.length > 0) {
+    blockers.push(
+      `${noAverage.length} row${noAverage.length === 1 ? "" : "s"} ${
+        noAverage.length === 1 ? "has" : "have"
+      } no readable Average (row${noAverage.length === 1 ? "" : "s"} ` +
+        `${noAverage.map((r) => r.rowIndex).join(", ")}). The average is imported as the sheet ` +
+        `states it and is never recomputed from the categories, so a row without one cannot be ` +
+        `imported. Fix the file and upload it again, or mark those rows as not importing.`,
+    );
+  }
+
+  const noInterviewer = live.filter((row) => row.missingInterviewerName);
+  if (noInterviewer.length > 0) {
+    blockers.push(
+      `${noInterviewer.length} row${noInterviewer.length === 1 ? "" : "s"} ${
+        noInterviewer.length === 1 ? "has" : "have"
+      } no interviewer name (row${noInterviewer.length === 1 ? "" : "s"} ` +
+        `${noInterviewer.map((r) => r.rowIndex).join(", ")}). It is half of what keeps two ` +
+        `interviewers' scores for one applicant apart.`,
     );
   }
 
