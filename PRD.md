@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.11, Phase 0-4 complete, FR-12a added, decisions 50-54 recorded, Phase 5 in progress
+**Status:** v1.12, Phase 0-4 complete, FR-12a added, decisions 50-54, 56-57 recorded (55 reserved), Phase 5 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -831,6 +831,16 @@ These need answers before or during the relevant build phase. They are the place
     No similarity function reorders that list; there is no signal in the strings to reorder it by. So any rule that auto-commits the case decision 45 wants auto-committed also auto-commits two different people onto one applicant record — the precise defect this system exists to remove, arrived at by a different route. A fuzzy row is therefore staged as resolved (`matchedApplicantId`, `matchTier = FUZZY`, `matchConfidence`) and appears in a confirm list; commit is not offered while any fuzzy row is unticked. One tick box is the whole cost of never doing that.
 
 54. **Where the interview rubric builder lives. RESOLVED: its own page, `/instances/[id]/interview-rubric`, not a second section of `/rubric`.** FR-12 presupposes configured `InterviewCategory` rows and named no surface for them, which is what FR-12a now fixes. A second section on the existing rubric page would put two instruments, two lock rules, and two "once any score exists" conditions on one screen — decision 6 already treats the written and interview rubrics as separate instruments precisely so they do not tangle, and a shared page reintroduces the tangle at the UI layer. Its own page, modelled on the existing builder and reusing `validateRubric`'s shape, keeps FR-4's lock semantics separate from the interview instrument's, which locks on `InterviewCategoryScore` rows rather than `Score` rows.
+
+55. **Reserved — an interview category score outside `0..maxPoints`.** Agreed in principle (flagged at preview, imported anyway, never rejected) and deliberately not written up yet: it is Phase 5 Slice 5's opening act, and the rule is not implemented until it is recorded here and read. `InterviewCategory` has no `minPoints`, since FR-12a asks only for max points and decision 40's floor exists for FR-4's *input* control, whereas these numbers arrive from a file.
+
+56. **Ambiguity at a stronger tier does not fall through to a weaker one. RESOLVED.** A row with two exact-name matches queues at tier 2 rather than proceeding to fuzzy matching in hopes of a tiebreak. Falling through would mean a row-level certainty (two exact matches exist) gets resolved by a strictly less reliable method, which is backward — fuzzy matching exists for rows with no exact candidate, not as a tiebreak among exact ones.
+
+    The cascade therefore stops at the first tier producing *any* candidate, ambiguous ones included. Implemented and tested in `lib/reconciliation.ts`.
+
+57. **A single-token name cannot be fuzzy-matched. RESOLVED.** Decision 52's method depends on a surname held fixed while the given name varies; a row with no second token has nothing to hold fixed, and comparing it as a bare string is the whole-string method decision 52 exists to replace. Such rows fall through to the manual queue.
+
+    This applies to either side of the comparison — a one-word row name, and a one-word applicant `displayName`, which FR-3 permits since only a blank name blocks import.
 
 ## 11. Out of scope for v1, worth noting for v2
 
