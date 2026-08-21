@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "seed": "tsx prisma/seed.ts",
+    "seed:advance": "tsx prisma/advance.ts",
     "seed:inspect": "tsx prisma/inspect.ts",
     "hash-secret": "tsx scripts/hash-secret.ts"
   },
