@@ -21,11 +21,19 @@ export function ConflictControl({
   applicantId,
   applicantName,
   flagged,
+  /// `row` is the list's treatment: a quiet right-aligned control that does not
+  /// compete with the applicant's name. Thirty of these render at once, and a
+  /// full-width button under every row turns a list of thirty applicants into a
+  /// list of thirty buttons — which is what the first version did. `section` is
+  /// the profile's, where it is the only control on screen and should look like
+  /// one. Same component either way, per FR-9's precedent with ReturnControl.
+  variant = "section",
 }: {
   instanceId: string;
   applicantId: string;
   applicantName: string;
   flagged: boolean;
+  variant?: "row" | "section";
 }) {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
@@ -49,7 +57,11 @@ export function ConflictControl({
   // Already flagged: a statement, not a control. There is nothing this reviewer
   // can do here, and a disabled button invites tapping to find out why.
   if (done) {
-    return (
+    return variant === "row" ? (
+      <p className="text-muted-foreground flex min-h-11 items-center justify-end text-xs">
+        Conflict flagged — you will not vote on them
+      </p>
+    ) : (
       <p className="text-muted-foreground text-sm">
         You have a conflict of interest with {applicantName}. You will not vote on them in any
         pass. Ask an admin if this was a mistake.
@@ -59,11 +71,15 @@ export function ConflictControl({
 
   if (!confirming) {
     return (
-      <div className="space-y-1">
+      <div className={variant === "row" ? undefined : "space-y-1"}>
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="hover:bg-muted active:bg-muted min-h-11 w-full rounded-md border text-sm font-medium"
+          className={
+            variant === "row"
+              ? "text-muted-foreground hover:text-foreground flex min-h-11 w-full cursor-pointer items-center justify-end text-xs"
+              : "hover:bg-muted active:bg-muted min-h-11 w-full rounded-md border text-sm font-medium"
+          }
         >
           Flag a conflict of interest
         </button>

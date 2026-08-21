@@ -135,12 +135,13 @@ export default async function SecondRoundListPage({
                     A sibling of the Link rather than inside it: an anchor may
                     not contain a button, and the confirm panel needs the full
                     width of the row to open into. */}
-                <div className="border-t border-dashed px-4 py-2">
+                <div className="border-t border-dashed px-4">
                   <ConflictControl
                     instanceId={instanceId}
                     applicantId={row.applicantId}
                     applicantName={row.displayName}
                     flagged={row.hasConflict}
+                    variant="row"
                   />
                 </div>
               </li>
