@@ -252,6 +252,59 @@ export function UnresolvedRow({
   );
 }
 
+/// A row that IS matched, with the one control it needs: set it aside.
+///
+/// **This is what a decision 49 collision is resolved with.** Both sides of a
+/// collision are resolved rows, so a screen that only offers controls on
+/// unresolved and set-aside rows leaves the blocker's own instruction — "skip
+/// the row you do not want" — with nothing to act on. That was the state this
+/// component fixes, found by the owner trying to finish the import.
+///
+/// Setting a row aside clears its match, so the way back re-runs the matcher
+/// rather than restoring what was there. For an automatic match that is the same
+/// answer; a hand-mapped row has to be mapped again.
+export function MatchedRow({
+  instanceId,
+  sheet,
+  rowIndex,
+  rowLabel,
+  detail,
+}: {
+  instanceId: string;
+  sheet: string;
+  rowIndex: number;
+  rowLabel: string;
+  /// How it matched, and the interviewer where there is one — the two things
+  /// that tell two colliding rows apart.
+  detail: string;
+}) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | undefined>();
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 border-t py-2">
+      <span className="text-sm">
+        <span className="text-muted-foreground">Row {rowIndex}</span>{" "}
+        <span className="font-medium">{rowLabel || <em>(no name or email)</em>}</span>{" "}
+        <span className="text-muted-foreground">{detail}</span>
+        {error ? <span className="text-destructive block text-xs">{error}</span> : null}
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={() =>
+          start(async () =>
+            setError((await setRowSkipped(instanceId, sheet, rowIndex, true)).error),
+          )
+        }
+      >
+        Don&rsquo;t import this row
+      </Button>
+    </li>
+  );
+}
+
 /// A row the admin has set aside, with the way back. Without this, skipping is
 /// a one-way door and a mis-click costs a re-upload.
 export function SkippedRow({

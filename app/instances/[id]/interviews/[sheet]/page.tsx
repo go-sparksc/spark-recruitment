@@ -6,6 +6,7 @@ import {
   CommitForm,
   DiscardStagedButton,
   FuzzyRow,
+  MatchedRow,
   SkippedRow,
   UnresolvedRow,
   type PoolOption,
@@ -70,6 +71,31 @@ export default async function InterviewSheetPage({
 
   const label = (row: (typeof findings.rows)[number]) =>
     row.rawName.trim() || row.rawEmail.trim();
+
+  const TIER_LABEL: Record<string, string> = {
+    EMAIL: "matched on email",
+    NAME: "matched on name",
+    FUZZY: "close name match",
+    MANUAL: "mapped by hand",
+  };
+
+  /// How a matched row matched, plus the interviewer where the sheet has one.
+  /// Both sides of a collision carry the same applicant, so the tier and the
+  /// interviewer are what let an admin tell them apart before setting one aside.
+  const detail = (row: (typeof findings.rows)[number]) =>
+    [
+      row.matchTier ? TIER_LABEL[row.matchTier] : null,
+      sheet === "SCORES" && row.interviewerName.trim() !== ""
+        ? `interviewer ${row.interviewerName.trim()}`
+        : null,
+    ]
+      .filter((part) => part !== null)
+      .join(" · ");
+
+  const rowsByIndex = new Map(findings.rows.map((row) => [row.rowIndex, row]));
+  const collidingRowIndexes = new Set(
+    findings.collisions.flatMap((collision) => collision.rowIndexes),
+  );
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-12">
@@ -138,6 +164,53 @@ export default async function InterviewSheetPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Decision 49's collisions, where they can actually be acted on.
+                Both sides of a collision are MATCHED rows, so this section is
+                the only place the "skip the row you do not want" instruction in
+                the blocker below has anything to click. Listed first because it
+                is what stands between the admin and the import. */}
+            {findings.collisions.length > 0 ? (
+              <section>
+                <h2 className="text-sm font-medium">
+                  Duplicates — {findings.collisions.length} to decide
+                </h2>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {sheet === "SCORES"
+                    ? "These rows would each be saved to the same applicant and interviewer, so the second would overwrite the first. Set one of each pair aside."
+                    : "These rows would each be saved to the same applicant — the notes sheet keeps one set per applicant. Set one of each pair aside."}
+                </p>
+                <div className="mt-2 space-y-4">
+                  {findings.collisions.map((collision) => (
+                    <div key={`${collision.applicantId}-${collision.rowIndexes.join("-")}`}>
+                      <p className="text-sm font-medium">
+                        {loaded.applicantNames.get(collision.applicantId) ??
+                          collision.applicantId}
+                        {collision.interviewerName === null
+                          ? ""
+                          : ` · ${collision.interviewerName}`}
+                      </p>
+                      <ul>
+                        {collision.rowIndexes.map((rowIndex) => {
+                          const row = rowsByIndex.get(rowIndex);
+                          if (!row) return null;
+                          return (
+                            <MatchedRow
+                              key={rowIndex}
+                              instanceId={id}
+                              sheet={lowerSheet}
+                              rowIndex={rowIndex}
+                              rowLabel={label(row)}
+                              detail={detail(row)}
+                            />
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             {awaiting.length > 0 ? (
               <section>
                 <h2 className="text-sm font-medium">
@@ -219,7 +292,38 @@ export default async function InterviewSheetPage({
               </section>
             ) : null}
 
-            {awaiting.length === 0 && unresolved.length === 0 ? (
+            {/* Every matched row, collapsed. Not decoration: without it the only
+                rows carrying a control are the ones something is wrong with, so
+                a row the admin simply does not want — a withdrawn candidate, a
+                duplicate they spotted themselves — is a dead end. Collapsed
+                because on a real cohort this is most of the file and none of it
+                needs attention. */}
+            {resolved.length > 0 ? (
+              <details>
+                <summary className="cursor-pointer text-sm font-medium">
+                  Matched — {resolved.length}
+                  {collidingRowIndexes.size > 0
+                    ? `, including ${collidingRowIndexes.size} listed above`
+                    : ""}
+                </summary>
+                <ul className="mt-2">
+                  {resolved.map((row) => (
+                    <MatchedRow
+                      key={row.rowIndex}
+                      instanceId={id}
+                      sheet={lowerSheet}
+                      rowIndex={row.rowIndex}
+                      rowLabel={label(row)}
+                      detail={detail(row)}
+                    />
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+
+            {awaiting.length === 0 &&
+            unresolved.length === 0 &&
+            findings.collisions.length === 0 ? (
               <p className="text-sm text-emerald-600">
                 Every row is either matched to an applicant or set aside.
               </p>
