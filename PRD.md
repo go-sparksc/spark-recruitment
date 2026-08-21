@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.12, Phase 0-4 complete, FR-12a added, decisions 50-54, 56-57 recorded (55 reserved), Phase 5 in progress
+**Status:** v1.13, Phase 0-4 complete, FR-12a added, decisions 50-54, 56-58 recorded (55 reserved), Phase 5 in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -841,6 +841,10 @@ These need answers before or during the relevant build phase. They are the place
 57. **A single-token name cannot be fuzzy-matched. RESOLVED.** Decision 52's method depends on a surname held fixed while the given name varies; a row with no second token has nothing to hold fixed, and comparing it as a bare string is the whole-string method decision 52 exists to replace. Such rows fall through to the manual queue.
 
     This applies to either side of the comparison — a one-word row name, and a one-word applicant `displayName`, which FR-3 permits since only a blank name blocks import.
+
+58. **FR-12a gains a reset action, not stated in the requirement text. RESOLVED.** Without it, an admin who imports scores against a wrong rubric has no path but deleting the instance. Modelled on clause 12a-4's "modelled on FR-4's builder," and less destructive than FR-4's reset — it discards data that still exists in the source file, and decision 47 makes re-importing routine. Deletes `InterviewResult` rows along with `InterviewCategoryScore` rows, since a result with no category scores underneath is a state nothing else in the system can produce. Audited.
+
+    The confirmation says what comes back, not only what goes away. An admin who cannot tell this apart from FR-4's reset — which destroys work thirty reviewers typed and cannot recover — will treat both as unrecoverable and neither as usable. `InterviewNotes` is untouched: it references no category and survives a rubric change intact.
 
 ## 11. Out of scope for v1, worth noting for v2
 

@@ -65,8 +65,15 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
   const counts = instance._count;
   const committed = instance.importCommittedAt !== null;
 
-  const [scoreCount, sparkletCount, writtenReviewerCount, writtenCode, activeAssignments] =
-    await Promise.all([
+  const [
+    scoreCount,
+    sparkletCount,
+    writtenReviewerCount,
+    writtenCode,
+    activeAssignments,
+    interviewCategoryCount,
+    interviewScoreCount,
+  ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
       prisma.score.count({ where: { assignment: { instanceId: id } } }),
@@ -81,6 +88,10 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       prisma.assignment.count({
         where: { instanceId: id, round: Round.WRITTEN, status: AssignmentStatus.ACTIVE },
       }),
+      prisma.interviewCategory.count({ where: { instanceId: id } }),
+      // Same path the interview rubric page and its action use, so the hub's
+      // "locked" and the builder's cannot disagree.
+      prisma.interviewCategoryScore.count({ where: { interviewCategory: { instanceId: id } } }),
     ]);
 
   // "Applicants short one reviewer" is a count over a relation, which Prisma
@@ -178,6 +189,24 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       // A page of em-dashes is not worth a click. Scores arrive one reviewer at
       // a time, so this stops being "waiting" as soon as anybody has graded.
       waiting: scoreCount === 0,
+    },
+    {
+      href: `/instances/${id}/interview-rubric`,
+      title: "Interview rubric",
+      state:
+        interviewCategoryCount === 0
+          ? "not set up yet"
+          : `${plural(interviewCategoryCount, "category", "categories")} · ${
+              interviewScoreCount > 0
+                ? `locked, ${plural(interviewScoreCount, "score")} imported`
+                : "unlocked"
+            }`,
+      // Only worth a click once the written round is over — before that there
+      // are no interviews to have scored. Says so rather than hiding, since a
+      // row that appears partway through a cycle is a row nobody goes looking
+      // for. Same reasoning as the pool link on the reviewer list.
+      waiting:
+        interviewCategoryCount === 0 && instance.currentStage === InstanceStage.WRITTEN,
     },
     {
       href: `/instances/${id}/settings`,

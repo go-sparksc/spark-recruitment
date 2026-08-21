@@ -4,6 +4,7 @@ import {
   MAX_CATEGORIES,
   MAX_DESCRIPTION_LENGTH,
   rubricRange,
+  validateInterviewRubric,
   validateRubric,
   type RubricCategoryInput,
 } from "@/lib/rubric";
@@ -194,5 +195,62 @@ describe("rubricRange", () => {
       min: 0,
       max: 4,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-12a — the interview rubric
+// ---------------------------------------------------------------------------
+
+describe("validateInterviewRubric", () => {
+  it("accepts the S26 shape: four categories, each out of 4", () => {
+    expect(
+      validateInterviewRubric([
+        { name: "Communication", maxPoints: 4 },
+        { name: "Motivation", maxPoints: 4 },
+        { name: "Culture Fit", maxPoints: 4 },
+        { name: "Problem Solving", maxPoints: 4 },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("assumes no particular number of categories or scale", () => {
+    // Clause 12g: a cycle that changes its interview rubric needs no code change.
+    expect(validateInterviewRubric([{ name: "Overall", maxPoints: 10 }])).toEqual([]);
+    expect(
+      validateInterviewRubric(
+        Array.from({ length: 6 }, (_, i) => ({ name: `C${i}`, maxPoints: 5 })),
+      ),
+    ).toEqual([]);
+  });
+
+  it("requires at least one category, a name, and a sane maximum", () => {
+    expect(validateInterviewRubric([])).toHaveLength(1);
+    expect(validateInterviewRubric([{ name: "  ", maxPoints: 4 }])).toContain(
+      "Category 1 has no name.",
+    );
+    expect(validateInterviewRubric([{ name: "A", maxPoints: 0 }])).toContain(
+      "Category 1 needs at least 1 point.",
+    );
+    expect(validateInterviewRubric([{ name: "A", maxPoints: 1.5 }])).toContain(
+      "Category 1 needs a whole number of points.",
+    );
+  });
+
+  it("rejects duplicate names, which the FR-12 mapping step binds by", () => {
+    expect(
+      validateInterviewRubric([
+        { name: "Fit", maxPoints: 4 },
+        { name: "fit", maxPoints: 4 },
+      ]),
+    ).toContain("More than one category is called “fit”.");
+  });
+
+  it("never reports a floor error, since FR-12a has no floor", () => {
+    // The delegation supplies minPoints: 0, so every floor branch in
+    // validateRubric is unreachable from here. Asserted rather than assumed —
+    // a maxPoints of 1 is the case that would trip `minPoints >= maxPoints` if
+    // the supplied floor ever changed to decision 40's 1.
+    expect(validateInterviewRubric([{ name: "Pass or fail", maxPoints: 1 }])).toEqual([]);
   });
 });

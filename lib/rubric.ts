@@ -100,6 +100,53 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
   return errors;
 }
 
+// ---------------------------------------------------------------------------
+// FR-12a — the interview rubric
+// ---------------------------------------------------------------------------
+
+/// One interview category. **No floor and no description**, unlike the written
+/// rubric above.
+///
+/// FR-12a asks for "number of categories and max points per category" and
+/// nothing else, and the two omissions are deliberate rather than unfinished:
+///
+///   - **No `minPoints`.** Decision 40 added a floor to the written rubric
+///     because FR-9 renders an input control and "no submitted answer should be
+///     scorable as nothing". These numbers are not typed into a control — they
+///     arrive from an interviewer's spreadsheet through FR-12, where 0 is a
+///     legal thing for a sheet to say. A floor here would reject real data at
+///     import for failing a rule the interviewers never agreed to.
+///   - **No `description`.** Decision 32's reasoning was that a written reviewer
+///     scoring blind needs to know what the category means. Nobody scores
+///     against this rubric inside the application; FR-12 imports numbers that
+///     were already decided in the room.
+///
+/// A separate type rather than reusing `RubricCategoryInput` with the extra
+/// fields ignored, so the builder cannot send a description that silently goes
+/// nowhere.
+export interface InterviewCategoryInput {
+  name: string;
+  maxPoints: number;
+}
+
+/// FR-12a's validation, which is FR-4's minus the two fields above.
+///
+/// Delegates rather than reimplements: the category cap, the points ceiling, the
+/// blank-name check and the duplicate-name check are the same rules for the same
+/// reasons, and two copies would drift. `minPoints: 0` is supplied here rather
+/// than by the caller — it makes the floor checks unreachable, which is the
+/// point, and keeps `0 <= minPoints < maxPoints` satisfied for every valid
+/// maximum.
+///
+/// Duplicate names matter more here than in the written rubric: FR-12's mapping
+/// step binds a CSV column to a category BY NAME, and two categories called
+/// "Fit" make that mapping ambiguous at exactly the moment nobody is looking.
+export function validateInterviewRubric(
+  categories: readonly InterviewCategoryInput[],
+): string[] {
+  return validateRubric(categories.map((category) => ({ ...category, minPoints: 0 })));
+}
+
 /// The range a single reviewer can award across the whole rubric. Shown while
 /// building so the scale is visible before grading starts rather than discovered
 /// from the first results.
