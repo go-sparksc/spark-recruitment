@@ -375,6 +375,8 @@ Ticked against clauses 12a-1 to 12a-6. `/instances/[id]/interview-rubric`, model
 
 ### Slice 5 — FR-12 and FR-13: upload → map → reconcile → commit
 
+**Opens with a PRD decision, before any code.** Decision 55: a category score outside `0..maxPoints` is flagged at preview and imported anyway, never rejected — the owner's call, agreed at the end of Slice 1, consistent with FR-12's stance on an average that disagrees with its categories. It arises because `InterviewCategory` has no `minPoints` (FR-12a asks only for max points, and decision 40's floor exists for FR-4's *input* control, whereas these numbers arrive from a file). Written into §10 and read before it is implemented, same as 50–54.
+
 The largest slice, and the one clause 12a–12u is ticked against. Four steps per sheet, both sheets sharing every component and differing only in their required roles:
 
 1. **Upload** — `parseCsv` (`lib/import/parse-csv.ts`, already handles BOM, CRLF, quoted newlines, ragged rejection), then `InterviewImport` + `InterviewImportRow` rows. A re-upload replaces the `InterviewImport` row and cascades.
