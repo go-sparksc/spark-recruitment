@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.18, Phase 0-4 complete, FR-12a added, decisions 50-64 recorded, Phase 5 in progress (slices 0-5 shipped)
+**Status:** v1.19, Phases 0-5 complete, decisions 50-65 recorded, Phase 6 (second round and passes) next
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -889,6 +889,12 @@ These need answers before or during the relevant build phase. They are the place
     `Instance.currentStage` is what separates them, exactly as decision 43 made it load-bearing for FR-11's read-only `/results`. Past `FIRST_ROUND` means the round is finished; still on `WRITTEN` means it has not started. **This is a second reader for the field decision 43 added**, which is the argument for having moved it rather than inferring the stage from applicant rows.
 
     Any vote still in flight is refused by the existing pool re-check in the vote action rather than by a new rule — an applicant who has left the round is not votable, whatever the screen was showing when the tab was opened.
+
+65. **`InterviewResult` ids do not survive a re-import. RECORDED as a consequence of decision 47's upsert, not fixed.** A re-committed sheet deletes and re-inserts `InterviewResult` and its `InterviewCategoryScore` rows rather than updating them in place, so the upsert key `(applicantId, interviewerName)` is respected and nothing is duplicated, but the row ids are new. Confirmed against the database after a real second import: twelve results, forty-eight category scores, no duplicates on the key and none after case-folding, and a single shared `createdAt` showing the rows had been replaced.
+
+    **Nothing references these ids today, which is why this is recorded rather than fixed.** Every reader reaches a result through its applicant. The delete-then-insert shape is deliberate — it is what keeps the commit to a fixed number of bulk statements instead of one upsert per row, which is the pattern FR-11's finalize adopted after 150 sequential round trips exceeded Prisma's transaction limit.
+
+    **It is the same instability decision 61 had to fix one table over**, and it is where a future feature breaks. Anything that needs to refer to a particular interview result across a re-upload — a comment thread on an interview, an audit trail of who changed a score, a flag on a disputed number — would silently lose its referent the next time a corrected sheet is imported. The fix, if that day comes, is decision 61's: match existing rows on the upsert key and update them in place. Doing it now would buy nothing and cost the bulk-statement shape.
 
 ## 11. Out of scope for v1, worth noting for v2
 

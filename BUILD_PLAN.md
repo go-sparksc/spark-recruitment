@@ -169,6 +169,12 @@ Gate: All cases pass, and you have read the tests to confirm they assert what yo
 
 **Gate:** Import a scores file where three names are deliberately wrong. Confirm all three land in the unresolved queue rather than being guessed at. Confirm yes-percentage excludes skips from both numerator and denominator, and that raw counts display alongside.
 
+**Done.** The gate passed on `prisma/fixtures/s26-1r-scores.csv`: Mia Chen, Cecilia Fong and Bartholomew Quiggleston all landed unresolved with no "did you mean", and `prisma/checks/reconciliation-fixture.ts` asserts that on every run. Built as eight slices, each a commit, with sixteen §10 decisions (50–65) recorded ahead of the code they govern.
+
+Two things the phase found that the requirement did not contain. **Decision 45's fuzzy threshold rejected its own worked example** — whole-string Jaro-Winkler scores `cici fang`/`cecilia fang` at 0.842 and `mia chen`/`nia chen` at 0.917, so the pair that had to match scored *lower* than the pair that must not, and no threshold separates them; decision 52 replaced the comparison basis. And **a nickname is less similar to its own given name than two different people's names are to each other**, which is why decision 53 makes a single fuzzy candidate a proposal rather than a commit.
+
+Three defects reached the owner's browser that neither the suite nor the clause ledger could see: a rubric edit silently unmapping a staged import (decision 61), a collision the UI reported but gave no way to resolve, and an import that replaced twelve rows while saying "Import". All three were correct pure logic assembled into an unusable surface — see the Testing note in `CLAUDE.md`.
+
 ---
 
 ### Phase 6 — Second round and passes

@@ -398,7 +398,7 @@ Same phone-first constraints as Phase 3: full-width tap targets at `min-h-14`, `
 
 ### Slice 8 — hub, CLAUDE.md, PRD status
 
-**Owed: a §10 decision on `InterviewResult` id instability.** A re-import deletes and re-inserts `InterviewResult` and `InterviewCategoryScore` rows rather than updating them in place, so their ids do not survive a re-upload even though decision 47's upsert key is respected and nothing is duplicated. Confirmed against the database after the owner's second import: twelve results, forty-eight category scores, no duplicates, and a single shared `createdAt` showing the rows had been replaced.
+**Owed — DONE, recorded as decision 65: a §10 decision on `InterviewResult` id instability.** A re-import deletes and re-inserts `InterviewResult` and `InterviewCategoryScore` rows rather than updating them in place, so their ids do not survive a re-upload even though decision 47's upsert key is respected and nothing is duplicated. Confirmed against the database after the owner's second import: twelve results, forty-eight category scores, no duplicates, and a single shared `createdAt` showing the rows had been replaced.
 
 Nothing references these ids today, so this is a recorded consequence rather than a defect — but it is the same shape as the `InterviewCategory` instability decision 61 had to fix, and it is where a future feature would break. If anything ever needs to reference an `InterviewResult` id across a re-import — a comment thread on an interview, an audit trail of who changed a score — that reference is what fails, silently, the next time a corrected sheet is uploaded. Write it up so the next person meets it in §10 rather than in production.
 

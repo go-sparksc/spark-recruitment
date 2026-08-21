@@ -25,6 +25,7 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 - Next.js App Router, TypeScript, Tailwind + shadcn/ui
 - Postgres via Prisma. **PRD §5 is the source of truth for the data model**; `prisma/schema.prisma` is its implementation. If the schema needs to diverge, change §5 first and say why — a schema that has drifted ahead of the PRD is how the next maintainer ends up trusting the wrong document
 - Prisma 7: connection URLs live in `prisma.config.ts`, not in the schema. The client is generated to `generated/prisma` (gitignored) and imported from `@/generated/prisma/client`
+- **`prisma migrate dev` cannot run here.** It refuses in a non-interactive shell, so the migration flow is `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`, hand-finish the SQL (CHECK constraints, partial indexes), then `prisma migrate deploy`. Prisma 7 renamed the diff flags — `--from-schema-datasource` is gone, and the error message names the replacement
 - Server actions for mutations, server components for data fetching
 - `lib/assignment.ts`, `lib/passes.ts`, and `lib/roster.ts` contain pure functions with no database access. Keep them that way. The first two are the pieces with real logic; `lib/roster.ts` is the FR-6 paste parser, smaller but equally worth testing away from the database.
 
@@ -53,15 +54,18 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
 ## Testing
 
-Three things get real tests:
+Four things get real tests:
 
 - **`lib/assignment.ts`** — 3 reviewers per applicant, at most 1 Sparklet each, even load, 5% pool, and a feasibility precheck that fails loudly when the Sparklet ratio makes the constraints unsatisfiable.
 - **`lib/passes.ts`** — the resolution state machine, including the COI-as-skip rule and the all-COI case, which must flag for admin rather than auto-resolve.
 - **`lib/roster.ts`** — FR-6 paste parsing: last-space split, blank lines dropped, unsplittable and duplicate lines routed to confirmation rather than imported.
+- **`lib/reconciliation.ts`** — FR-13's four-tier cascade: exact email, exact name, fuzzy name, unresolved. Normalization (single-letter tokens, non-alphanumerics, NFC, case) is tested on its own, before any tier, because every tier depends on it. Jaro-Winkler is pinned to published reference pairs so a refactor cannot quietly change the metric. Two cases are regression guards rather than behaviour: `cici fang`/`cecilia fang` scores **below** 0.85 whole-string and `mia chen`/`nia chen` scores **above** it, which is why decision 52 scores the given name against an exact surname instead. Ambiguity queues at *every* tier, not only the fuzzy one, and a single fuzzy candidate is confirmed by a human before commit — the nickname the PRD wants matched is less similar to its own given name than two different people's names are to each other, and no threshold fixes that.
 
-Test cases for all three are enumerated in `BUILD_PLAN.md` phases 2 and 6. Those cases are the spec. If a test contradicts them, the test is wrong.
+Test cases for all four are enumerated in `BUILD_PLAN.md` phases 2 and 6 and in `lib/reconciliation.test.ts` itself. Those cases are the spec. If a test contradicts them, the test is wrong.
 
 Everything else gets light smoke coverage. Do not chase coverage percentage.
+
+**Where "light" still means something.** Twice in Phase 5 a page assembled correct pure functions incorrectly — a wrong `tallySelections` call and an unactionable collision list — and neither the pure suites nor the clause ledger could see it. The rule that came out of it: when a page transforms query results before rendering them, that transformation belongs in `lib/` where it can be tested, and the page keeps only the query. `lib/first-round.ts` is the worked example.
 
 `prisma/checks/` holds constraint verification scripts. They are not part of `npm run verify` — they need a seeded database and they write to it — so re-run them by hand after any schema change. They assert against the database rather than the Prisma client: a duplicate insert goes through raw SQL and must come back as SQLSTATE 23505 naming the expected index, because Prisma can reject a duplicate client-side without the statement ever reaching Postgres. Each script cleans up whatever it creates and verifies that it did.
 
