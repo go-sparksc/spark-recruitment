@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.19, Phases 0-5 complete, decisions 50-65 recorded, Phase 6 (second round and passes) next
+**Status:** v1.20, Phases 0-5 complete, decisions 50-71 recorded, Phase 6 (second round and passes) in progress
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -895,6 +895,18 @@ These need answers before or during the relevant build phase. They are the place
     **Nothing references these ids today, which is why this is recorded rather than fixed.** Every reader reaches a result through its applicant. The delete-then-insert shape is deliberate — it is what keeps the commit to a fixed number of bulk statements instead of one upsert per row, which is the pattern FR-11's finalize adopted after 150 sequential round trips exceeded Prisma's transaction limit.
 
     **It is the same instability decision 61 had to fix one table over**, and it is where a future feature breaks. Anything that needs to refer to a particular interview result across a re-upload — a comment thread on an interview, an audit trail of who changed a score, a flag on a disputed number — would silently lose its referent the next time a corrected sheet is imported. The fix, if that day comes, is decision 61's: match existing rows on the upsert key and update them in place. Doing it now would buy nothing and cost the bulk-statement shape.
+
+66. **A reviewer cannot be added to the second round once it has started. RESOLVED.** Second-round pass membership is every reviewer with `SECOND_ROUND` in `rounds` — fixed, not timing-dependent, because the roster cannot change after the round begins. The reviewer roster page must refuse adding `SECOND_ROUND` to a reviewer's `rounds` once `Instance.currentStage` reaches `SECOND_ROUND`. This replaces the "reviewer added mid-round" row in §7.4's edge case table, which described a situation that can no longer occur.
+
+67. **COI-as-skip is computed, never a stored `PassVote` row. RESOLVED.** `PassVote` means a reviewer actually submitted. `lib/passes.ts` computes each reviewer's effective status per applicant per pass from two inputs: actual `PassVote` rows, and the round's `ConflictOfInterest` set. No vote row exists means outstanding, unless the reviewer has an active COI on that applicant, in which case they are SKIP without a row.
+
+68. **Flagging COI on an applicant after already voting on them in the open pass deletes that `PassVote` row. RESOLVED.** The reviewer is SKIP from that point forward, in that pass and any later one. A vote from a reviewer who has since disclosed a conflict cannot be allowed to still count toward unanimity. This is distinct from decision 63 (votes changeable until finalize) — that is the reviewer changing their own mind; this is the system correcting for a known conflict.
+
+69. **A `Decision` row is written at `stage = SECOND_ROUND` the moment an applicant resolves. RESOLVED.** Same table, same pattern as WRITTEN and FIRST_ROUND: `outcome = SPARKLET` or `REJECT`, `actor = SYSTEM` for a pass's own unanimous result, `actor = ADMIN` for a manual reject. This is what FR-20's "decisions by stage" export actually reads for the second round; without it that export has nothing to show.
+
+70. **NEEDS_ADMIN writes no `Decision` row. RESOLVED.** Nothing has been decided yet — that is the entire meaning of NEEDS_ADMIN. A `Decision` row is written only later, whenever an admin actually resolves that applicant, at whatever stage that resolution happens.
+
+71. **Admin's manual reject during an open pass writes `PassApplicant.resolution = REJECTED` on the current pass row immediately, in the same transaction as decision 69's `Decision` row. RESOLVED.** Any other reviewer's vote still in flight on that applicant becomes moot — not blocked, just no longer read by anything, since the applicant is already excluded from future passes.
 
 ## 11. Out of scope for v1, worth noting for v2
 

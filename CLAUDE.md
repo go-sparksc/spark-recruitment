@@ -57,9 +57,9 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 Four things get real tests:
 
 - **`lib/assignment.ts`** — 3 reviewers per applicant, at most 1 Sparklet each, even load, 5% pool, and a feasibility precheck that fails loudly when the Sparklet ratio makes the constraints unsatisfiable.
-- **`lib/passes.ts`** — the resolution state machine, including the COI-as-skip rule and the all-COI case, which must flag for admin rather than auto-resolve.
 - **`lib/roster.ts`** — FR-6 paste parsing: last-space split, blank lines dropped, unsplittable and duplicate lines routed to confirmation rather than imported.
 - **`lib/reconciliation.ts`** — FR-13's four-tier cascade: exact email, exact name, fuzzy name, unresolved. Normalization (single-letter tokens, non-alphanumerics, NFC, case) is tested on its own, before any tier, because every tier depends on it. Jaro-Winkler is pinned to published reference pairs so a refactor cannot quietly change the metric. Two cases are regression guards rather than behaviour: `cici fang`/`cecilia fang` scores **below** 0.85 whole-string and `mia chen`/`nia chen` scores **above** it, which is why decision 52 scores the given name against an exact surname instead. Ambiguity queues at *every* tier, not only the fuzzy one, and a single fuzzy candidate is confirmed by a human before commit — the nickname the PRD wants matched is less similar to its own given name than two different people's names are to each other, and no threshold fixes that.
+- **`lib/passes.ts`** — the resolution state machine: unanimous yes admits, unanimous no rejects, mixed carries forward, COI counts as skip without a stored vote, all-COI must flag NEEDS_ADMIN rather than read as unanimous. Pure function, no database access, tested against every case in `BUILD_PLAN.md`'s Phase 6 section and PRD decisions 66-71 before anything is built against it.
 
 Test cases for all four are enumerated in `BUILD_PLAN.md` phases 2 and 6 and in `lib/reconciliation.test.ts` itself. Those cases are the spec. If a test contradicts them, the test is wrong.
 
