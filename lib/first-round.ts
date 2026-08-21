@@ -8,6 +8,9 @@
 // receives a decision, or an applicant decided on votes nobody was shown.
 
 import { ApplicantStatus, Round, VoteValue } from "@/generated/prisma/enums";
+import { applicantDemographics, type DemographicColumn } from "@/lib/demographics";
+import type { ApplicantData } from "@/lib/field-groups";
+import { firstRoundSummary, rankFirstRound } from "@/lib/results";
 
 /// Everyone still in the first round.
 ///
@@ -75,4 +78,84 @@ export function toFirstRoundListRow(source: FirstRoundApplicantSource): FirstRou
 /// not a vote, and this is the one place that says so.
 export function votedCount(rows: readonly FirstRoundListRow[]): number {
   return rows.filter((row) => row.vote !== null).length;
+}
+
+// ---------------------------------------------------------------------------
+// FR-15's page assembly
+// ---------------------------------------------------------------------------
+//
+// The transformation between "applicant rows with their votes" and "ranked
+// result rows" — the seam the results page used to do inline, where a wrong
+// call to `tallySelections` would have been a runtime crash on a page with no
+// test rather than a typecheck failure. The Prisma query stays in the page; this
+// is everything after it.
+
+
+/// One applicant as the results page loads them.
+export interface FirstRoundResultSource {
+  id: string;
+  displayName: string;
+  sourceRowIndex: number;
+  data: ApplicantData;
+  status: ApplicantStatus;
+  stageReached: Round;
+  /// Every reviewer's vote on this applicant. Unlike the reviewer dashboard,
+  /// which loads only the signed-in reviewer's.
+  votes: readonly VoteValue[];
+}
+
+export interface FirstRoundResultRow {
+  id: string;
+  rank: number;
+  displayName: string;
+  sourceRowIndex: number;
+  yesCount: number;
+  noCount: number;
+  nonSkipCount: number;
+  yesPercent: number | null;
+  /// Column key -> the labels this applicant selected, for the live breakdown.
+  selections: Record<string, string[]>;
+  /// Whether FR-15's finalize would decide on this applicant. False for someone
+  /// the round has already decided — the page ranks them for reference, but the
+  /// checkbox column does not apply.
+  inPool: boolean;
+}
+
+/// Rank and shape the first-round results.
+///
+/// **Ranked over everyone passed in, not just the pool.** The caller loads
+/// everyone with `stageReached != WRITTEN`, because ranking only the live pool
+/// would blank the page the moment it was finalized and these results are what
+/// an admin revisits afterwards. `inPool` is what the checkbox column reads.
+///
+/// **A SKIP vote counts toward neither side.** Nothing writes one in this round
+/// — the absence of a row is the skip — but the second round does, and a skip
+/// belongs in no part of `yes / (yes + no)`. Filtered rather than asserted away.
+export function buildFirstRoundResultRows(
+  applicants: readonly FirstRoundResultSource[],
+  columns: readonly DemographicColumn[],
+): FirstRoundResultRow[] {
+  const scored = applicants.map((applicant) => ({
+    id: applicant.id,
+    displayName: applicant.displayName,
+    sourceRowIndex: applicant.sourceRowIndex,
+    ...firstRoundSummary({
+      yesCount: applicant.votes.filter((value) => value === VoteValue.YES).length,
+      noCount: applicant.votes.filter((value) => value === VoteValue.NO).length,
+    }),
+    selections: Object.fromEntries(
+      Object.entries(applicantDemographics(applicant.data, columns)).map(([key, cell]) => [
+        key,
+        cell.selected,
+      ]),
+    ),
+    inPool:
+      applicant.status === FIRST_ROUND_POOL.status &&
+      applicant.stageReached === FIRST_ROUND_POOL.stageReached,
+  }));
+
+  // Rank the whole cohort, then number. The rank a row carries is its place
+  // among everyone the round decided on, not its position in a filtered view —
+  // the same rule FR-10's page follows.
+  return rankFirstRound(scored).map((row, index) => ({ ...row, rank: index + 1 }));
 }

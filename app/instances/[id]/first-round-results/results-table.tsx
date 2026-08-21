@@ -14,25 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { tallySelections } from "@/lib/demographics";
+import type { FirstRoundResultRow } from "@/lib/first-round";
 import { formatYesPercent, hasNoVotes } from "@/lib/results";
-
-export interface FirstRoundResultRow {
-  id: string;
-  rank: number;
-  displayName: string;
-  sourceRowIndex: number;
-  yesCount: number;
-  noCount: number;
-  nonSkipCount: number;
-  yesPercent: number | null;
-  /// Column key -> the labels this applicant selected, for the live breakdown.
-  selections: Record<string, string[]>;
-  /// In the pool FR-15's finalize decides on. False for an applicant who is on
-  /// the page for reference but is not being decided — there are none today,
-  /// since the page renders the pool, but the flag keeps the table honest about
-  /// which rows the checkbox column applies to.
-  inPool: boolean;
-}
 
 /// FR-15's ranked table and selection, in one client component.
 ///
@@ -87,10 +70,6 @@ export function FirstRoundResultsTable({
       else next.add(id);
       return next;
     });
-
-  // Tallied per column, against that column's own label list — the same call the
-  // written round's panel makes. `column.labels` is what keeps unselected
-  // options visible so the two sides of the breakdown stay row-aligned.
 
   return (
     <div className="space-y-6">
