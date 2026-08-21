@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.16, Phase 0-4 complete, FR-12a added, decisions 50-61 recorded, Phase 5 in progress (slices 0-5 shipped)
+**Status:** v1.17, Phase 0-4 complete, FR-12a added, decisions 50-63 recorded, Phase 5 in progress (slices 0-5 shipped)
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -879,6 +879,10 @@ These need answers before or during the relevant build phase. They are the place
     **A self-healing re-proposal was considered and rejected.** Re-matching a stale id by header text would have hidden this instance and any future one, and the phase's practice is to surface a real problem rather than let a second mechanism quietly mask it. Preserving identity removes the cause; re-proposing would only have removed the symptom.
 
     The immediate consequence is that reordering can no longer be a wholesale replace: `@@unique([instanceId, ordinal])` is not deferrable, so a save parks the surviving rows on temporary ordinals before writing their final ones.
+
+62. **The first-round dashboard shows a reviewer's vote progress, not required by FR-14's text. RESOLVED: "voted on N of M",** matching the completion count Phase 3 already established for the written round. A first-round reviewer votes on every applicant in the pool with no assignment narrowing it, so the navigational aid FR-9 already gives written reviewers applies at least as much here.
+
+63. **A first-round vote can be changed after submit, up until FR-15's finalize. RESOLVED:** the schema already permits it — `FirstRoundVote` has no immutability, and its `updatedAt` exists for this. FR-17's rule against reopening a vote is scoped to a closed pass, which the first round is not; nothing analogous closes it here before finalize. Resubmitting updates the existing row via the unique constraint rather than creating a second one. Disallowing revision would make a misclick permanent for the rest of the round, which is the exact loss decision 26 already treats as unacceptable in the written round.
 
 ## 11. Out of scope for v1, worth noting for v2
 
