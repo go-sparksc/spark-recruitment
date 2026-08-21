@@ -30,15 +30,17 @@ export default async function ReviewerListPage({
   const { instanceId } = await params;
   const { session, reviewer } = await requireReviewerOnRoster(instanceId);
 
-  // FR-14's "Round → First Round, then name" lands here, because every reviewer
-  // entry point does — sign-in, claim-from-pool and return-to-pool all redirect
-  // to `/list`. Branching here rather than changing each of them keeps one place
-  // that decides which dashboard a round gets, so a new entry point cannot miss
-  // the rule.
+  // FR-14's "Round → First Round, then name" and FR-16's "Round → Second Round,
+  // then name" both land here, because every reviewer entry point does —
+  // sign-in, claim-from-pool and return-to-pool all redirect to `/list`.
+  // Branching here rather than changing each of them keeps one place that
+  // decides which dashboard a round gets, so a new entry point cannot miss the
+  // rule.
   //
-  // A first-round reviewer has no assignments at all — nothing below this line
-  // would find anything to show them.
+  // Neither round has assignments at all — nothing below this line would find
+  // anything to show them.
   if (session.rd === Round.FIRST_ROUND) redirect(`/r/${instanceId}/first-round`);
+  if (session.rd === Round.SECOND_ROUND) redirect(`/r/${instanceId}/second-round`);
 
   const [instance, categories, assignments] = await Promise.all([
     prisma.instance.findUnique({

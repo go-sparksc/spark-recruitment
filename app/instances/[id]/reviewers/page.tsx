@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AccessCodeCard } from "./access-code-card";
 import { RosterControls, type ReviewerRow } from "./roster-controls";
 import { InstanceCrumbs } from "../instance-crumbs";
-import { Round } from "@/generated/prisma/enums";
+import { InstanceStage, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -34,7 +34,13 @@ export default async function ReviewersPage({
 
   const instance = await prisma.instance.findUnique({
     where: { id },
-    select: { id: true, name: true, importCommittedAt: true, _count: { select: { applicants: true } } },
+    select: {
+      id: true,
+      name: true,
+      currentStage: true,
+      importCommittedAt: true,
+      _count: { select: { applicants: true } },
+    },
   });
 
   if (!instance) notFound();
@@ -58,6 +64,13 @@ export default async function ReviewersPage({
       _count: { select: { assignments: true } },
     },
   });
+
+  // Decisions 66 and 78, on the round being staffed. COMPLETE counts as fixed
+  // too: the round is over and its roster is a historical fact.
+  const rosterFixed =
+    round === Round.SECOND_ROUND &&
+    (instance.currentStage === InstanceStage.SECOND_ROUND ||
+      instance.currentStage === InstanceStage.COMPLETE);
 
   const rows: ReviewerRow[] = reviewers.map((reviewer) => ({
     id: reviewer.id,
@@ -112,6 +125,23 @@ export default async function ReviewersPage({
         round={round}
         hasCode={accessCode !== null}
       />
+
+      {/* Decisions 66 and 78. The actions refuse this on their own — they are
+          the boundary — and this is what stops an admin discovering the rule by
+          typing a name into a box that then throws it away. It says which
+          direction is locked and why, because "you cannot edit this" with no
+          reason reads as a bug. */}
+      {rosterFixed ? (
+        <p className="rounded-md border p-4 text-sm">
+          <span className="font-medium">This roster is fixed.</span>{" "}
+          <span className="text-muted-foreground">
+            The second round has started, and how many votes it takes to decide an applicant
+            depends on exactly who is on it. Neither adding nor removing a second-round reviewer
+            is possible until the round is closed. Names can still be corrected, and the written
+            and first-round rosters are unaffected.
+          </span>
+        </p>
+      ) : null}
 
       <RosterControls instanceId={id} round={round} reviewers={rows} />
     </main>

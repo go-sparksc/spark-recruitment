@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { Round } from "@/generated/prisma/enums";
+import { InstanceStage, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
@@ -34,6 +34,43 @@ const ROUND_VALUES: readonly string[] = Object.values(Round);
 function path(instanceId: string) {
   return `/instances/${instanceId}/reviewers`;
 }
+
+// ---------------------------------------------------------------------------
+// Decisions 66 and 78 — the second-round roster is fixed once the round starts
+// ---------------------------------------------------------------------------
+
+/// Whether the second-round roster may still change.
+///
+/// **Both directions are locked, and the reason is the same one.** FR-17
+/// resolves an applicant when "every non-SKIP reviewer has submitted", and the
+/// set of reviewers is the denominator of that sentence. Adding one mid-round
+/// silently makes every open applicant unresolved again; withdrawing one makes
+/// an applicant sitting at 10 YES and one outstanding unanimous the instant the
+/// outstanding reviewer leaves — and cascade-deletes their votes on the way out.
+/// Neither is a thing an admin should be able to do from a screen that mentions
+/// no passes.
+///
+/// `COMPLETE` is locked too. The round is over; its roster is a historical fact.
+async function secondRoundRosterIsFixed(instanceId: string): Promise<boolean> {
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { currentStage: true },
+  });
+
+  return (
+    instance?.currentStage === InstanceStage.SECOND_ROUND ||
+    instance?.currentStage === InstanceStage.COMPLETE
+  );
+}
+
+const ROSTER_FIXED_ADD =
+  "The second round has started, so its reviewer roster is fixed. Adding someone now would " +
+  "change how many votes it takes to decide an applicant in a pass that is already open.";
+
+const ROSTER_FIXED_REMOVE =
+  "The second round has started, so its reviewer roster is fixed. Removing someone now would " +
+  "delete their votes and could turn an in-progress applicant unanimous without anyone deciding " +
+  "anything. Close the round instead once the passes are done.";
 
 /// Every reviewer on the INSTANCE, with round membership flattened for the round
 /// being staffed. Instance-scoped per PRD decision 22: a reviewer serving
@@ -92,6 +129,14 @@ export async function commitPaste(
 
   if (creates.length === 0 && addRounds.length === 0) {
     return { error: "Nothing to import — every line was dropped." };
+  }
+
+  // Decision 66's third path into the same change. Both halves of a paste add
+  // somebody to the round — CREATE makes a reviewer whose `rounds` is `[round]`,
+  // ADD_ROUND puts an existing one in it — so the whole commit is refused rather
+  // than half of it.
+  if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
+    return { error: ROSTER_FIXED_ADD };
   }
 
   // The client is not trusted to have cleared the queue, and the queue's two
@@ -192,6 +237,12 @@ export async function addReviewer(
   confirmDuplicate = false,
 ): Promise<NameState> {
   await requireInstance(instanceId, path(instanceId));
+
+  // Decision 66, checked in the action rather than only by the page hiding the
+  // form: a server action is a POST endpoint reachable without it.
+  if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
+    return { error: ROSTER_FIXED_ADD };
+  }
 
   const verdict = checkReviewerName(input, await existingReviewers(instanceId, round));
   if (!verdict.ok) return { error: verdict.reason };
@@ -350,6 +401,19 @@ export async function removeReviewer(
   });
   if (!reviewer) return { error: "That reviewer no longer exists." };
 
+  // Decision 78, and it covers BOTH shapes of removal: withdrawing them from the
+  // second round, and deleting the reviewer outright. The second is the more
+  // dangerous of the two — `PassVote` cascades from `Reviewer`, so a delete
+  // takes their votes with it — and it arrives here with `round === null`, which
+  // a guard written only against the round-scoped form would wave through.
+  if (
+    reviewer.rounds.includes(Round.SECOND_ROUND) &&
+    (round === null || round === Round.SECOND_ROUND) &&
+    (await secondRoundRosterIsFixed(instanceId))
+  ) {
+    return { error: ROSTER_FIXED_REMOVE };
+  }
+
   // One read, used for both the verdict and the audit row, so the number the
   // guard decided on is the number the log records.
   const impact = await removalImpact(instanceId, reviewerId, round);
@@ -417,6 +481,11 @@ export async function addRound(
   });
   if (!reviewer) return { error: "That reviewer no longer exists." };
   if (reviewer.rounds.includes(round)) return ok;
+
+  // Decision 66 again, on the grid's own path into the same change.
+  if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
+    return { error: ROSTER_FIXED_ADD };
+  }
 
   await prisma.reviewer.update({
     where: { id: reviewerId },

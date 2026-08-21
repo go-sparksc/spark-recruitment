@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AssignmentStatus, InstanceStage, Round } from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
 import { requireInstance } from "@/lib/auth";
+import { SECOND_ROUND_POOL } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Instance — Spark SC Recruitment" };
@@ -77,6 +78,9 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
     interviewNotesCount,
     stagedSheetCount,
     firstRoundVoteCount,
+    secondRoundPool,
+    secondRoundReviewerCount,
+    conflictCount,
   ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
@@ -100,6 +104,13 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       prisma.interviewNotes.count({ where: { applicant: { instanceId: id } } }),
       prisma.interviewImport.count({ where: { instanceId: id } }),
       prisma.firstRoundVote.count({ where: { applicant: { instanceId: id } } }),
+      // FR-17's pass membership, read through the same constant pass creation
+      // will use — `status = ACTIVE`, no round qualifier.
+      prisma.applicant.count({ where: { instanceId: id, ...SECOND_ROUND_POOL } }),
+      prisma.reviewer.count({ where: { instanceId: id, rounds: { has: Round.SECOND_ROUND } } }),
+      prisma.conflictOfInterest.count({
+        where: { round: Round.SECOND_ROUND, applicant: { instanceId: id } },
+      }),
     ]);
 
   // "Applicants short one reviewer" is a count over a relation, which Prisma
@@ -249,6 +260,29 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       // Votes arrive one reviewer at a time, so this stops being "waiting" as
       // soon as anybody has voted — the same rule the written results row uses.
       waiting: instance.currentStage === InstanceStage.WRITTEN || firstRoundVoteCount === 0,
+    },
+    {
+      href: `/instances/${id}/reviewers?round=SECOND_ROUND`,
+      title: "Second round",
+      state:
+        instance.currentStage === InstanceStage.WRITTEN ||
+        instance.currentStage === InstanceStage.FIRST_ROUND
+          ? "first round not finalized"
+          : secondRoundPool === 0
+            ? "every applicant decided"
+            : [
+                `${plural(secondRoundPool, "applicant")} active`,
+                `${plural(secondRoundReviewerCount, "reviewer")}`,
+                conflictCount > 0 ? `${plural(conflictCount, "conflict")} flagged` : null,
+              ]
+                .filter((part) => part !== null)
+                .join(" · "),
+      // Nothing to do here until the first round is finalized. FR-17's own
+      // surface replaces this link in Day 2 — until then the roster page is
+      // where the second round is actually administered.
+      waiting:
+        instance.currentStage === InstanceStage.WRITTEN ||
+        instance.currentStage === InstanceStage.FIRST_ROUND,
     },
     {
       href: `/instances/${id}/settings`,
