@@ -1,6 +1,19 @@
 import { hashSecret } from "../lib/password";
-import { AssignmentOrigin, InstanceStage, Round } from "../generated/prisma/enums";
+import {
+  ApplicantStatus,
+  AssignmentOrigin,
+  DecisionActor,
+  DecisionOutcome,
+  InstanceStage,
+  Round,
+} from "../generated/prisma/enums";
 import { buildApplicantData, buildApplicantProfiles } from "./seed/applicants";
+import {
+  FIRST_ROUND_ADVANCE_COUNT,
+  RECONCILIATION_COHORT,
+  applyReconciliationCohort,
+  chooseFirstRoundCohort,
+} from "./seed/first-round";
 import { SEED_INSTANCE_ID, createSeedClient } from "./seed/client";
 import { ETHNICITY_GROUP, buildFieldSpecs } from "./seed/fields";
 import { createRng } from "../lib/rng";
@@ -174,7 +187,12 @@ async function main() {
     return { ...spec, id: stored.id };
   });
 
-  const profiles = buildApplicantProfiles(rng, APPLICANT_COUNT);
+  // The pinned cohort is generated at the END of the rng sequence and then has
+  // its identity overwritten, which is what keeps rows 1-150 byte-identical to
+  // every previous seed run. See prisma/seed/first-round.ts.
+  const profiles = applyReconciliationCohort(
+    buildApplicantProfiles(rng, APPLICANT_COUNT + RECONCILIATION_COHORT.length),
+  );
 
   await prisma.applicant.createMany({
     data: profiles.map((profile) => ({
@@ -261,6 +279,84 @@ async function main() {
   const noteRows = buildNotes(scoreRows, RUBRIC_CATEGORIES.length, reviewsRng);
   await prisma.reviewNote.createMany({ data: noteRows });
 
+  // --- The written round, finalized -----------------------------------------
+  //
+  // Phase 5 needs a first round with applicants in it. This produces exactly
+  // what `finalizeWritten` produces — not an approximation: a Decision row for
+  // EVERY applicant in the pool per decision 41, stageReached moved on the
+  // advanced, status REJECTED on the rest, and Instance.currentStage moved per
+  // decision 43. A seed whose idea of "advanced" differed from the action's
+  // would have every Phase 5 surface developed against a state the application
+  // cannot reach.
+  //
+  // Votes and passes stay deliberately absent — they belong to Phase 6, and
+  // inventing them now would let a wrong shape harden before FR-17 specifies
+  // one.
+  const pointsByAssignment = new Map<string, number[]>();
+  for (const score of scoreRows) {
+    pointsByAssignment.set(score.assignmentId, [
+      ...(pointsByAssignment.get(score.assignmentId) ?? []),
+      score.points,
+    ]);
+  }
+
+  const pinnedIds = new Set(
+    profiles
+      .slice(profiles.length - RECONCILIATION_COHORT.length)
+      .map((profile) => seedId("applicant", profile.sourceRowIndex)),
+  );
+
+  const advancedIds = chooseFirstRoundCohort({
+    applicants: profiles.map((profile) => ({
+      applicantId: seedId("applicant", profile.sourceRowIndex),
+      sourceRowIndex: profile.sourceRowIndex,
+    })),
+    assignments: assignmentRows.map((row) => ({
+      applicantId: row.applicantId,
+      points: pointsByAssignment.get(row.id) ?? [],
+    })),
+    categoryCount: RUBRIC_CATEGORIES.length,
+    alwaysAdvance: pinnedIds,
+    advanceCount: FIRST_ROUND_ADVANCE_COUNT,
+  });
+
+  const rejectedIds = applicantIds.filter((id) => !advancedIds.has(id));
+
+  await prisma.decision.createMany({
+    data: applicantIds.map((applicantId) => ({
+      id: seedId("decision_written", rowIndexByApplicantId.get(applicantId) ?? 0),
+      applicantId,
+      stage: Round.WRITTEN,
+      outcome: advancedIds.has(applicantId)
+        ? DecisionOutcome.ADVANCE
+        : DecisionOutcome.REJECT,
+      // ADMIN, not SYSTEM: a human made this call on the real screen, and a seed
+      // that claimed otherwise would misrepresent who decided.
+      actor: DecisionActor.ADMIN,
+    })),
+  });
+
+  await prisma.applicant.updateMany({
+    where: { id: { in: [...advancedIds] } },
+    // stageReached only. Decision 41 dropped ADVANCED from the status enum
+    // precisely because an advancing applicant stays ACTIVE the whole way
+    // through — FR-17 defines pass membership as status = ACTIVE with no round
+    // qualifier.
+    data: { stageReached: Round.FIRST_ROUND },
+  });
+
+  await prisma.applicant.updateMany({
+    where: { id: { in: rejectedIds } },
+    // stageReached stays WRITTEN: it records how far they got, and they got no
+    // further. This is also what PRD decision 48 scopes FR-13 matching against.
+    data: { status: ApplicantStatus.REJECTED },
+  });
+
+  await prisma.instance.update({
+    where: { id: SEED_INSTANCE_ID },
+    data: { currentStage: InstanceStage.FIRST_ROUND },
+  });
+
   const sparklets = reviewers.filter((reviewer) => reviewer.isSparklet).length;
   const shape = planShape(profiles.length, writtenReviewers.length);
   const completeAssignments = countCompleteAssignments(scoreRows, RUBRIC_CATEGORIES.length);
@@ -279,6 +375,13 @@ async function main() {
     `  review notes       ${noteRows.length} of ${completeAssignments} complete reviews\n` +
       `  scores             ${scoreRows.length} across ${completeAssignments} complete ` +
       `and ${assignmentRows.length - completeAssignments} incomplete reviews`,
+  );
+  console.log(
+    `  written round      finalized — ${advancedIds.size} advanced, ${rejectedIds.length} rejected`,
+  );
+  console.log(
+    `  first-round pool   ${advancedIds.size}, including ${RECONCILIATION_COHORT.length} pinned ` +
+      `for the FR-13 fixtures (rows ${APPLICANT_COUNT + 1}-${profiles.length})`,
   );
   console.log("");
   console.log("Development credentials (synthetic data only, stored as argon2id hashes):");

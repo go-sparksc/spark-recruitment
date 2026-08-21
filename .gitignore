@@ -163,6 +163,11 @@ next-env.d.ts
 # which is the failure this whole block exists to prevent. Adding a legitimate
 # fixture should cost one deliberate line here.
 !prisma/fixtures/s26-shape.csv
+# Phase 5, FR-12's two interview sheets. Same rules: entirely synthetic, every
+# address on example.com, every free-text cell prefixed SYNTHETIC. One
+# deliberate line each, for the reason above.
+!prisma/fixtures/s26-1r-scores.csv
+!prisma/fixtures/s26-1r-notes.csv
 *.xlsx
 *.xls
 /data
