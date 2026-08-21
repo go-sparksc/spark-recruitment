@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-import { FIRST_ROUND_POOL } from "../load";
 import { VoteButtons } from "../vote-buttons";
 import { Round } from "@/generated/prisma/enums";
+import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { buildApplicantView } from "@/lib/review";

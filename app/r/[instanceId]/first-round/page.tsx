@@ -5,6 +5,7 @@ import { loadFirstRoundList } from "./load";
 import { VoteButtons } from "./vote-buttons";
 import { SignOutButton } from "../sign-out-button";
 import { Round } from "@/generated/prisma/enums";
+import { votedCount } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 
@@ -41,7 +42,7 @@ export default async function FirstRoundListPage({
   // Decision 62. The same navigational aid FR-9 gives written reviewers, and
   // more useful here: nothing narrows this list, so "am I done" is otherwise
   // unanswerable without counting.
-  const votedCount = rows.filter((row) => row.vote !== null).length;
+  const voted = votedCount(rows);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-6">
@@ -63,7 +64,7 @@ export default async function FirstRoundListPage({
       ) : (
         <>
           <p className="mt-5 text-sm font-medium">
-            Voted on {votedCount} of {rows.length}
+            Voted on {voted} of {rows.length}
           </p>
           <p className="text-muted-foreground mt-1 text-sm">
             You can change a vote any time before the round is finalized. Leaving one blank counts
