@@ -202,3 +202,107 @@ export function parseVarianceThreshold(raw: string | undefined | null): number |
   const value = Number(trimmed);
   return Number.isFinite(value) ? value : null;
 }
+
+// ---------------------------------------------------------------------------
+// FR-15's arithmetic — the first round
+// ---------------------------------------------------------------------------
+//
+// Beside FR-10's rather than in a module of its own, because the file's own
+// header anticipated it: "FR-15 already says first-round results mirror this
+// behaviour, so there will be a second surface." The two rounds rank on
+// different numbers — an average of scores against a percentage of votes — but
+// they are the same kind of thing and a successor looking for one will look here
+// for the other.
+
+/// One applicant's first-round votes, already reduced to counts.
+///
+/// **Skips are not represented**, which is the point. FR-14 writes no SKIP row —
+/// the absence of a vote IS the skip — so a skip is simply a reviewer who does
+/// not appear in either count. Carrying a `skipCount` would invite someone to
+/// put it in a denominator.
+export interface FirstRoundTally {
+  yesCount: number;
+  noCount: number;
+}
+
+export interface FirstRoundSummary {
+  yesCount: number;
+  noCount: number;
+  /// yes + no. The number FR-15 requires shown beside the percentage, because
+  /// "2/2 and 14/14 are not the same signal".
+  nonSkipCount: number;
+  /// `yes / (yes + no)`, or **null when nobody voted**.
+  ///
+  /// Null rather than 0: a zero would sort as the worst possible result and read
+  /// as unanimous rejection, when it means nothing was recorded at all. The same
+  /// distinction `scoreSummary` draws for an unreviewed applicant, for the same
+  /// reason.
+  yesPercent: number | null;
+}
+
+/// FR-15: "yes% = yes / (yes + no), skips excluded from both numerator and
+/// denominator."
+export function firstRoundSummary(tally: FirstRoundTally): FirstRoundSummary {
+  const nonSkipCount = tally.yesCount + tally.noCount;
+  return {
+    yesCount: tally.yesCount,
+    noCount: tally.noCount,
+    nonSkipCount,
+    yesPercent: nonSkipCount === 0 ? null : tally.yesCount / nonSkipCount,
+  };
+}
+
+export interface RankableFirstRoundApplicant {
+  sourceRowIndex: number;
+  yesPercent: number | null;
+  nonSkipCount: number;
+}
+
+/// FR-15's ranking, with PRD decision 46's tiebreak.
+///
+/// Yes percentage descending, then **raw non-skip count descending** — a 6/6
+/// unanimous yes is a stronger signal than a 2/2 one at the same percentage and
+/// the ranking should say so — then `sourceRowIndex` ascending, which is
+/// arbitrary with respect to the applicant and is what makes it fair as a last
+/// resort. Same third key as decision 42 uses for FR-10.
+///
+/// **An applicant nobody voted on sorts last**, below every real percentage,
+/// rather than being treated as 0% and mixed in with unanimous rejections.
+/// Comparing null as -Infinity does that with no special case and keeps the
+/// comparator total, which matters because a comparator returning 0 for pairs
+/// that are not equivalent lets two renders of the same page disagree.
+///
+/// Returns a new array; the caller's is not reordered in place.
+export function rankFirstRound<T extends RankableFirstRoundApplicant>(rows: readonly T[]): T[] {
+  return [...rows].sort(compareFirstRound);
+}
+
+function compareFirstRound(
+  a: RankableFirstRoundApplicant,
+  b: RankableFirstRoundApplicant,
+): number {
+  const percentA = a.yesPercent ?? Number.NEGATIVE_INFINITY;
+  const percentB = b.yesPercent ?? Number.NEGATIVE_INFINITY;
+  if (percentA !== percentB) return percentB - percentA;
+
+  if (a.nonSkipCount !== b.nonSkipCount) return b.nonSkipCount - a.nonSkipCount;
+
+  return a.sourceRowIndex - b.sourceRowIndex;
+}
+
+/// Whether the vote-count cell carries FR-15's marker.
+///
+/// **On the cell, not the row**, exactly as FR-10's under-target marker is. And
+/// **literal zero**, not a threshold: decision 46 is explicit that there is no
+/// fixed target here to fall short of, unlike the written round's 3/3.
+export function hasNoVotes(nonSkipCount: number): boolean {
+  return nonSkipCount === 0;
+}
+
+/// Here rather than in the component, so the em-dash rule is covered by the same
+/// tests as the arithmetic. A null rendered as "0%" is the single most
+/// misleading thing this page could do — it would read as a unanimous rejection
+/// of someone nobody assessed.
+export function formatYesPercent(yesPercent: number | null): string {
+  return yesPercent === null ? "—" : `${Math.round(yesPercent * 100)}%`;
+}

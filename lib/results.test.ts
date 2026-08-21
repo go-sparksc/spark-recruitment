@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  firstRoundSummary,
+  formatYesPercent,
+  hasNoVotes,
+  rankFirstRound,
   applyResultFilters,
   formatAverage,
   formatVariance,
@@ -360,5 +364,109 @@ describe("parseVarianceThreshold", () => {
     expect(parseVarianceThreshold("0")).toBe(0);
     expect(parseVarianceThreshold("0.5")).toBe(0.5);
     expect(parseVarianceThreshold(" 1.25 ")).toBe(1.25);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-15 — the first round
+// ---------------------------------------------------------------------------
+
+describe("firstRoundSummary", () => {
+  it("excludes skips from both numerator and denominator", () => {
+    // FR-15's central sentence. Eleven reviewers on the roster, four voted:
+    // 3 yes, 1 no. The seven who did not vote are invisible to the arithmetic —
+    // FR-14 writes no SKIP row, so a skip is a reviewer who is simply absent.
+    expect(firstRoundSummary({ yesCount: 3, noCount: 1 })).toEqual({
+      yesCount: 3,
+      noCount: 1,
+      nonSkipCount: 4,
+      yesPercent: 0.75,
+    });
+  });
+
+  it("reports 2/2 and 14/14 as the same percentage but different counts", () => {
+    // The reason FR-15 requires the raw counts beside the percentage.
+    const small = firstRoundSummary({ yesCount: 2, noCount: 0 });
+    const large = firstRoundSummary({ yesCount: 14, noCount: 0 });
+
+    expect(small.yesPercent).toBe(1);
+    expect(large.yesPercent).toBe(1);
+    expect(small.nonSkipCount).toBe(2);
+    expect(large.nonSkipCount).toBe(14);
+  });
+
+  it("gives an applicant nobody voted on a null percentage, never zero", () => {
+    // A zero would sort as the worst possible result and read as unanimous
+    // rejection. It means nothing was recorded at all.
+    expect(firstRoundSummary({ yesCount: 0, noCount: 0 }).yesPercent).toBeNull();
+  });
+
+  it("distinguishes that from a genuine unanimous no", () => {
+    expect(firstRoundSummary({ yesCount: 0, noCount: 5 }).yesPercent).toBe(0);
+  });
+});
+
+describe("rankFirstRound", () => {
+  const row = (sourceRowIndex: number, yesCount: number, noCount: number) => ({
+    sourceRowIndex,
+    ...firstRoundSummary({ yesCount, noCount }),
+  });
+
+  it("ranks by yes percentage descending", () => {
+    const ranked = rankFirstRound([row(1, 1, 3), row(2, 3, 1), row(3, 2, 2)]);
+    expect(ranked.map((r) => r.sourceRowIndex)).toEqual([2, 3, 1]);
+  });
+
+  it("breaks a percentage tie on raw non-skip count, descending", () => {
+    // Decision 46: 6/6 is a stronger signal than 2/2 at the same 100%.
+    const ranked = rankFirstRound([row(1, 2, 0), row(2, 6, 0), row(3, 4, 0)]);
+    expect(ranked.map((r) => r.sourceRowIndex)).toEqual([2, 3, 1]);
+  });
+
+  it("falls back to sourceRowIndex ascending when both keys tie", () => {
+    const ranked = rankFirstRound([row(9, 3, 1), row(2, 3, 1), row(5, 3, 1)]);
+    expect(ranked.map((r) => r.sourceRowIndex)).toEqual([2, 5, 9]);
+  });
+
+  it("sorts an applicant nobody voted on last, below a unanimous no", () => {
+    // The case that would go wrong if null were treated as 0%.
+    const ranked = rankFirstRound([row(1, 0, 0), row(2, 0, 4), row(3, 1, 3)]);
+    expect(ranked.map((r) => r.sourceRowIndex)).toEqual([3, 2, 1]);
+  });
+
+  it("does not reorder the caller's array", () => {
+    const rows = [row(1, 1, 1), row(2, 2, 0)];
+    const before = rows.map((r) => r.sourceRowIndex);
+    rankFirstRound(rows);
+    expect(rows.map((r) => r.sourceRowIndex)).toEqual(before);
+  });
+
+  it("is a total order — equal rows never compare as equivalent", () => {
+    // sourceRowIndex is unique per instance, so no two rows can tie on all
+    // three keys. A comparator returning 0 for non-equivalent pairs would let
+    // two renders of the same page disagree about row order.
+    const ranked = rankFirstRound([row(3, 1, 1), row(1, 1, 1), row(2, 1, 1)]);
+    expect(ranked.map((r) => r.sourceRowIndex)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("hasNoVotes and formatYesPercent", () => {
+  it("marks literal zero only", () => {
+    // Decision 46: no fixed target to fall short of here, unlike FR-10's 3/3.
+    expect(hasNoVotes(0)).toBe(true);
+    expect(hasNoVotes(1)).toBe(false);
+    expect(hasNoVotes(11)).toBe(false);
+  });
+
+  it("renders a null percentage as an em-dash, never 0%", () => {
+    expect(formatYesPercent(null)).toBe("—");
+    expect(formatYesPercent(0)).toBe("0%");
+    expect(formatYesPercent(0.75)).toBe("75%");
+    expect(formatYesPercent(1)).toBe("100%");
+  });
+
+  it("rounds to whole percents", () => {
+    // 2 of 3 is 66.67%; the column is read at a glance, not audited.
+    expect(formatYesPercent(2 / 3)).toBe("67%");
   });
 });

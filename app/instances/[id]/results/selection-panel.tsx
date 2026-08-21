@@ -221,7 +221,7 @@ export function SelectionPanel({
   );
 }
 
-function Breakdown({
+export function Breakdown({
   label,
   selection,
   pool,

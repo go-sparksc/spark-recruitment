@@ -76,6 +76,7 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
     interviewResultCount,
     interviewNotesCount,
     stagedSheetCount,
+    firstRoundVoteCount,
   ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
@@ -98,6 +99,7 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       prisma.interviewResult.count({ where: { applicant: { instanceId: id } } }),
       prisma.interviewNotes.count({ where: { applicant: { instanceId: id } } }),
       prisma.interviewImport.count({ where: { instanceId: id } }),
+      prisma.firstRoundVote.count({ where: { applicant: { instanceId: id } } }),
     ]);
 
   // "Applicants short one reviewer" is a count over a relation, which Prisma
@@ -232,6 +234,21 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       // "waiting" as soon as one sheet lands.
       waiting:
         stagedSheetCount === 0 && interviewResultCount === 0 && interviewNotesCount === 0,
+    },
+    {
+      href: `/instances/${id}/first-round-results`,
+      title: "First round results",
+      state:
+        instance.currentStage === InstanceStage.WRITTEN
+          ? "written round not finalized"
+          : instance.currentStage === InstanceStage.FIRST_ROUND
+            ? firstRoundVoteCount === 0
+              ? "no votes yet"
+              : `${plural(firstRoundVoteCount, "vote")} cast`
+            : "first round finalized",
+      // Votes arrive one reviewer at a time, so this stops being "waiting" as
+      // soon as anybody has voted — the same rule the written results row uses.
+      waiting: instance.currentStage === InstanceStage.WRITTEN || firstRoundVoteCount === 0,
     },
     {
       href: `/instances/${id}/settings`,
