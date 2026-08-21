@@ -22,12 +22,17 @@ export function InterviewRubricBuilder({
   instanceId,
   initial,
   lockedByScoreCount,
+  stagedScoresSheet,
 }: {
   instanceId: string;
   initial: InterviewCategoryInput[];
   /// Non-zero means a scores sheet has been imported and FR-12a locks the
   /// rubric.
   lockedByScoreCount: number;
+  /// A scores sheet staged but not yet imported, if any. PRD decision 61: its
+  /// mapping is bound to these categories by id, so adding or removing one
+  /// leaves that column unmapped and the admin has to redo it.
+  stagedScoresSheet: { _count: { rows: number } } | null;
 }) {
   const [rows, setRows] = useState<InterviewCategoryInput[]>(
     initial.length > 0 ? initial : [NEW_CATEGORY],
@@ -94,6 +99,19 @@ export function InterviewRubricBuilder({
             </Button>
           )}
         </div>
+      ) : null}
+
+      {/* PRD decision 61. Renaming a category is now free — its id survives the
+          save — but adding or removing one still leaves a staged column with
+          nothing to point at. Said before the edit rather than discovered on the
+          import screen afterwards. */}
+      {!locked && stagedScoresSheet !== null ? (
+        <p className="text-muted-foreground rounded-md border p-3 text-sm">
+          A scores sheet is staged — {stagedScoresSheet._count.rows} row
+          {stagedScoresSheet._count.rows === 1 ? "" : "s"} waiting to be imported. Renaming a
+          category here is safe. <strong>Adding or removing one</strong> will leave its column
+          unmapped, and you will need to set that column again before importing.
+        </p>
       ) : null}
 
       <div className="space-y-3">

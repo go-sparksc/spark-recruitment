@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.15, Phase 0-4 complete, FR-12a added, decisions 50-60 recorded, Phase 5 in progress (slices 0-5 shipped)
+**Status:** v1.16, Phase 0-4 complete, FR-12a added, decisions 50-61 recorded, Phase 5 in progress (slices 0-5 shipped)
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -871,6 +871,14 @@ These need answers before or during the relevant build phase. They are the place
     The escape hatch is decision 51's, unchanged: mark the row as not importing. The difference from an automatic skip is only that a person does it, having seen what they are dropping.
 
     Neither rule applies to the notes sheet. It has no average, and `InterviewNotes.interviewerName` is nullable because only one interviewer of the pair writes the notes.
+
+61. **`InterviewCategory` ids are preserved across a rubric edit, amending clause 12a-5's "replace-not-diff." RESOLVED:** an edit updates existing rows in place and only adds or removes rows for categories actually added or removed, rather than deleting and recreating the whole set. Same ruling §5 already made for `FieldGroup.key`, and the reason is the same: a staged FR-12 mapping references `InterviewCategory` ids, and regenerating them on every save silently invalidates any in-progress mapping, which is exactly the "Not imported" regression this decision fixes. The rubric page also warns when a scores sheet is staged, naming that changing categories will need the mapping re-done — a real cost of editing after upload, stated rather than discovered.
+
+    Found by the owner clicking through, not by review: a typo in one category name was corrected, and all four columns of an already-staged sheet came back unmapped — the three untouched ones because their ids had changed underneath the mapping, the corrected one because it had never matched. The failure was safe rather than silent (`parseRole` degrades an unknown id to `IGNORED`, `validateMapping` then refuses the commit, and the importer builds category ids from the live rubric rather than from the mapping), so no wrong data was reachable — but a dead end an admin reaches by doing something entirely reasonable is still a defect.
+
+    **A self-healing re-proposal was considered and rejected.** Re-matching a stale id by header text would have hidden this instance and any future one, and the phase's practice is to surface a real problem rather than let a second mechanism quietly mask it. Preserving identity removes the cause; re-proposing would only have removed the symptom.
+
+    The immediate consequence is that reordering can no longer be a wholesale replace: `@@unique([instanceId, ordinal])` is not deferrable, so a save parks the surviving rows on temporary ordinals before writing their final ones.
 
 ## 11. Out of scope for v1, worth noting for v2
 

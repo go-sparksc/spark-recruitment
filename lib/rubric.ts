@@ -125,8 +125,70 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
 /// fields ignored, so the builder cannot send a description that silently goes
 /// nowhere.
 export interface InterviewCategoryInput {
+  /// The existing row's id, absent for a category being added.
+  ///
+  /// **Load-bearing, per PRD decision 61.** A staged FR-12 mapping stores
+  /// `CATEGORY:<id>`, so an id that changes when someone fixes a typo silently
+  /// unmaps every column of an in-progress import. This is the same ruling §5
+  /// makes for `FieldGroup.key` and for the same reason.
+  id?: string;
   name: string;
   maxPoints: number;
+}
+
+/// What a save has to do to turn the stored rubric into the submitted one.
+///
+/// Pure, and separated from the action so the identity rule that decision 61
+/// turns on can be tested without a database — this is the part that regressed,
+/// and "the ids survived" is not observable from the UI until an import is
+/// already staged against them.
+export interface InterviewRubricPlan {
+  updates: { id: string; name: string; maxPoints: number; ordinal: number }[];
+  creates: { name: string; maxPoints: number; ordinal: number }[];
+  deleteIds: string[];
+}
+
+/// PRD decision 61: update in place, add and remove only what actually changed.
+///
+/// A submitted row keeps its id when the database still has that row. Anything
+/// else is a create — including a row carrying an id the instance does not own,
+/// which is what stops a tampered or stale payload from adopting another
+/// instance's category.
+///
+/// **A repeated id is honoured once.** Two submitted rows claiming one id would
+/// otherwise become two updates to the same row, leaving one submitted category
+/// silently unsaved; the second occurrence becomes a create instead.
+///
+/// Ordinal is position in the submitted list, so reordering is expressed purely
+/// as updates. The caller has to park the survivors on temporary ordinals before
+/// writing these, since `@@unique([instanceId, ordinal])` is not deferrable.
+export function planInterviewRubricSave(
+  existingIds: readonly string[],
+  incoming: readonly InterviewCategoryInput[],
+): InterviewRubricPlan {
+  const available = new Set(existingIds);
+  const claimed = new Set<string>();
+
+  const updates: InterviewRubricPlan["updates"] = [];
+  const creates: InterviewRubricPlan["creates"] = [];
+
+  incoming.forEach((category, ordinal) => {
+    const row = { name: category.name.trim(), maxPoints: category.maxPoints, ordinal };
+
+    if (category.id !== undefined && available.has(category.id) && !claimed.has(category.id)) {
+      claimed.add(category.id);
+      updates.push({ id: category.id, ...row });
+    } else {
+      creates.push(row);
+    }
+  });
+
+  return {
+    updates,
+    creates,
+    // Everything the instance had that the submission no longer claims.
+    deleteIds: existingIds.filter((id) => !claimed.has(id)),
+  };
 }
 
 /// FR-12a's validation, which is FR-4's minus the two fields above.

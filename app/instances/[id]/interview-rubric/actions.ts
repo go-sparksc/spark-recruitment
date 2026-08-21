@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { validateInterviewRubric, type InterviewCategoryInput } from "@/lib/rubric";
+import {
+  planInterviewRubricSave,
+  validateInterviewRubric,
+  type InterviewCategoryInput,
+} from "@/lib/rubric";
 
 export interface InterviewRubricState {
   error?: string;
@@ -47,22 +51,51 @@ export async function saveInterviewRubric(
     };
   }
 
-  const cleaned = categories.map((category, ordinal) => ({
-    name: category.name.trim(),
-    maxPoints: category.maxPoints,
-    ordinal,
-  }));
+  const existing = await prisma.interviewCategory.findMany({
+    where: { instanceId },
+    orderBy: { ordinal: "asc" },
+    select: { id: true },
+  });
 
-  // Replace rather than diff, the same shape `saveRubric` uses and for the same
-  // reason: `InterviewCategory` is keyed by (instanceId, ordinal), and reordering
-  // through a diff means a sequence of updates that collide with that key
-  // halfway. Unreachable once any score exists, so the delete cannot orphan an
-  // `InterviewCategoryScore` — that is what the guard above is protecting.
+  const plan = planInterviewRubricSave(
+    existing.map((category) => category.id),
+    categories,
+  );
+
+  // **Update in place, per PRD decision 61.** This used to delete every row and
+  // recreate the set, which regenerated all four cuids on every save — so
+  // correcting one category's spelling silently unmapped every column of an
+  // already-staged FR-12 sheet, because the mapping stores `CATEGORY:<id>`.
+  // Found by clicking through, not by review.
+  //
+  // Ordinals are parked first because `@@unique([instanceId, ordinal])` is not
+  // deferrable: writing final positions row by row collides the moment two
+  // categories swap places. Negating is one statement for the whole instance and
+  // cannot collide with the 0..n-1 range being written next, since every stored
+  // ordinal is non-negative.
   await prisma.$transaction(async (tx) => {
-    await tx.interviewCategory.deleteMany({ where: { instanceId } });
-    await tx.interviewCategory.createMany({
-      data: cleaned.map((category) => ({ ...category, instanceId })),
-    });
+    if (plan.deleteIds.length > 0) {
+      await tx.interviewCategory.deleteMany({ where: { id: { in: plan.deleteIds } } });
+    }
+
+    if (plan.updates.length > 0) {
+      await tx.$executeRaw`
+        UPDATE "InterviewCategory" SET "ordinal" = -"ordinal" - 1 WHERE "instanceId" = ${instanceId}
+      `;
+
+      for (const update of plan.updates) {
+        await tx.interviewCategory.update({
+          where: { id: update.id },
+          data: { name: update.name, maxPoints: update.maxPoints, ordinal: update.ordinal },
+        });
+      }
+    }
+
+    if (plan.creates.length > 0) {
+      await tx.interviewCategory.createMany({
+        data: plan.creates.map((category) => ({ ...category, instanceId })),
+      });
+    }
   });
 
   revalidatePath(path(instanceId));

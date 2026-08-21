@@ -4,6 +4,7 @@ import {
   MAX_CATEGORIES,
   MAX_DESCRIPTION_LENGTH,
   rubricRange,
+  planInterviewRubricSave,
   validateInterviewRubric,
   validateRubric,
   type RubricCategoryInput,
@@ -252,5 +253,103 @@ describe("validateInterviewRubric", () => {
     // a maxPoints of 1 is the case that would trip `minPoints >= maxPoints` if
     // the supplied floor ever changed to decision 40's 1.
     expect(validateInterviewRubric([{ name: "Pass or fail", maxPoints: 1 }])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRD decision 61 — ids survive a rubric edit
+// ---------------------------------------------------------------------------
+
+describe("planInterviewRubricSave", () => {
+  const existing = ["cat-a", "cat-b", "cat-c"];
+
+  it("keeps every id when only a name changes", () => {
+    // THE regression. Correcting "Motiviation" used to regenerate all four ids
+    // and silently unmap every column of an already-staged FR-12 sheet.
+    const plan = planInterviewRubricSave(existing, [
+      { id: "cat-a", name: "Communication", maxPoints: 4 },
+      { id: "cat-b", name: "Motivation", maxPoints: 4 },
+      { id: "cat-c", name: "Culture Fit", maxPoints: 4 },
+    ]);
+
+    expect(plan.updates.map((u) => u.id)).toEqual(["cat-a", "cat-b", "cat-c"]);
+    expect(plan.creates).toEqual([]);
+    expect(plan.deleteIds).toEqual([]);
+    expect(plan.updates[1].name).toBe("Motivation");
+  });
+
+  it("expresses a reorder purely as updates, with new ordinals", () => {
+    const plan = planInterviewRubricSave(existing, [
+      { id: "cat-c", name: "C", maxPoints: 4 },
+      { id: "cat-a", name: "A", maxPoints: 4 },
+      { id: "cat-b", name: "B", maxPoints: 4 },
+    ]);
+
+    expect(plan.creates).toEqual([]);
+    expect(plan.deleteIds).toEqual([]);
+    expect(plan.updates).toEqual([
+      { id: "cat-c", name: "C", maxPoints: 4, ordinal: 0 },
+      { id: "cat-a", name: "A", maxPoints: 4, ordinal: 1 },
+      { id: "cat-b", name: "B", maxPoints: 4, ordinal: 2 },
+    ]);
+  });
+
+  it("creates only the added category and keeps the rest", () => {
+    const plan = planInterviewRubricSave(existing, [
+      { id: "cat-a", name: "A", maxPoints: 4 },
+      { id: "cat-b", name: "B", maxPoints: 4 },
+      { id: "cat-c", name: "C", maxPoints: 4 },
+      { name: "New one", maxPoints: 5 },
+    ]);
+
+    expect(plan.updates).toHaveLength(3);
+    expect(plan.creates).toEqual([{ name: "New one", maxPoints: 5, ordinal: 3 }]);
+    expect(plan.deleteIds).toEqual([]);
+  });
+
+  it("deletes only the removed category", () => {
+    const plan = planInterviewRubricSave(existing, [
+      { id: "cat-a", name: "A", maxPoints: 4 },
+      { id: "cat-c", name: "C", maxPoints: 4 },
+    ]);
+
+    expect(plan.updates.map((u) => u.id)).toEqual(["cat-a", "cat-c"]);
+    expect(plan.deleteIds).toEqual(["cat-b"]);
+  });
+
+  it("treats an id the instance does not own as a create", () => {
+    // Stops a stale or tampered payload adopting another instance's category.
+    const plan = planInterviewRubricSave(existing, [
+      { id: "someone-elses", name: "A", maxPoints: 4 },
+    ]);
+
+    expect(plan.updates).toEqual([]);
+    expect(plan.creates).toEqual([{ name: "A", maxPoints: 4, ordinal: 0 }]);
+    expect(plan.deleteIds).toEqual(existing);
+  });
+
+  it("honours a repeated id once and creates the second", () => {
+    // Two updates to one row would leave one submitted category unsaved.
+    const plan = planInterviewRubricSave(existing, [
+      { id: "cat-a", name: "First", maxPoints: 4 },
+      { id: "cat-a", name: "Second", maxPoints: 4 },
+    ]);
+
+    expect(plan.updates).toEqual([{ id: "cat-a", name: "First", maxPoints: 4, ordinal: 0 }]);
+    expect(plan.creates).toEqual([{ name: "Second", maxPoints: 4, ordinal: 1 }]);
+  });
+
+  it("starts from nothing on a first save", () => {
+    const plan = planInterviewRubricSave([], [{ name: "Only", maxPoints: 4 }]);
+    expect(plan).toEqual({
+      updates: [],
+      creates: [{ name: "Only", maxPoints: 4, ordinal: 0 }],
+      deleteIds: [],
+    });
+  });
+
+  it("trims names, as the save used to", () => {
+    const plan = planInterviewRubricSave(["cat-a"], [{ id: "cat-a", name: "  Fit  ", maxPoints: 4 }]);
+    expect(plan.updates[0].name).toBe("Fit");
   });
 });

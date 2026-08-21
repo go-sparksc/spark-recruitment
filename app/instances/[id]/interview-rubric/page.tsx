@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { InterviewRubricBuilder } from "./interview-rubric-builder";
 import { InstanceCrumbs } from "../instance-crumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ImportSheet } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -38,9 +39,19 @@ export default async function InterviewRubricPage({
   // instance's. Same predicate the action re-checks — render-time gating is not
   // a boundary, since a server action is a POST endpoint reachable without the
   // page that renders its form.
-  const scoreCount = await prisma.interviewCategoryScore.count({
-    where: { interviewCategory: { instanceId: id } },
-  });
+  const [scoreCount, stagedScoresSheet] = await Promise.all([
+    prisma.interviewCategoryScore.count({
+      where: { interviewCategory: { instanceId: id } },
+    }),
+    // PRD decision 61's warning. A staged sheet's mapping is bound to these
+    // categories, and adding or removing one leaves its column unmapped — a real
+    // cost of editing after upload, stated here rather than discovered on the
+    // import screen.
+    prisma.interviewImport.findUnique({
+      where: { instanceId_sheet: { instanceId: id, sheet: ImportSheet.SCORES } },
+      select: { _count: { select: { rows: true } } },
+    }),
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-16">
@@ -62,10 +73,16 @@ export default async function InterviewRubricPage({
           <InterviewRubricBuilder
             instanceId={instance.id}
             initial={instance.interviewCategories.map((category) => ({
+              // The id travels to the client and back so a save can update this
+              // row rather than recreate it — PRD decision 61. Not a secret:
+              // it identifies a row the admin is already looking at, and the
+              // action re-checks that the instance owns it.
+              id: category.id,
               name: category.name,
               maxPoints: category.maxPoints,
             }))}
             lockedByScoreCount={scoreCount}
+            stagedScoresSheet={stagedScoresSheet}
           />
         </CardContent>
       </Card>
