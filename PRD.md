@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.14, Phase 0-4 complete, FR-12a added, decisions 50-59 recorded, Phase 5 in progress (slices 0-4 shipped)
+**Status:** v1.15, Phase 0-4 complete, FR-12a added, decisions 50-60 recorded, Phase 5 in progress (slices 0-5 shipped)
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -863,6 +863,14 @@ These need answers before or during the relevant build phase. They are the place
     Decision 55 answers "the cell is a number, but the wrong one". This answers "the cell is not a number at all", which `InterviewCategoryScore.points` being a non-null `Int` makes unavoidable rather than optional: the importer cannot defer it to the database.
 
     The three readings share one property — **no row is written, and the row's other categories still import.** A single unreadable cell costs that one category, never the interview. That is what keeps this consistent with 55, where a readable but wrong number is kept precisely because the interview is the record.
+
+60. **A row missing `Average` or interviewer name — the two required scores-sheet fields with no fallback — blocks import rather than being skipped automatically. RESOLVED.** The non-null columns force that such a row cannot commit silently, but not that it must block rather than skip; that's a choice, consistent with this phase's practice of stating it. Treated as a per-row blocker rather than an automatic skip, same posture as a batch collision (decision 49) and an unresolved match (decision 51) — an admin should see and act on a genuinely broken row rather than have it quietly excluded from the cohort.
+
+    "With no fallback" is what separates these two from the applicant columns. FR-12 offers `Applicant Email` **or** `Applicant Name`, and FR-13's cascade skips whichever tier it has no value for, so a row missing one still resolves. Nothing stands in for the average — decision 55 and FR-12 both forbid recomputing it from the categories — and nothing stands in for the interviewer name, which is half of `(applicantId, interviewerName)` and therefore half of what keeps two interviewers' scores for one applicant apart under decision 47.
+
+    The escape hatch is decision 51's, unchanged: mark the row as not importing. The difference from an automatic skip is only that a person does it, having seen what they are dropping.
+
+    Neither rule applies to the notes sheet. It has no average, and `InterviewNotes.interviewerName` is nullable because only one interviewer of the pair writes the notes.
 
 ## 11. Out of scope for v1, worth noting for v2
 
