@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.13, Phase 0-4 complete, FR-12a added, decisions 50-54, 56-58 recorded (55 reserved), Phase 5 in progress
+**Status:** v1.14, Phase 0-4 complete, FR-12a added, decisions 50-59 recorded, Phase 5 in progress (slices 0-4 shipped)
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -832,7 +832,19 @@ These need answers before or during the relevant build phase. They are the place
 
 54. **Where the interview rubric builder lives. RESOLVED: its own page, `/instances/[id]/interview-rubric`, not a second section of `/rubric`.** FR-12 presupposes configured `InterviewCategory` rows and named no surface for them, which is what FR-12a now fixes. A second section on the existing rubric page would put two instruments, two lock rules, and two "once any score exists" conditions on one screen — decision 6 already treats the written and interview rubrics as separate instruments precisely so they do not tangle, and a shared page reintroduces the tangle at the UI layer. Its own page, modelled on the existing builder and reusing `validateRubric`'s shape, keeps FR-4's lock semantics separate from the interview instrument's, which locks on `InterviewCategoryScore` rows rather than `Score` rows.
 
-55. **Reserved — an interview category score outside `0..maxPoints`.** Agreed in principle (flagged at preview, imported anyway, never rejected) and deliberately not written up yet: it is Phase 5 Slice 5's opening act, and the rule is not implemented until it is recorded here and read. `InterviewCategory` has no `minPoints`, since FR-12a asks only for max points and decision 40's floor exists for FR-4's *input* control, whereas these numbers arrive from a file.
+55. **An interview category score outside `0..maxPoints`. RESOLVED: flagged in the preview, imported anyway, never rejected.** The question arises because `InterviewCategory` has no `minPoints` — FR-12a asks only for max points per category, and decision 40's floor exists for FR-4's *input* control, where the rule is that no submitted answer should be scorable as nothing. These numbers are not typed into a control. They arrive from an interviewer's spreadsheet, where 0 is a legal thing for a sheet to say and where a 5 in a column scored out of 4 means somebody made a mistake that the import cannot unmake.
+
+    **This is FR-12's existing stance on a disagreeing average, applied to the same sheet's other numbers.** FR-12 already says the importer "does not recompute the average or reject a row whose average disagrees with its categories — interviewers sometimes adjust it deliberately — but it does flag the disagreement in the preview so the admin sees it before commit." An out-of-range category score is the same shape of problem and gets the same treatment, because the alternatives are worse in the same ways:
+
+    - **Rejecting the row** discards an interview that actually happened over a typo in one cell, and leaves the admin editing the source file and re-uploading to recover data the tool already read correctly. The interview is the record; the tool is not entitled to refuse it.
+    - **Clamping to the range** silently rewrites what the interviewers recorded, which is the one thing FR-12 is emphatic the importer must never do to the average and has no more licence to do here.
+    - **Staying silent** lets a 5-out-of-4 flow into FR-14's dashboard and FR-15's ranking, where it reads as a legitimate score and is unattributable to anything once the sheet is closed.
+
+    The flag is two-directional: below 0 as well as above the category's `maxPoints`. A score of exactly 0 is **not** flagged — there is no floor, and 0 is a real thing for an interviewer to award.
+
+    **Not blocking**, so a flagged row does not hold up the commit the way an unresolved FR-13 row does under decision 51. The distinction is what the admin can do about it: an unresolved row is a question only they can answer, whereas an out-of-range score is a fact about the file that they can act on now, later, or not at all. Blocking on it would stop a whole cohort's scores over one interviewer's fat finger.
+
+    **Deliberately not enforced by a CHECK constraint on `InterviewCategoryScore.points`.** A database that refused the row would make this decision unimplementable, and the value has to survive so the flag has something to point at.
 
 56. **Ambiguity at a stronger tier does not fall through to a weaker one. RESOLVED.** A row with two exact-name matches queues at tier 2 rather than proceeding to fuzzy matching in hopes of a tiebreak. Falling through would mean a row-level certainty (two exact matches exist) gets resolved by a strictly less reliable method, which is backward — fuzzy matching exists for rows with no exact candidate, not as a tiebreak among exact ones.
 
@@ -845,6 +857,12 @@ These need answers before or during the relevant build phase. They are the place
 58. **FR-12a gains a reset action, not stated in the requirement text. RESOLVED.** Without it, an admin who imports scores against a wrong rubric has no path but deleting the instance. Modelled on clause 12a-4's "modelled on FR-4's builder," and less destructive than FR-4's reset — it discards data that still exists in the source file, and decision 47 makes re-importing routine. Deletes `InterviewResult` rows along with `InterviewCategoryScore` rows, since a result with no category scores underneath is a state nothing else in the system can produce. Audited.
 
     The confirmation says what comes back, not only what goes away. An admin who cannot tell this apart from FR-4's reset — which destroys work thirty reviewers typed and cannot recover — will treat both as unrecoverable and neither as usable. `InterviewNotes` is untouched: it references no category and survives a rubric change intact.
+
+59. **A category cell that is blank or non-numeric, distinct from decision 55's wrong-but-numeric case. RESOLVED, three readings.** Blank means *not scored* — no `InterviewCategoryScore` row is written for that category, same as the written round's rule that an unscored category is the absence of a row, never a zero. Non-numeric text is flagged like decision 55, with no row written. A decimal in an integer column (`points` is `Int`, `Average` is `Float`) is flagged rather than rounded, on the same reasoning decision 55 rejects clamping — rounding would rewrite what the interviewer actually recorded.
+
+    Decision 55 answers "the cell is a number, but the wrong one". This answers "the cell is not a number at all", which `InterviewCategoryScore.points` being a non-null `Int` makes unavoidable rather than optional: the importer cannot defer it to the database.
+
+    The three readings share one property — **no row is written, and the row's other categories still import.** A single unreadable cell costs that one category, never the interview. That is what keeps this consistent with 55, where a readable but wrong number is kept precisely because the interview is the record.
 
 ## 11. Out of scope for v1, worth noting for v2
 
