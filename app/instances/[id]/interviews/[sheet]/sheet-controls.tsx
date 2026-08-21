@@ -380,11 +380,20 @@ export function CommitForm({
   instanceId,
   sheet,
   rowCount,
+  replacingCount,
   disabled,
 }: {
   instanceId: string;
   sheet: string;
   rowCount: number;
+  /// How many of those rows overwrite something already imported.
+  ///
+  /// **"Import 12 rows" is the wrong verb for a re-upload.** Decision 47 makes
+  /// re-importing routine, and the first time it happened the button said the
+  /// same thing it says for a first import while twelve existing results were
+  /// replaced. The count was right and the verb was wrong, which is worse than
+  /// an outright error: nothing looked unusual.
+  replacingCount: number;
   disabled: boolean;
 }) {
   const [state, setState] = useState<InterviewImportState>({});
@@ -407,8 +416,28 @@ export function CommitForm({
       ) : null}
       {state.message ? <p className="text-sm text-emerald-600">{state.message}</p> : null}
 
+      {/* Said above the button rather than only on it, because this is the
+          sentence that distinguishes a first import from an overwrite and it
+          has to be readable before the click, not after. */}
+      {replacingCount > 0 ? (
+        <p className="text-sm">
+          <strong>
+            {replacingCount} of these {rowCount} row{rowCount === 1 ? "" : "s"} replace
+          </strong>{" "}
+          {replacingCount === 1 ? "a result" : "results"} already imported for the same{" "}
+          {sheet === "scores" ? "applicant and interviewer" : "applicant"}. The rest are new.
+          Replaced {replacingCount === 1 ? "data is" : "data are"} overwritten, not duplicated.
+        </p>
+      ) : null}
+
       <Button type="submit" disabled={disabled || pending}>
-        {pending ? "Importing…" : `Import ${rowCount} row${rowCount === 1 ? "" : "s"}`}
+        {pending
+          ? "Importing…"
+          : replacingCount === rowCount && rowCount > 0
+            ? `Replace ${rowCount} row${rowCount === 1 ? "" : "s"}`
+            : replacingCount > 0
+              ? `Import ${rowCount} row${rowCount === 1 ? "" : "s"}, replacing ${replacingCount}`
+              : `Import ${rowCount} row${rowCount === 1 ? "" : "s"}`}
       </Button>
     </form>
   );

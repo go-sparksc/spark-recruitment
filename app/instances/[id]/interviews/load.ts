@@ -21,12 +21,23 @@ import {
   type StagedRow,
 } from "@/lib/import/interview-preview";
 import { prisma } from "@/lib/prisma";
-import { matchRow, type Candidate, type MatchOutcome } from "@/lib/reconciliation";
+import {
+  matchRow,
+  normalizeInterviewerName,
+  type Candidate,
+  type MatchOutcome,
+} from "@/lib/reconciliation";
 
 export function parseSheetParam(raw: string): InterviewSheet | null {
   const upper = raw.toUpperCase();
   return upper === "SCORES" || upper === "NOTES" ? upper : null;
 }
+
+/// U+001F, built from its codepoint so no control character sits in the source.
+/// lib/roster.ts explains why that matters, and why the separator cannot be a
+/// plain space: a cuid and a normalized name are both free-form text, so joining
+/// them with a space would make ("a1", "kim") and ("a1 kim", "") one key.
+const UNIT_SEPARATOR = String.fromCharCode(0x1f);
 
 export const SHEET_LABEL: Record<InterviewSheet, string> = {
   SCORES: "First round scores",
@@ -64,6 +75,19 @@ export interface LoadedSheet {
   findings: InterviewPreviewFindings;
   pool: Candidate[];
   applicantNames: Map<string, string>;
+  /// How many of the importable rows would REPLACE something already imported,
+  /// per PRD decision 47's upsert.
+  ///
+  /// **Because "Import 12 rows" is not what a re-upload does.** A second upload
+  /// of a corrected sheet silently replaced twelve existing results and said
+  /// nothing about it — the count was right, the verb was wrong, and an admin
+  /// had no way to tell a first import from an overwrite. Found by the owner
+  /// asking whether the counts had actually changed.
+  ///
+  /// Computed here rather than in the pure preview, which has no database and
+  /// must not grow one. Keyed exactly as the commit keys its delete, through the
+  /// same normalizer, so the number cannot disagree with what happens.
+  replacingCount: number;
   /// The first non-empty value in each column, for the mapping table.
   ///
   /// A heading on its own is often ambiguous — "Name" could be either party, and
@@ -153,6 +177,53 @@ export async function loadInterviewSheet(
     );
   }
 
+  const findings = buildInterviewPreview({
+    sheet,
+    rows,
+    columns,
+    categories,
+    mappingErrors,
+    applicantNames,
+  });
+
+  // What a commit would overwrite. Keyed exactly as `commitInterviewSheet` keys
+  // its delete — (applicant, folded interviewer) for scores, applicant alone for
+  // notes — so this count and the rows that actually get replaced are the same
+  // set by construction rather than by two pieces of code agreeing.
+  const importable = findings.rows.filter((row) => !row.skipped && row.applicantId !== null);
+  const importableApplicantIds = [
+    ...new Set(importable.map((row) => row.applicantId as string)),
+  ];
+
+  let replacingCount = 0;
+  if (importableApplicantIds.length > 0) {
+    if (sheet === "SCORES") {
+      const existingResults = await prisma.interviewResult.findMany({
+        where: { applicantId: { in: importableApplicantIds } },
+        select: { applicantId: true, interviewerName: true },
+      });
+      const existingKeys = new Set(
+        existingResults.map(
+          (r) => `${r.applicantId}${UNIT_SEPARATOR}${normalizeInterviewerName(r.interviewerName)}`,
+        ),
+      );
+      replacingCount = importable.filter((row) =>
+        existingKeys.has(
+          `${row.applicantId}${UNIT_SEPARATOR}${normalizeInterviewerName(row.interviewerName)}`,
+        ),
+      ).length;
+    } else {
+      const existingNotes = await prisma.interviewNotes.findMany({
+        where: { applicantId: { in: importableApplicantIds } },
+        select: { applicantId: true },
+      });
+      const existingKeys = new Set(existingNotes.map((n) => n.applicantId));
+      replacingCount = importable.filter((row) =>
+        existingKeys.has(row.applicantId as string),
+      ).length;
+    }
+  }
+
   const sampleByColumn = headers.map((_, columnIndex) => {
     const found = rows.find((row) => (row.cells[String(columnIndex)] ?? "").trim() !== "");
     return found ? (found.cells[String(columnIndex)] ?? "").trim() : "";
@@ -164,16 +235,10 @@ export async function loadInterviewSheet(
     headers,
     mapping,
     sampleByColumn,
+    replacingCount,
     categories,
     mappingErrors,
-    findings: buildInterviewPreview({
-      sheet,
-      rows,
-      columns,
-      categories,
-      mappingErrors,
-      applicantNames,
-    }),
+    findings,
     pool,
     applicantNames,
     candidatesByRow,

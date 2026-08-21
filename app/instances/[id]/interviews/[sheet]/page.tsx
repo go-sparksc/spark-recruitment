@@ -48,8 +48,16 @@ export default async function InterviewSheetPage({
   // the staging row. Back to the hub rather than an empty screen.
   if (!loaded) redirect(`/instances/${id}/interviews`);
 
-  const { findings, headers, mapping, categories, mappingErrors, candidatesByRow, sampleByColumn } =
-    loaded;
+  const {
+    findings,
+    headers,
+    mapping,
+    categories,
+    mappingErrors,
+    candidatesByRow,
+    sampleByColumn,
+    replacingCount,
+  } = loaded;
   const lowerSheet = sheet.toLowerCase();
 
   const pool: PoolOption[] = loaded.pool.map((candidate) => ({
@@ -366,6 +374,7 @@ export default async function InterviewSheetPage({
             instanceId={id}
             sheet={lowerSheet}
             rowCount={findings.resolvedCount}
+            replacingCount={replacingCount}
             disabled={!findings.canCommit}
           />
         </CardContent>
