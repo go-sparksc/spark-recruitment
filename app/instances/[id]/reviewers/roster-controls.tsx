@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 
 import {
   addReviewer,
@@ -525,25 +525,50 @@ function RosterGrid({
     verdict: { allowed: boolean; text: string };
   } | null>(null);
 
+  /// A refusal, pinned to the row whose control caused it.
+  ///
+  /// **Inline rather than a page-level banner, and that is the whole point.** A
+  /// refusal at the top of the page is invisible to an admin who has scrolled to
+  /// the roster table — which is everybody, since the table is what they came to
+  /// use — and one at the bottom has to be scrolled to. Beside the control that
+  /// caused it, it needs neither: it appears where the admin is already looking,
+  /// and it needs no dismiss button because the next action on that row replaces
+  /// it and a successful one clears it.
+  const [refusal, setRefusal] = useState<{ reviewerId: string; text: string } | null>(null);
+
   const sparkletCount = reviewers.filter((r) => r.isSparklet).length;
 
   const ask = (reviewerId: string, round: Round | null) =>
     start(async () => {
+      setRefusal(null);
       const verdict = await previewRemoval(instanceId, reviewerId, round);
-      setConfirming({
-        reviewerId,
-        round,
-        verdict: {
-          allowed: verdict.allowed,
-          text: verdict.allowed ? verdict.consequence : verdict.reason,
-        },
-      });
+
+      // **A refusal never opens the dialog.** There is nothing to confirm, and
+      // the dialog renders below the table where it has to be scrolled to. Only
+      // a real confirmation — one with a destructive button to press — is worth
+      // taking over the bottom of the screen.
+      if (!verdict.allowed) {
+        setRefusal({ reviewerId, text: verdict.reason });
+        return;
+      }
+
+      setConfirming({ reviewerId, round, verdict: { allowed: true, text: verdict.consequence } });
     });
 
   const confirm = () =>
     start(async () => {
       if (confirming === null) return;
-      onResult(await removeReviewer(instanceId, confirming.reviewerId, confirming.round));
+      const result = await removeReviewer(instanceId, confirming.reviewerId, confirming.round);
+
+      // The action re-checks on its own counts rather than trusting the verdict
+      // the confirmation was built from, so it can still refuse here — a score
+      // submitted between the two, or decision 78. That refusal belongs on the
+      // row as well.
+      if (result.error) {
+        setRefusal({ reviewerId: confirming.reviewerId, text: result.error });
+      } else {
+        onResult(result);
+      }
       setConfirming(null);
     });
 
@@ -577,7 +602,10 @@ function RosterGrid({
           </thead>
           <tbody>
             {reviewers.map((reviewer) => (
-              <tr key={reviewer.id} className="border-b last:border-0">
+              // Fragment: a refused action adds a second <tr> under this one,
+              // and a <tbody> may not contain anything else.
+              <Fragment key={reviewer.id}>
+              <tr className="border-b last:border-0">
                 <td className="py-2 pr-4">
                   <NameCell instanceId={instanceId} reviewer={reviewer} onResult={onResult} />
                 </td>
@@ -610,8 +638,20 @@ function RosterGrid({
                             // so it just happens.
                             if (serves) {
                               ask(reviewer.id, r.value);
+                              return;
+                            }
+
+                            setRefusal(null);
+                            const result = await addRound(instanceId, reviewer.id, r.value);
+
+                            // Decision 66's refusal lands on this row. It used
+                            // to go to the page-level state, which rendered an
+                            // error only while a bulk paste was open — so the
+                            // checkbox reverted and said nothing at all.
+                            if (result.error) {
+                              setRefusal({ reviewerId: reviewer.id, text: result.error });
                             } else {
-                              onResult(await addRound(instanceId, reviewer.id, r.value));
+                              onResult(result);
                             }
                           })
                         }
@@ -631,6 +671,21 @@ function RosterGrid({
                   </Button>
                 </td>
               </tr>
+
+              {/* Directly under the row that caused it, rather than inside a
+                  checkbox cell — the round columns are one checkbox wide and a
+                  sentence in one would push the table sideways. colSpan covers
+                  Name, Sparklet, the three rounds, Assigned and the button. */}
+              {refusal?.reviewerId === reviewer.id ? (
+                <tr className="border-b last:border-0">
+                  <td colSpan={ROUNDS.length + 4} className="pb-2">
+                    <p role="alert" className="text-destructive text-sm">
+                      {refusal.text}
+                    </p>
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
             ))}
           </tbody>
         </table>

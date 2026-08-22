@@ -67,10 +67,24 @@ const ROSTER_FIXED_ADD =
   "The second round has started, so its reviewer roster is fixed. Adding someone now would " +
   "change how many votes it takes to decide an applicant in a pass that is already open.";
 
-const ROSTER_FIXED_REMOVE =
-  "The second round has started, so its reviewer roster is fixed. Removing someone now would " +
-  "delete their votes and could turn an in-progress applicant unanimous without anyone deciding " +
-  "anything. Close the round instead once the passes are done.";
+/// **Names which removal it is refusing.** Both scopes trip the same guard for
+/// the same reason — deleting the reviewer outright withdraws them from the
+/// second round as surely as unchecking the box does — but they are two
+/// different actions, and a refusal that does not say which one it caught reads
+/// as a refusal of whichever the admin *meant*. On the refused path there is no
+/// button left to carry the distinction, so the sentence has to.
+function rosterFixedRemove(round: Round | null): string {
+  const act =
+    round === null
+      ? "Removing them from the roster entirely"
+      : "Withdrawing them from the second round";
+
+  return (
+    `The second round has started, so its reviewer roster is fixed. ${act} would delete their ` +
+    `pass votes and could turn an in-progress applicant unanimous without anyone deciding ` +
+    `anything. Close the round instead once the passes are done.`
+  );
+}
 
 /// Every reviewer on the INSTANCE, with round membership flattened for the round
 /// being staffed. Instance-scoped per PRD decision 22: a reviewer serving
@@ -387,7 +401,7 @@ export async function previewRemoval(
     (round === null || round === Round.SECOND_ROUND) &&
     (await secondRoundRosterIsFixed(instanceId))
   ) {
-    return { allowed: false, reason: ROSTER_FIXED_REMOVE };
+    return { allowed: false, reason: rosterFixedRemove(round) };
   }
 
   return checkReviewerRemoval(
@@ -429,7 +443,7 @@ export async function removeReviewer(
     (round === null || round === Round.SECOND_ROUND) &&
     (await secondRoundRosterIsFixed(instanceId))
   ) {
-    return { error: ROSTER_FIXED_REMOVE };
+    return { error: rosterFixedRemove(round) };
   }
 
   // One read, used for both the verdict and the audit row, so the number the
