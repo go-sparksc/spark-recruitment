@@ -368,9 +368,27 @@ export async function previewRemoval(
 
   const reviewer = await prisma.reviewer.findFirst({
     where: { id: reviewerId, instanceId },
-    select: { firstName: true, lastName: true },
+    select: { firstName: true, lastName: true, rounds: true },
   });
   if (!reviewer) return { allowed: false, reason: "That reviewer no longer exists." };
+
+  // **Decision 78 belongs in the PREVIEW as well as in the action.** It was in
+  // the action only, so the dialog computed its verdict without knowing the rule
+  // and offered a destructive "Remove" button that the action would then refuse.
+  // A confirmation that offers an action the system will not perform is worse
+  // than no confirmation: the admin has already decided by the time they are
+  // told no, and the dialog spent its one chance to explain on something else.
+  //
+  // Same condition as `removeReviewer`, including `round === null` — deleting
+  // the reviewer outright withdraws them from the second round as surely as the
+  // round-scoped form does, and takes their PassVote rows with it.
+  if (
+    reviewer.rounds.includes(Round.SECOND_ROUND) &&
+    (round === null || round === Round.SECOND_ROUND) &&
+    (await secondRoundRosterIsFixed(instanceId))
+  ) {
+    return { allowed: false, reason: ROSTER_FIXED_REMOVE };
+  }
 
   return checkReviewerRemoval(
     {

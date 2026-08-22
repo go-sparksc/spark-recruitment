@@ -372,7 +372,23 @@ export function checkReviewerRemoval(
   if (assignmentCount === 0) {
     return {
       allowed: true,
-      consequence: `${request.reviewerName} has no assignments. Nothing else is affected.`,
+      // **Names the scope, like every other branch.** This one used to read
+      // "X has no assignments. Nothing else is affected." for BOTH a withdrawal
+      // from one round and a delete of the reviewer entirely — the same sentence
+      // for the reversible action and the irreversible one.
+      //
+      // It is the branch where that matters most, because it is the one a
+      // second-round reviewer always lands in: they hold no written
+      // assignments, so `assignmentCount` is 0 and the wording above never
+      // reaches them. An admin unchecking one round was shown the text they
+      // would have been shown for "Remove", and had no way to tell from the
+      // dialog which one they had opened.
+      consequence:
+        request.roundLabel === null
+          ? `${request.reviewerName} has no assignments. Removing them deletes the reviewer ` +
+            `entirely, from every round they serve.`
+          : `${request.reviewerName} has no assignments in the ${request.roundLabel}. They are ` +
+            `withdrawn from that round only and stay on the roster for any other.`,
     };
   }
 

@@ -642,6 +642,32 @@ describe("checkReviewerRemoval — PRD decision 24", () => {
       if (verdict.allowed) expect(verdict.consequence).toContain("no assignments");
     });
 
+    it("says WHICH removal it is when the reviewer holds nothing", () => {
+      // Regression. This branch used to return one sentence for both scopes —
+      // "Priya Raman has no assignments. Nothing else is affected." — so the
+      // confirmation for withdrawing someone from a single round was word for
+      // word the confirmation for deleting them from every round.
+      //
+      // It is the branch a second-round reviewer ALWAYS lands in, because they
+      // hold no written assignments, so the two paths that read differently for
+      // everyone else read identically for exactly the people decision 78 is
+      // about. Found by the owner clicking an unchecked box and being shown
+      // what looked like a full delete.
+      const whole = checkReviewerRemoval(priya, impact({ assignmentCount: 0 }));
+      const round = checkReviewerRemoval(
+        { reviewerName: "Priya Raman", roundLabel: "second round" },
+        impact({ assignmentCount: 0 }),
+      );
+
+      expect(whole.allowed && round.allowed).toBe(true);
+      if (!whole.allowed || !round.allowed) return;
+
+      expect(whole.consequence).not.toBe(round.consequence);
+      expect(whole.consequence).toContain("every round");
+      expect(round.consequence).toContain("second round");
+      expect(round.consequence).toContain("stay on the roster");
+    });
+
     it("never returns an empty consequence", () => {
       // "Are you sure?" with nothing after it is the dialog everyone clicks
       // through without reading.

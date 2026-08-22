@@ -267,17 +267,28 @@ export function RosterControls({
               {unresolved} line{unresolved === 1 ? "" : "s"} still to confirm.
             </p>
           ) : null}
-          {state.error ? (
-            <p role="alert" className="text-destructive text-sm">
-              {state.error}
-            </p>
-          ) : null}
           <Button disabled={!canCommit} onClick={commit}>
             {pending ? "Importing…" : "Import"}
           </Button>
         </div>
       ) : null}
 
+      {/* **Outside the paste block, which is where the error used to live.**
+          `state` is shared: the grid below writes into it through `onResult`,
+          and so does every rename. But the error was only rendered while a
+          paste was open, so a refusal from the grid was stored and never shown
+          — the checkbox reverted on the next render and the admin was told
+          nothing at all.
+
+          Decision 66's refusal is what exposed it, being the first grid action
+          that fails routinely, but it was swallowing setSparklet's and
+          removeReviewer's errors just as silently. The message has always
+          rendered here; the error simply was not beside it. */}
+      {state.error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {state.error}
+        </p>
+      ) : null}
       {state.message ? <p className="text-sm text-emerald-600">{state.message}</p> : null}
 
       <RosterGrid instanceId={instanceId} reviewers={reviewers} onResult={setState} />
@@ -628,7 +639,15 @@ function RosterGrid({
       {confirming !== null ? (
         <div
           role="alertdialog"
-          aria-label="Confirm removal"
+          // Names the scope. Two different actions shared one dialog title, and
+          // the narrower of them is the reversible one.
+          aria-label={
+            confirming.round === null
+              ? "Confirm removing this reviewer entirely"
+              : `Confirm withdrawing this reviewer from the ${roundLabel(
+                  confirming.round,
+                ).toLowerCase()}`
+          }
           className="space-y-3 rounded-md border p-4"
         >
           <p className={confirming.verdict.allowed ? "text-sm" : "text-destructive text-sm"}>
@@ -637,7 +656,14 @@ function RosterGrid({
           <div className="flex gap-2">
             {confirming.verdict.allowed ? (
               <Button size="sm" variant="destructive" disabled={pending} onClick={confirm}>
-                {pending ? "Removing…" : "Remove"}
+                {/* The button says which of the two it is. "Remove" on a
+                    round withdrawal reads as the delete beside it, and the
+                    button is the part people read instead of the sentence. */}
+                {pending
+                  ? "Removing…"
+                  : confirming.round === null
+                    ? "Remove from roster"
+                    : `Withdraw from ${roundLabel(confirming.round).toLowerCase()}`}
               </Button>
             ) : null}
             <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
