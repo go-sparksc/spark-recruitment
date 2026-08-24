@@ -983,6 +983,16 @@ and decision 79, checked in the same place.
 
     Consequence for the build: `secondRoundRosterIsFixed` reads whether the instance has any `Pass`, rather than reading `currentStage`. The refusal messages keep 66 and 78's reasoning but name the pass rather than the round.
 
+85. **Withdrawing a reviewer from `SECOND_ROUND` deletes their `ConflictOfInterest` rows for that round. RESOLVED.** Matches how assignments are already handled on withdrawal — round-scoped records do not outlive the reviewer's membership in the round.
+
+    Decision 68's "sticky across all passes" governs a conflict staying in force while the reviewer *remains active and eligible to vote*; it says nothing about what happens once they are removed from the round entirely, and nothing in its reasoning is protected by keeping an orphaned row around. The alternative — retaining it — creates the actual problem: a withdrawn-then-re-added reviewer returns with old conflicts silently reattached, which the admin has no way to see or explain. If a returning reviewer still has the conflict, they re-flag it; that cost is trivial.
+
+    This also resolves the roster-blind conflict count on the hub and the passes page as a side effect, since an orphaned row can no longer exist to be miscounted.
+
+    Deleting the reviewer outright already did this: `ConflictOfInterest.reviewer` is `onDelete: Cascade`, so a full delete has always taken the conflicts with it. This decision makes the round-scoped withdrawal behave the same way, which is what decision 84 made reachable — before it, the roster locked at the moment the second-round dashboard became usable, so flagging a conflict and then being withdrawn could not both happen.
+
+    No separate audit entry: the withdrawal already writes one `AuditLog` row for the removal inside the same transaction, and the deletion is part of that action rather than a second one.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
