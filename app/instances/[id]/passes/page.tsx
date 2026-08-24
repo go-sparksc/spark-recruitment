@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PassControls } from "./pass-controls";
@@ -94,7 +95,14 @@ export default async function PassesPage({ params }: { params: Promise<{ id: str
         <Card className="mt-8">
           <CardContent className="divide-y p-0">
             {summaries.map((summary) => (
-              <div key={summary.id} className="px-6 py-4">
+              // A link, so the pass detail has a way in. The hub exists because
+              // two whole surfaces once had none; a pass reachable only by typing
+              // its id would be the same mistake one level down.
+              <Link
+                key={summary.id}
+                href={`/instances/${instance.id}/passes/${summary.id}`}
+                className="hover:bg-muted/50 block px-6 py-4 transition-colors"
+              >
                 <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
                   <span className="font-medium">
                     Pass {summary.ordinal}
@@ -114,7 +122,7 @@ export default async function PassesPage({ params }: { params: Promise<{ id: str
                 </div>
 
                 <p className="text-muted-foreground mt-1 text-sm">{describe(summary)}</p>
-              </div>
+              </Link>
             ))}
           </CardContent>
         </Card>

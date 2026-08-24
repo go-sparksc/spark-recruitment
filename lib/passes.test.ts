@@ -22,6 +22,7 @@ import {
   VoteValue,
 } from "@/generated/prisma/enums";
 import {
+  RESOLUTION_LABEL,
   SECOND_ROUND_POOL,
   buildPassGrid,
   decisionOutcomeFor,
@@ -30,6 +31,7 @@ import {
   isTerminal,
   needsAdminAtClose,
   passCreationBlock,
+  resolutionLabel,
   resolveApplicant,
   resolvePass,
   statusFor,
@@ -647,6 +649,31 @@ describe("voteAvailability", () => {
     ]) {
       const availability = voteAvailability({ ...open, storedResolution: resolution });
       expect(availability.kind === "SETTLED").toBe(!isMutableResolution(resolution));
+    }
+  });
+});
+
+describe("resolutionLabel", () => {
+  it("names every resolution in §7.4's vocabulary", () => {
+    expect(resolutionLabel(PassResolution.SPARKLET)).toBe("Sparklet");
+    expect(resolutionLabel(PassResolution.REJECTED)).toBe("Rejected");
+    expect(resolutionLabel(PassResolution.CARRIED)).toBe("Carried");
+    expect(resolutionLabel(PassResolution.NEEDS_ADMIN)).toBe("Needs an admin");
+  });
+
+  /// Null is not a fifth resolution: the pass has not finished with them.
+  it("distinguishes unresolved from every stored value", () => {
+    expect(resolutionLabel(null)).toBe("Unresolved");
+
+    const stored = Object.values(PassResolution).map((value) => resolutionLabel(value));
+    expect(stored).not.toContain("Unresolved");
+  });
+
+  /// The guard the type already gives, asserted so a new enum member cannot ship
+  /// a blank cell if someone widens the map's type later.
+  it("has a label for every member of the enum", () => {
+    for (const value of Object.values(PassResolution)) {
+      expect(RESOLUTION_LABEL[value]).toBeTruthy();
     }
   });
 });

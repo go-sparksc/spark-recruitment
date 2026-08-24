@@ -548,3 +548,28 @@ export function voteAvailability(input: VoteAvailabilityInput): VoteAvailability
 
   return { kind: "OPEN", current: input.currentVote };
 }
+
+// ---------------------------------------------------------------------------
+// Vocabulary
+// ---------------------------------------------------------------------------
+
+/// How a resolution is named on an admin surface, in §7.4's own words.
+///
+/// Here rather than in a component because the pass list, the member list and
+/// FR-18's grid all render the same five states, and three private label maps is
+/// three chances for one screen to call `NEEDS_ADMIN` something the next screen
+/// does not. Exhaustive over the enum by type, so adding a `PassResolution`
+/// member fails the typecheck here rather than rendering blank somewhere.
+export const RESOLUTION_LABEL: Record<PassResolution, string> = {
+  [PassResolution.SPARKLET]: "Sparklet",
+  [PassResolution.REJECTED]: "Rejected",
+  [PassResolution.CARRIED]: "Carried",
+  [PassResolution.NEEDS_ADMIN]: "Needs an admin",
+};
+
+/// `null` is not a resolution and is deliberately not in the map above: it means
+/// the pass has not finished with this applicant, which is a different kind of
+/// answer from the four that have.
+export function resolutionLabel(resolution: PassResolution | null): string {
+  return resolution === null ? "Unresolved" : RESOLUTION_LABEL[resolution];
+}

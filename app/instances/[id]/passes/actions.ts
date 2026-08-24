@@ -2,9 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 
-import { InstanceStage, PassResolution, PassStatus, Round } from "@/generated/prisma/enums";
+import {
+  ApplicantStatus,
+  DecisionActor,
+  DecisionOutcome,
+  InstanceStage,
+  PassResolution,
+  PassStatus,
+  Round,
+} from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
-import { SECOND_ROUND_POOL, passCreationBlock, resolvePass } from "@/lib/passes";
+import { SECOND_ROUND_POOL, isTerminal, passCreationBlock, resolvePass } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export interface PassActionState {
@@ -250,4 +258,120 @@ export async function closePass(
         ? ` ${unresolved} applicant${unresolved === 1 ? "" : "s"} carried forward unresolved.`
         : ""),
   };
+}
+
+/// FR-17: "An admin can manually reject any applicant within a pass, excluding
+/// them from future passes." Clauses 17l, 17m, 17t and decision 71.
+///
+/// **One transaction, four writes, and the order of the guards matters.** The
+/// pass row records what happened to the applicant *in this pass*; the applicant
+/// status is what excludes them from the next one (17m, falling out of 17b
+/// reading `status = ACTIVE`); the `Decision` row is decision 69's `actor =
+/// ADMIN` half; the audit row is §8.
+///
+/// **A terminal row is never overwritten.** An applicant already resolved
+/// SPARKLET by a unanimous vote is not rejectable — that is not an override, it
+/// is a contradiction, and §7.4 sends corrections after the fact through the
+/// applicant override rather than back through the pass. A `CARRIED` or
+/// `NEEDS_ADMIN` row *is* rejectable: neither decided anything about the
+/// applicant, and 17l says "any applicant", which is precisely the population
+/// those two describe.
+export async function manuallyReject(
+  _prev: PassActionState,
+  formData: FormData,
+): Promise<PassActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const passId = String(formData.get("passId") ?? "");
+  const applicantId = String(formData.get("applicantId") ?? "");
+  await requireInstance(instanceId, path(instanceId));
+
+  const pass = await prisma.pass.findFirst({
+    where: { id: passId, instanceId },
+    select: { id: true, ordinal: true, status: true },
+  });
+  if (!pass) return { error: "No such pass in this instance." };
+
+  // Decision 71 scopes this to an open pass: "the admin's manual reject during
+  // an open pass". A closed pass is a record of what happened, and §7.4 refuses
+  // to reopen one — corrections there go through an override on the applicant,
+  // which is FR-19's surface and not this one.
+  if (pass.status !== PassStatus.OPEN) {
+    return {
+      error: `Pass ${pass.ordinal} is closed. A closed pass is not reopened; correct this on the applicant instead.`,
+    };
+  }
+
+  const membership = await prisma.passApplicant.findUnique({
+    where: { passId_applicantId: { passId: pass.id, applicantId } },
+    select: {
+      resolution: true,
+      applicant: { select: { id: true, status: true } },
+    },
+  });
+
+  if (!membership) return { error: "That applicant is not in this pass." };
+
+  if (isTerminal(membership.resolution)) {
+    return {
+      error: `This pass has already resolved that applicant. Reload to see where they stand.`,
+    };
+  }
+
+  // The applicant's own status, checked separately from the pass row: a manual
+  // reject in an earlier pass leaves this pass's row untouched, so the row can
+  // read null while the applicant is already REJECTED.
+  if (membership.applicant.status !== ApplicantStatus.ACTIVE) {
+    return { error: "That applicant has already been decided." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.passApplicant.update({
+      where: { passId_applicantId: { passId: pass.id, applicantId } },
+      data: { resolution: PassResolution.REJECTED, resolvedAt: new Date() },
+    });
+
+    // 17m. This is the write that excludes them from every future pass, because
+    // membership is recomputed from `status` at each creation.
+    await tx.applicant.update({
+      where: { id: applicantId },
+      data: { status: ApplicantStatus.REJECTED },
+    });
+
+    // Decision 69: same table and pattern as the other two rounds, `actor =
+    // ADMIN` because a person did this rather than a tally.
+    await tx.decision.upsert({
+      where: { applicantId_stage: { applicantId, stage: Round.SECOND_ROUND } },
+      create: {
+        applicantId,
+        stage: Round.SECOND_ROUND,
+        outcome: DecisionOutcome.REJECT,
+        actor: DecisionActor.ADMIN,
+      },
+      update: { outcome: DecisionOutcome.REJECT, actor: DecisionActor.ADMIN },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: "MANUAL_REJECT_IN_PASS",
+        // The applicant id, which is what §8's entityId is for, and never the
+        // name — 17t. `previousValue` carries what this overwrote, so the row
+        // says what changed rather than only that something did.
+        entityType: "Applicant",
+        entityId: applicantId,
+        previousValue: {
+          passId: pass.id,
+          ordinal: pass.ordinal,
+          previousResolution: membership.resolution,
+          previousStatus: membership.applicant.status,
+        },
+      },
+    });
+  });
+
+  revalidateAll(instanceId);
+  revalidatePath(`/instances/${instanceId}/passes/${pass.id}`);
+
+  return { message: `Applicant rejected in pass ${pass.ordinal}.` };
 }
