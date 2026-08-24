@@ -963,6 +963,14 @@ and decision 79, checked in the same place.
 
     Consequence for the build: `plans/phase-6.md`'s Slice 8 line said "the vote control on both FR-16 surfaces" and is narrowed to the profile by this decision.
 
+83. **The vote submission response names no outcome, not just no count. RESOLVED.** A successful pass vote returns "Vote recorded." and nothing further. It does not say the applicant became a Sparklet, or was rejected, or that the pass has moved on from them; the control's settled state says the pass has finished with this applicant without saying which way it went.
+
+    **This is decision 74 applied to a new surface, not a separate judgement.** 74 keeps other reviewers' pass votes from a reviewer, closed pass or not, and §7.4 says counts are never revealed. An outcome is the same fact in a smaller package. An applicant resolves only when every eligible reviewer has submitted, so "this applicant is now a Sparklet" tells the reviewer who cast the last vote that *every other eligible reviewer voted yes* — a complete reading of the tally, derived without ever seeing one. "Rejected" says the same in the other direction, and even a neutral "the pass has moved on" reveals that theirs was the final outstanding vote and that the result was unanimous either way. The leak arrives through the submission response instead of through a tally, and the response is the surface nobody thought to check, because it feels like feedback rather than data.
+
+    **What this costs, on the same terms 74 already accepted:** a reviewer gets no confirmation of what their vote did. They are told it was recorded and nothing more, which is less than any other submit action in the product gives back. That is the price of 74, paid at the moment it actually bites rather than only in the places it was easy to pay. Two things soften it without breaking the rule: the vote itself is echoed back ("You voted yes"), which is their own data, and a resolved applicant simply leaves their list, which reveals that a decision happened but not what it was or how anyone else voted.
+
+    The admin's FR-18 grid is unaffected and remains the only surface in the product that renders a pass vote.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
