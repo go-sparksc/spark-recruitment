@@ -946,6 +946,13 @@ rejects that applicant (17l), or the round closes into NEEDS_ADMIN. This
 is decision 78 working as intended — the alternative is the silent
 unanimity shift 78 exists to prevent. No tool is added for it in v1.
 
+81. Pass creation is refused when Instance.currentStage is not
+SECOND_ROUND. RESOLVED, built beyond FR-17's clause list. §7.4's close
+rule — "so a COMPLETE instance cannot hold an OPEN one" — is the same
+invariant read forward: creation is blocked before SECOND_ROUND for the
+identical reason it's blocked after. Same guard function as 17c, 17w,
+and decision 79, checked in the same place.
+
 82. **A second-round reviewer votes from the applicant's profile, not from the list. RESOLVED.** FR-16's list is a reading and recusal surface; the vote control lives on the profile and nowhere else, and the list renders no vote state of its own.
 
     **This is deliberately not an application of the every-tap-counts rule.** That rule governs fast, independent review surfaces — FR-14's first-round list, where a vote is a reaction to two numbers and a paragraph, and where an extra tap really is a review that does not get completed. Second-round voting is not that surface. §7.4 and FR-16 both frame this round as reading the complete applicant profile — demographics, written responses, written scores and notes, interview scores and notes — and deliberating over it, and FR-17 requires an explicit submit for exactly that reason. **Requiring the profile to be open before voting is the correct tradeoff, not friction to be designed away.** A vote cast from a row nobody opened is the outcome the requirement is written to prevent, and saving a tap to allow it would be optimizing the wrong quantity.
