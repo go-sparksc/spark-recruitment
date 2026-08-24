@@ -245,7 +245,7 @@ CLAUDE.md's mechanical guard, re-ticked against the diff before each commit. FR-
 
 ## Day 2 — FR-17 and FR-18
 
-**Slice 6 — the one-open-pass index.** Migration adding `CREATE UNIQUE INDEX "Pass_one_open_per_instance" ON "Pass"("instanceId") WHERE "status" = 'OPEN'`, hand-finished SQL via `prisma migrate diff --from-config-datasource`, then `migrate deploy`. §5 gains the index beside the model. `prisma/checks/passes.ts` asserts it bites through raw SQL and comes back as SQLSTATE 23505 naming the index. **Restart `next dev` after the generate.**
+**Slice 6 — the one-open-pass index.** Migration adding `CREATE UNIQUE INDEX "Pass_instanceId_statusOpen_key" ON "Pass"("instanceId") WHERE "status" = 'OPEN'`, hand-finished SQL via `prisma migrate diff --from-config-datasource`, then `migrate deploy`. §5 gains the index beside the model. `prisma/checks/passes.ts` asserts it bites through raw SQL and comes back as SQLSTATE 23505 naming the index. **Restart `next dev` after the generate.**
 
 **Slice 7 — pass creation and close.** `/instances/[id]/passes`: create (guards 17c, 17w, and decision 79's empty roster; membership per 17b; immediate `resolvePass` so an all-COI applicant carries `NEEDS_ADMIN` from the start), and close (17n — status and `closedAt`, nothing else).
 

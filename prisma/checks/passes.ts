@@ -23,7 +23,7 @@ import { SEED_INSTANCE_ID, createSeedClient } from "../seed/client";
 
 const prisma = createSeedClient();
 
-const ONE_OPEN_INDEX = "Pass_one_open_per_instance";
+const ONE_OPEN_INDEX = "Pass_instanceId_statusOpen_key";
 
 // Ordinals well clear of any real pass, and distinct from each other so that
 // Pass_instanceId_ordinal_key cannot be what fires on the duplicate.
