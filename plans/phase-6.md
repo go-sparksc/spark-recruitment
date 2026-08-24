@@ -210,7 +210,7 @@ CLAUDE.md's mechanical guard, re-ticked against the diff before each commit. FR-
 | 17w | Table: zero ACTIVE applicants → block creation | 7 | Guard, message says the pool is resolved |
 | 17x | Table: reviewer added mid-round | 4 | Decision 66 replaces this row: the roster refuses the add |
 | 17y | Table: admin reopens a closed pass → not supported | 7 | No reopen action exists; corrections go through 17l |
-| 17z | "counts are never revealed to reviewers" | 3, 8 | Decision 74. No reviewer query loads another reviewer's `PassVote` |
+| 17z | "counts are never revealed to reviewers" | 3, 8 | Decision 74. **Revealed**, which is §7.4's word and a narrower claim than *read*: no reviewer-facing surface renders another reviewer's `PassVote`, and the submit response carries no count, no tally and no outcome. The profile loads this reviewer's own vote and no other. Resolving an applicant does read every vote for them, server-side inside the submitting transaction, because it is not computable without them — that read reaches no client. Decision 83 covers why the response withholds the outcome as well as the count |
 
 ### FR-18 — pass dashboard
 
