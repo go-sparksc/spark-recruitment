@@ -971,6 +971,18 @@ and decision 79, checked in the same place.
 
     The admin's FR-18 grid is unaffected and remains the only surface in the product that renders a pass vote.
 
+84. **The second-round roster locks when the first pass is created, not when the round begins. RESOLVED, amending decisions 66 and 78.** Both of those fixed the roster at `Instance.currentStage = SECOND_ROUND`. The trigger moves to the existence of a `Pass` on the instance: before the first pass exists the roster is freely editable in both directions, and from the moment pass 1 is created it is completely fixed, adds and removals alike. Same single hard cutover 66 and 78 already describe — moved to the condition that actually carries their reasoning.
+
+    **What 66 and 78 protect is a denominator with votes riding on it.** Adding a reviewer mid-round changes how many votes it takes to decide an applicant; withdrawing one shrinks the denominator retroactively and can make an applicant unanimous the instant they leave. Both of those are facts about a pass that is already open. **Before any pass exists there is no denominator and no vote in flight, however many reviewers are listed**, so the old trigger was locking against a risk that had not yet come into being.
+
+    **This closes a dead end that was reachable in the built product.** FR-15's finalize moves `currentStage` to `SECOND_ROUND` and does not require a second-round roster to exist first. An admin who finalized without one landed in a state where decision 79 blocked pass creation until reviewers were added, and decision 66 refused to add them because the round had started — two guards that are mutually exclusive by construction, with no path out inside the product. The second round simply could not be run. Decision 79's message ("add reviewers to the second round before creating a pass") named the fix correctly and the application refused it; under this decision the message becomes true.
+
+    **Why not "unlock while the roster is empty".** That was the smaller change and it does not work: it permits exactly one add before re-engaging, so an admin still cannot build out a roster of eleven. The condition has to be about whether voting has begun, not about how many names are on the list.
+
+    A `COMPLETE` instance stays locked without a special case: closing the second round is blocked unless a pass exists (FR-17), so every `COMPLETE` instance necessarily has one. The written and first-round rosters are untouched by this and by 66 and 78 — those rounds are over and nothing recomputes over them.
+
+    Consequence for the build: `secondRoundRosterIsFixed` reads whether the instance has any `Pass`, rather than reading `currentStage`. The refusal messages keep 66 and 78's reasoning but name the pass rather than the round.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
