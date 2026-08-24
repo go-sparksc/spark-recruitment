@@ -296,8 +296,16 @@ export async function manuallyReject(
   // to reopen one — corrections there go through an override on the applicant,
   // which is FR-19's surface and not this one.
   if (pass.status !== PassStatus.OPEN) {
+    // **Names only what exists today.** This used to say "correct this on the
+    // applicant instead", which is FR-19's override — a Phase 7 surface. A
+    // message that points at an unbuilt screen is worse than no message: it
+    // sends an admin looking for something that is not there, and reads as a
+    // feature they have failed to find rather than one nobody has written.
     return {
-      error: `Pass ${pass.ordinal} is closed. A closed pass is not reopened; correct this on the applicant instead.`,
+      error:
+        `Pass ${pass.ordinal} is closed and cannot be reopened. If this applicant is still ` +
+        `active, reject them from the open pass, or from the next pass once you create one. ` +
+        `Reload this page to see where they stand.`,
     };
   }
 
