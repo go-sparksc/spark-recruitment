@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { InstanceStage, Round } from "@/generated/prisma/enums";
+import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
@@ -50,22 +50,29 @@ function path(instanceId: string) {
 /// Neither is a thing an admin should be able to do from a screen that mentions
 /// no passes.
 ///
-/// `COMPLETE` is locked too. The round is over; its roster is a historical fact.
+/// **Decision 84 moved this trigger from `currentStage` to the first pass.**
+/// What 66 and 78 protect is a denominator with votes riding on it, and before
+/// any pass exists there is no denominator and no vote in flight however many
+/// reviewers are listed. Locking at `currentStage = SECOND_ROUND` guarded
+/// against a risk that had not yet come into being — and produced a dead end:
+/// FR-15's finalize sets that stage without requiring a roster, so an admin who
+/// finalized without one could not create a pass (decision 79) and could not add
+/// reviewers (decision 66), with no way out inside the product.
+///
+/// `COMPLETE` needs no special case any more. Closing the second round is
+/// blocked unless a pass exists, so every `COMPLETE` instance has one and is
+/// locked by the same condition.
 async function secondRoundRosterIsFixed(instanceId: string): Promise<boolean> {
-  const instance = await prisma.instance.findUnique({
-    where: { id: instanceId },
-    select: { currentStage: true },
-  });
-
-  return (
-    instance?.currentStage === InstanceStage.SECOND_ROUND ||
-    instance?.currentStage === InstanceStage.COMPLETE
-  );
+  // Passes exist only for the second round, so their existence is exactly "has
+  // voting begun" — the question 66 and 78 were reaching for.
+  const passes = await prisma.pass.count({ where: { instanceId } });
+  return passes > 0;
 }
 
 const ROSTER_FIXED_ADD =
-  "The second round has started, so its reviewer roster is fixed. Adding someone now would " +
-  "change how many votes it takes to decide an applicant in a pass that is already open.";
+  "The second round's first pass has been created, so its reviewer roster is fixed. Adding " +
+  "someone now would change how many votes it takes to decide an applicant in a pass that is " +
+  "already under way.";
 
 /// **Names which removal it is refusing.** Both scopes trip the same guard for
 /// the same reason — deleting the reviewer outright withdraws them from the
@@ -80,9 +87,9 @@ function rosterFixedRemove(round: Round | null): string {
       : "Withdrawing them from the second round";
 
   return (
-    `The second round has started, so its reviewer roster is fixed. ${act} would delete their ` +
-    `pass votes and could turn an in-progress applicant unanimous without anyone deciding ` +
-    `anything. Close the round instead once the passes are done.`
+    `The second round's first pass has been created, so its reviewer roster is fixed. ${act} ` +
+    `would delete their pass votes and could turn an in-progress applicant unanimous without ` +
+    `anyone deciding anything. Close the round instead once the passes are done.`
   );
 }
 

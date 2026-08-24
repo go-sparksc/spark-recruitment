@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AccessCodeCard } from "./access-code-card";
 import { RosterControls, type ReviewerRow } from "./roster-controls";
 import { InstanceCrumbs } from "../instance-crumbs";
-import { InstanceStage, Round } from "@/generated/prisma/enums";
+import { Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -65,12 +65,15 @@ export default async function ReviewersPage({
     },
   });
 
-  // Decisions 66 and 78, on the round being staffed. COMPLETE counts as fixed
-  // too: the round is over and its roster is a historical fact.
+  // Decisions 66 and 78 as amended by 84: the trigger is the first pass, not the
+  // stage. Read the same way the action reads it — a page that computes the lock
+  // from a different condition than the action enforces is a page that offers a
+  // control the action then refuses, which is the shape Slice 4 existed to fix.
+  //
+  // COMPLETE needs no special case: closing the round is blocked without a pass,
+  // so a COMPLETE instance always has one.
   const rosterFixed =
-    round === Round.SECOND_ROUND &&
-    (instance.currentStage === InstanceStage.SECOND_ROUND ||
-      instance.currentStage === InstanceStage.COMPLETE);
+    round === Round.SECOND_ROUND && (await prisma.pass.count({ where: { instanceId: id } })) > 0;
 
   const rows: ReviewerRow[] = reviewers.map((reviewer) => ({
     id: reviewer.id,
@@ -135,10 +138,10 @@ export default async function ReviewersPage({
         <p className="rounded-md border p-4 text-sm">
           <span className="font-medium">This roster is fixed.</span>{" "}
           <span className="text-muted-foreground">
-            The second round has started, and how many votes it takes to decide an applicant
-            depends on exactly who is on it. Neither adding nor removing a second-round reviewer
-            is possible until the round is closed. Names can still be corrected, and the written
-            and first-round rosters are unaffected.
+            The second round&rsquo;s first pass has been created, and how many votes it takes to
+            decide an applicant depends on exactly who is on this roster. Neither adding nor
+            removing a second-round reviewer is possible from here on. Names can still be
+            corrected, and the written and first-round rosters are unaffected.
           </span>
         </p>
       ) : null}
