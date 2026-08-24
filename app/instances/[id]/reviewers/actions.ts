@@ -495,6 +495,17 @@ export async function removeReviewer(
     // reviewer row survives, so no cascade would fire and the assignments would
     // otherwise be left pointing at a round the reviewer no longer serves.
     await tx.assignment.deleteMany({ where: { instanceId, reviewerId, round } });
+
+    // Decision 85, and it is the same sentence as the one above: a round-scoped
+    // record does not outlive the reviewer's membership in the round. Deleting
+    // the reviewer outright already did this through `onDelete: Cascade`; this
+    // makes the withdrawal match, which decision 84 is what made reachable.
+    //
+    // Kept, the row would silently reattach if the reviewer were added back
+    // before the first pass — a conflict the admin cannot see and cannot
+    // explain. Decision 68's stickiness is about a conflict holding while the
+    // reviewer is still eligible to vote, not about outliving their membership.
+    await tx.conflictOfInterest.deleteMany({ where: { reviewerId, round } });
     await tx.reviewer.update({
       where: { id: reviewerId },
       data: { rounds: reviewer.rounds.filter((r) => r !== round) },
