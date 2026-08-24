@@ -490,3 +490,61 @@ export function summarizePass(source: PassSummarySource): PassSummary {
     ...counts,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Whether one reviewer may vote right now
+// ---------------------------------------------------------------------------
+
+export type VoteAvailability =
+  /// No pass is open. FR-17: a vote lands in the currently open pass, and
+  /// without one there is nowhere for it to land.
+  | { kind: "NO_PASS" }
+  /// Membership was fixed at creation (17b), so an applicant who became active
+  /// afterwards is genuinely not in this pass. Defensive: nothing in the
+  /// product makes a REJECTED applicant ACTIVE again.
+  | { kind: "NOT_IN_PASS" }
+  /// Clause 17f. Computed from the conflict, never from a stored SKIP row.
+  | { kind: "CONFLICT" }
+  /// The pass has already concluded on this applicant, so decision 75's window
+  /// has shut on its own.
+  | { kind: "SETTLED"; resolution: PassResolution }
+  | { kind: "OPEN"; current: VoteValue | null };
+
+export interface VoteAvailabilityInput {
+  hasOpenPass: boolean;
+  isMember: boolean;
+  hasConflict: boolean;
+  storedResolution: PassResolution | null;
+  /// **This reviewer's own vote and no one else's.** Decision 74 and clause
+  /// 17z: no reviewer surface loads another reviewer's `PassVote`, so there is
+  /// no count here to leak.
+  currentVote: VoteValue | null;
+}
+
+/// May this reviewer vote on this applicant, and what does the control show?
+///
+/// **One function, read by the profile and by the action.** 17f asks for both
+/// halves — "the control is absent, and the action refuses" — and deriving them
+/// separately is how a control disappears for one reason while the action
+/// refuses for another. Same posture as `passCreationBlock`.
+///
+/// Order is the specification. The conflict outranks the stored resolution
+/// because decision 68 has already deleted this reviewer's vote: they are SKIP
+/// whatever the row says, and telling them the pass has settled would be
+/// answering a question they did not ask.
+export function voteAvailability(input: VoteAvailabilityInput): VoteAvailability {
+  if (!input.hasOpenPass) return { kind: "NO_PASS" };
+  if (!input.isMember) return { kind: "NOT_IN_PASS" };
+  if (input.hasConflict) return { kind: "CONFLICT" };
+
+  // `isMutableResolution` is the same predicate the persistence layer writes
+  // through, so a row this refuses to vote on is exactly a row a recount refuses
+  // to overwrite. NEEDS_ADMIN is mutable: decision 76 lets an admin hand this
+  // reviewer back their eligibility, and the vote they then cast is the whole
+  // point of that decision.
+  if (!isMutableResolution(input.storedResolution) && input.storedResolution !== null) {
+    return { kind: "SETTLED", resolution: input.storedResolution };
+  }
+
+  return { kind: "OPEN", current: input.currentVote };
+}

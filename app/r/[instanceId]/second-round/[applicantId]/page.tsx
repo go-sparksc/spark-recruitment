@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConflictControl } from "../conflict-control";
-import { Round } from "@/generated/prisma/enums";
-import { SECOND_ROUND_POOL } from "@/lib/passes";
+import { VoteButtons } from "./vote-buttons";
+import { PassStatus, Round } from "@/generated/prisma/enums";
+import { SECOND_ROUND_POOL, voteAvailability } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { buildApplicantView } from "@/lib/review";
@@ -115,6 +116,45 @@ export default async function SecondRoundApplicantPage({
   ]);
 
   if (!applicant) notFound();
+
+  // FR-17's vote control. **The open pass is resolved here, server-side** — 17d
+  // says a vote lands in the currently open pass, so no pass id ever travels
+  // through the client.
+  //
+  // **The only `PassVote` this page loads is this reviewer's own**, per decision
+  // 74 and clause 17z. Not fetched and hidden: not fetched. There is no count in
+  // the RSC payload to leak, which is the §6 posture applied to votes.
+  const openPass = await prisma.pass.findFirst({
+    where: { instanceId, status: PassStatus.OPEN },
+    select: { id: true },
+  });
+
+  const [membership, ownVote] = openPass
+    ? await Promise.all([
+        prisma.passApplicant.findUnique({
+          where: { passId_applicantId: { passId: openPass.id, applicantId: applicant.id } },
+          select: { resolution: true },
+        }),
+        prisma.passVote.findUnique({
+          where: {
+            passId_applicantId_reviewerId: {
+              passId: openPass.id,
+              applicantId: applicant.id,
+              reviewerId: reviewer.id,
+            },
+          },
+          select: { value: true },
+        }),
+      ])
+    : [null, null];
+
+  const availability = voteAvailability({
+    hasOpenPass: openPass !== null,
+    isMember: membership !== null,
+    hasConflict: applicant.conflicts.length > 0,
+    storedResolution: membership?.resolution ?? null,
+    currentVote: ownVote?.value ?? null,
+  });
 
   const view = buildApplicantView(
     {
@@ -301,8 +341,23 @@ export default async function SecondRoundApplicantPage({
         )}
       </section>
 
-      {/* Last, under everything it is a judgement about. FR-17's vote control
-          arrives beside it once a pass is open. */}
+      {/* FR-17's vote, under everything it is a judgement about. Decision 82
+          puts it here and only here: the list is for reading and recusing, and a
+          vote cast from a row nobody opened is what FR-17's explicit submit is
+          written to prevent. */}
+      <section className="mt-6">
+        <h2 className="text-sm font-medium">Your vote</h2>
+        <p className="text-muted-foreground mt-1 mb-2 text-sm">
+          Nobody else&rsquo;s vote is shown here, during the pass or after it closes.
+        </p>
+        <VoteButtons
+          instanceId={instanceId}
+          applicantId={applicant.id}
+          availability={availability}
+        />
+      </section>
+
+      {/* Beside the vote, because it is the alternative to casting one. */}
       <section className="mt-6">
         <h2 className="text-sm font-medium">Conflict of interest</h2>
         <p className="text-muted-foreground mt-1 mb-2 text-sm">

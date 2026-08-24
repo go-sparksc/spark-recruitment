@@ -2,13 +2,30 @@
 
 import { revalidatePath } from "next/cache";
 
-import { PassStatus, Round } from "@/generated/prisma/enums";
-import { SECOND_ROUND_POOL } from "@/lib/passes";
+import {
+  DecisionActor,
+  PassStatus,
+  Round,
+  VoteValue,
+} from "@/generated/prisma/enums";
+import {
+  SECOND_ROUND_POOL,
+  decisionOutcomeFor,
+  isMutableResolution,
+  resolveApplicant,
+  statusFor,
+  voteAvailability,
+} from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 
 export interface ConflictState {
   error?: string;
+}
+
+export interface VoteState {
+  error?: string;
+  message?: string;
 }
 
 /// FR-16: "Reviewer can flag conflict of interest per applicant, which is sticky
@@ -102,4 +119,212 @@ export async function flagConflict(formData: FormData): Promise<ConflictState> {
   revalidatePath(`/r/${instanceId}/second-round`);
   revalidatePath(`/r/${instanceId}/second-round/${applicant.id}`);
   return {};
+}
+
+/// FR-17's vote submission. Clauses 17d, 17e, 17f, 17g, 17h, 17i, 17j, 17k, 17z.
+///
+/// **The pass is resolved here, not sent from the client.** 17d says a vote
+/// "lands in the currently open pass", so the request carries an applicant and a
+/// value and nothing else. A pass id in the form would be a pass id a stale tab
+/// could hold, and votes would land in a pass that closed ten minutes ago.
+///
+/// **What this computes over, and what it returns, are deliberately different
+/// sets.** Resolving an applicant needs every reviewer's effective vote, so the
+/// transaction reads them all. Decision 74 and clause 17z govern what comes
+/// *back*: the return value is "Vote recorded" and never a count, never a
+/// tally, and never the outcome. Naming the outcome would be the leak in
+/// disguise — telling a reviewer their vote made the applicant a Sparklet tells
+/// them every other eligible reviewer voted yes, which is precisely the fact
+/// decision 74 exists to withhold.
+export async function submitPassVote(
+  _prev: VoteState,
+  formData: FormData,
+): Promise<VoteState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const applicantId = String(formData.get("applicantId") ?? "");
+  const raw = String(formData.get("value") ?? "");
+
+  const { session, reviewer } = await requireReviewerOnRoster(instanceId);
+
+  if (session.rd !== Round.SECOND_ROUND) {
+    return { error: "You are signed in for a different round." };
+  }
+
+  // 17g: an explicit submit, and only the two values a reviewer can choose.
+  // SKIP is never submitted — decision 67 makes it computed from the conflict,
+  // so accepting one here would create the stored row that decision forbids.
+  if (raw !== VoteValue.YES && raw !== VoteValue.NO) {
+    return { error: "Choose yes or no before submitting." };
+  }
+  const value = raw as typeof VoteValue.YES | typeof VoteValue.NO;
+
+  const applicant = await prisma.applicant.findFirst({
+    where: { id: applicantId, instanceId, ...SECOND_ROUND_POOL },
+    select: { id: true },
+  });
+
+  // **Decision 71's permissive half, and it is not an error.** An admin may have
+  // manually rejected this applicant while the reviewer was mid-tap. That vote
+  // "becomes moot — not blocked": nothing downstream reads it, the applicant is
+  // already excluded from future passes, and a red failure would tell a reviewer
+  // they did something wrong when they did not. The page revalidates and the
+  // control is gone.
+  if (!applicant) {
+    revalidatePath(`/r/${instanceId}/second-round`);
+    revalidatePath(`/r/${instanceId}/second-round/${applicantId}`);
+    return { message: "This applicant has already been decided. Nothing was recorded." };
+  }
+
+  const [openPass, conflict] = await Promise.all([
+    prisma.pass.findFirst({
+      where: { instanceId, status: PassStatus.OPEN },
+      select: { id: true },
+    }),
+    prisma.conflictOfInterest.findUnique({
+      where: {
+        round_applicantId_reviewerId: {
+          round: Round.SECOND_ROUND,
+          applicantId: applicant.id,
+          reviewerId: reviewer.id,
+        },
+      },
+      select: { id: true },
+    }),
+  ]);
+
+  const membership = openPass
+    ? await prisma.passApplicant.findUnique({
+        where: { passId_applicantId: { passId: openPass.id, applicantId: applicant.id } },
+        select: { id: true, resolution: true },
+      })
+    : null;
+
+  // The same function the profile renders the control from, so a control that is
+  // absent and an action that refuses cannot be answering different questions.
+  const availability = voteAvailability({
+    hasOpenPass: openPass !== null,
+    isMember: membership !== null,
+    hasConflict: conflict !== null,
+    storedResolution: membership?.resolution ?? null,
+    currentVote: null,
+  });
+
+  switch (availability.kind) {
+    case "NO_PASS":
+      return { error: "No pass is open. Voting opens when an admin starts one." };
+    case "NOT_IN_PASS":
+      return { error: "This applicant is not in the open pass. Reload the page." };
+    case "CONFLICT":
+      // 17f, the action half. You are recorded as skipping, per 17e, and no row
+      // is written to say so.
+      return { error: "You have flagged a conflict on this applicant and cannot vote on them." };
+    case "SETTLED":
+      return {
+        error: "The pass has already concluded on this applicant, so votes can no longer change.",
+      };
+    case "OPEN":
+      break;
+  }
+
+  // `openPass` and `membership` are non-null on the OPEN branch; narrowing the
+  // union does not narrow them, so this is the assertion rather than a `!`.
+  if (!openPass || !membership) {
+    return { error: "No pass is open. Voting opens when an admin starts one." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Decision 75: resubmitting updates the existing row through
+    // UNIQUE (passId, applicantId, reviewerId). Decision 26's reasoning about
+    // misclicks, applied to a round where the window shuts on its own.
+    await tx.passVote.upsert({
+      where: {
+        passId_applicantId_reviewerId: {
+          passId: openPass.id,
+          applicantId: applicant.id,
+          reviewerId: reviewer.id,
+        },
+      },
+      create: {
+        passId: openPass.id,
+        applicantId: applicant.id,
+        reviewerId: reviewer.id,
+        value,
+      },
+      update: { value },
+    });
+
+    // Recomputed inside the same transaction as the write that changed it.
+    // Reading the votes before the upsert commits would resolve against a state
+    // that no longer exists by the time the resolution is stored.
+    const [roster, votes, conflicts, current] = await Promise.all([
+      tx.reviewer.findMany({
+        where: { instanceId, rounds: { has: Round.SECOND_ROUND } },
+        select: { id: true },
+      }),
+      tx.passVote.findMany({
+        where: { passId: openPass.id, applicantId: applicant.id },
+        select: { applicantId: true, reviewerId: true, value: true },
+      }),
+      tx.conflictOfInterest.findMany({
+        where: { round: Round.SECOND_ROUND, applicantId: applicant.id },
+        select: { applicantId: true, reviewerId: true },
+      }),
+      tx.passApplicant.findUnique({
+        where: { passId_applicantId: { passId: openPass.id, applicantId: applicant.id } },
+        select: { resolution: true },
+      }),
+    ]);
+
+    // 17h: resolved when every non-SKIP reviewer has submitted. The roster is
+    // the denominator, per decisions 66 and 78.
+    const { resolution } = resolveApplicant(applicant.id, {
+      reviewerIds: roster.map((entry) => entry.id),
+      applicantIds: [applicant.id],
+      votes,
+      conflicts,
+    });
+
+    // A terminal row is never recomputed — the rule that protects a manual
+    // reject (decision 71) and a Sparklet alike.
+    if (!isMutableResolution(current?.resolution ?? null)) return;
+
+    await tx.passApplicant.update({
+      where: { passId_applicantId: { passId: openPass.id, applicantId: applicant.id } },
+      data: { resolution, resolvedAt: resolution === null ? null : new Date() },
+    });
+
+    // 17i and 17j: the status change and the exclusion from future passes, which
+    // falls out of 17b reading `status = ACTIVE`. 17k writes neither — CARRIED
+    // leaves them ACTIVE, and `statusFor` returns null for it.
+    const status = statusFor(resolution);
+    if (status !== null) {
+      await tx.applicant.update({ where: { id: applicant.id }, data: { status } });
+    }
+
+    // Decision 69: `actor = SYSTEM` for a pass's own unanimous result. Decision
+    // 70: NEEDS_ADMIN writes none, and neither does CARRIED — `decisionOutcomeFor`
+    // returns null for both.
+    const outcome = decisionOutcomeFor(resolution);
+    if (outcome !== null) {
+      await tx.decision.upsert({
+        where: { applicantId_stage: { applicantId: applicant.id, stage: Round.SECOND_ROUND } },
+        create: {
+          applicantId: applicant.id,
+          stage: Round.SECOND_ROUND,
+          outcome,
+          actor: DecisionActor.SYSTEM,
+        },
+        update: { outcome, actor: DecisionActor.SYSTEM },
+      });
+    }
+  });
+
+  revalidatePath(`/r/${instanceId}/second-round`);
+  revalidatePath(`/r/${instanceId}/second-round/${applicant.id}`);
+  // The admin's pass list counts resolutions, and this may have moved one.
+  revalidatePath(`/instances/${instanceId}/passes`);
+
+  // Neutral by design. See the note on decision 74 above: no count, no tally,
+  // no outcome.
+  return { message: "Vote recorded." };
 }

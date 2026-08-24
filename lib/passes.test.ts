@@ -34,6 +34,7 @@ import {
   resolvePass,
   statusFor,
   summarizePass,
+  voteAvailability,
   type PassInput,
 } from "@/lib/passes";
 
@@ -561,5 +562,91 @@ describe("summarizePass", () => {
 
     expect(summary.memberCount).toBe(0);
     expect(summary.unresolved).toBe(0);
+  });
+});
+
+describe("voteAvailability", () => {
+  const open = {
+    hasOpenPass: true,
+    isMember: true,
+    hasConflict: false,
+    storedResolution: null,
+    currentVote: null,
+  };
+
+  it("is OPEN with no current vote for a member of an open pass", () => {
+    expect(voteAvailability(open)).toEqual({ kind: "OPEN", current: null });
+  });
+
+  /// Decision 75: changeable until the applicant resolves, so the control comes
+  /// back carrying what was submitted rather than blank.
+  it("carries the reviewer's own existing vote back into the control", () => {
+    expect(voteAvailability({ ...open, currentVote: VoteValue.YES })).toEqual({
+      kind: "OPEN",
+      current: VoteValue.YES,
+    });
+  });
+
+  it("is NO_PASS when nothing is open", () => {
+    expect(voteAvailability({ ...open, hasOpenPass: false })).toEqual({ kind: "NO_PASS" });
+  });
+
+  it("is NOT_IN_PASS for an applicant outside the fixed membership", () => {
+    expect(voteAvailability({ ...open, isMember: false })).toEqual({ kind: "NOT_IN_PASS" });
+  });
+
+  /// Clause 17f.
+  it("is CONFLICT for a conflicted reviewer", () => {
+    expect(voteAvailability({ ...open, hasConflict: true })).toEqual({ kind: "CONFLICT" });
+  });
+
+  /// The conflict outranks everything below it: decision 68 already deleted the
+  /// vote, so "the pass has settled" would answer a question they did not ask.
+  it("reports the conflict ahead of a settled resolution", () => {
+    expect(
+      voteAvailability({
+        ...open,
+        hasConflict: true,
+        storedResolution: PassResolution.CARRIED,
+      }),
+    ).toEqual({ kind: "CONFLICT" });
+  });
+
+  /// Decision 75's window shutting on its own: CARRIED means every eligible
+  /// reviewer submitted and they disagreed, which is a completed outcome.
+  it("is SETTLED once the pass has concluded on the applicant", () => {
+    expect(voteAvailability({ ...open, storedResolution: PassResolution.CARRIED })).toEqual({
+      kind: "SETTLED",
+      resolution: PassResolution.CARRIED,
+    });
+
+    expect(voteAvailability({ ...open, storedResolution: PassResolution.SPARKLET })).toEqual({
+      kind: "SETTLED",
+      resolution: PassResolution.SPARKLET,
+    });
+  });
+
+  /// Decision 76's whole point: an admin removed this reviewer's conflict, the
+  /// row still carries the all-COI NEEDS_ADMIN, and the vote they cast now is
+  /// what resolves it. NEEDS_ADMIN is mutable, so it must not read as settled.
+  it("is OPEN on a NEEDS_ADMIN row once the reviewer's conflict is gone", () => {
+    expect(
+      voteAvailability({ ...open, storedResolution: PassResolution.NEEDS_ADMIN }),
+    ).toEqual({ kind: "OPEN", current: null });
+  });
+
+  /// The same predicate the persistence layer writes through, asserted as one
+  /// fact rather than two that could drift.
+  it("refuses exactly the rows a recount refuses to overwrite", () => {
+    for (const resolution of [
+      PassResolution.SPARKLET,
+      PassResolution.REJECTED,
+      PassResolution.CARRIED,
+      PassResolution.NEEDS_ADMIN,
+      null,
+    ]) {
+      const availability = voteAvailability({ ...open, storedResolution: resolution });
+      expect(availability.kind === "SETTLED").toBe(!isMutableResolution(resolution));
+    }
   });
 });
