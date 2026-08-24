@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { AssignmentStatus, InstanceStage, Round } from "@/generated/prisma/enums";
+import { AssignmentStatus, InstanceStage, PassStatus, Round } from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
 import { requireInstance } from "@/lib/auth";
 import { SECOND_ROUND_POOL } from "@/lib/passes";
@@ -81,6 +81,8 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
     secondRoundPool,
     secondRoundReviewerCount,
     conflictCount,
+    passCount,
+    openPass,
   ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
@@ -110,6 +112,11 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       prisma.reviewer.count({ where: { instanceId: id, rounds: { has: Round.SECOND_ROUND } } }),
       prisma.conflictOfInterest.count({
         where: { round: Round.SECOND_ROUND, applicant: { instanceId: id } },
+      }),
+      prisma.pass.count({ where: { instanceId: id } }),
+      prisma.pass.findFirst({
+        where: { instanceId: id, status: PassStatus.OPEN },
+        select: { ordinal: true },
       }),
     ]);
 
@@ -262,24 +269,32 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       waiting: instance.currentStage === InstanceStage.WRITTEN || firstRoundVoteCount === 0,
     },
     {
-      href: `/instances/${id}/reviewers?round=SECOND_ROUND`,
+      href: `/instances/${id}/passes`,
       title: "Second round",
       state:
         instance.currentStage === InstanceStage.WRITTEN ||
         instance.currentStage === InstanceStage.FIRST_ROUND
           ? "first round not finalized"
-          : secondRoundPool === 0
-            ? "every applicant decided"
-            : [
-                `${plural(secondRoundPool, "applicant")} active`,
-                `${plural(secondRoundReviewerCount, "reviewer")}`,
-                conflictCount > 0 ? `${plural(conflictCount, "conflict")} flagged` : null,
-              ]
-                .filter((part) => part !== null)
-                .join(" · "),
-      // Nothing to do here until the first round is finalized. FR-17's own
-      // surface replaces this link in Day 2 — until then the roster page is
-      // where the second round is actually administered.
+          : [
+              openPass
+                ? `pass ${openPass.ordinal} open`
+                : passCount === 0
+                  ? "no pass yet"
+                  : `${plural(passCount, "pass", "passes")} closed`,
+              secondRoundPool === 0
+                ? "every applicant decided"
+                : `${plural(secondRoundPool, "applicant")} active`,
+              // The roster is here because decision 79 makes it a precondition
+              // for creating a pass at all, so an admin who sees "0 reviewers"
+              // beside "no pass yet" has already been told why.
+              `${plural(secondRoundReviewerCount, "reviewer")}`,
+              conflictCount > 0 ? `${plural(conflictCount, "conflict")} flagged` : null,
+            ]
+              .filter((part) => part !== null)
+              .join(" · "),
+      // Nothing to do here until the first round is finalized. Once it is, this
+      // points at FR-17's own surface rather than the roster — the roster is a
+      // precondition for a pass, not the place the round is run from.
       waiting:
         instance.currentStage === InstanceStage.WRITTEN ||
         instance.currentStage === InstanceStage.FIRST_ROUND,

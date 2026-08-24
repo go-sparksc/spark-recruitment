@@ -24,6 +24,7 @@ import {
   ApplicantStatus,
   DecisionOutcome,
   PassResolution,
+  PassStatus,
   VoteValue,
 } from "@/generated/prisma/enums";
 
@@ -354,4 +355,138 @@ export function buildPassGrid(
   });
 
   return { reviewerIds: input.reviewerIds, rows };
+}
+
+// ---------------------------------------------------------------------------
+// FR-17's creation guards
+// ---------------------------------------------------------------------------
+
+export interface PassCreationContext {
+  /// `Instance.currentStage === SECOND_ROUND`. Passes belong to the second
+  /// round and only to it.
+  inSecondRound: boolean;
+  /// The ordinal of the pass that is already open, or null. Clause 17c.
+  openPassOrdinal: number | null;
+  /// `SECOND_ROUND_POOL` counted server-side. Clause 17b's membership, and
+  /// §7.4's zero-applicant block.
+  poolSize: number;
+  /// Reviewers with SECOND_ROUND in `rounds`. Decision 79.
+  reviewerCount: number;
+}
+
+/// Why a pass cannot be created right now, or null when one can be.
+///
+/// **One function, read by both the page and the action.** The page needs it to
+/// say why the button is absent — the Slice 4 rule, that a surface explains
+/// rather than offering a control that fails — and the action needs it because a
+/// second tab still holds a form bound to it. Deriving the two separately is how
+/// they end up disagreeing about which guard fired, and the message an admin
+/// reads stops matching the reason they were refused.
+///
+/// Order is deliberate. Stage first, because in a COMPLETE instance none of the
+/// other three questions is worth asking. Then the open pass, then §7.4's two
+/// table rows in the order §7.4 lists them.
+export function passCreationBlock(context: PassCreationContext): string | null {
+  if (!context.inSecondRound) {
+    return (
+      "Passes belong to the second round. This instance is not in it — finalize the first " +
+      "round to begin, or, if the second round has been closed, it cannot be reopened."
+    );
+  }
+
+  if (context.openPassOrdinal !== null) {
+    return (
+      `Pass ${context.openPassOrdinal} is still open. Exactly one pass is open at a time, so ` +
+      `close it before creating the next.`
+    );
+  }
+
+  if (context.poolSize === 0) {
+    return (
+      "Every applicant has been decided — there is nobody left for a pass to vote on. Close " +
+      "the second round to finish the cycle."
+    );
+  }
+
+  if (context.reviewerCount === 0) {
+    // Decision 79. Without an electorate every member resolves NEEDS_ADMIN the
+    // moment the pass is created: a pass that decides nothing and flags
+    // everyone, indistinguishable at a glance from the all-COI case it is not.
+    return (
+      "No reviewer is on the second-round roster. Add reviewers to the second round before " +
+      "creating a pass."
+    );
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// The pass list
+// ---------------------------------------------------------------------------
+
+export interface PassSummarySource {
+  id: string;
+  ordinal: number;
+  status: PassStatus;
+  openedAt: Date;
+  closedAt: Date | null;
+  /// One entry per member, in any order. Null is a row that has not resolved.
+  resolutions: readonly (PassResolution | null)[];
+}
+
+export interface PassSummary {
+  id: string;
+  ordinal: number;
+  status: PassStatus;
+  openedAt: Date;
+  closedAt: Date | null;
+  memberCount: number;
+  sparklet: number;
+  rejected: number;
+  carried: number;
+  needsAdmin: number;
+  /// Members with no resolution yet. On an open pass this is the work left; on a
+  /// closed one it is decision 72's unvoted rows, which the close deliberately
+  /// left as `NULL`.
+  unresolved: number;
+}
+
+/// The pass list's per-row counts.
+///
+/// In `lib/` rather than the page for CLAUDE.md's Phase 5 reason: a page that
+/// reshapes query results before rendering them puts the reshaping where nothing
+/// can test it, and twice in Phase 5 that is exactly where the defect was.
+export function summarizePass(source: PassSummarySource): PassSummary {
+  const counts = { sparklet: 0, rejected: 0, carried: 0, needsAdmin: 0, unresolved: 0 };
+
+  for (const resolution of source.resolutions) {
+    switch (resolution) {
+      case PassResolution.SPARKLET:
+        counts.sparklet += 1;
+        break;
+      case PassResolution.REJECTED:
+        counts.rejected += 1;
+        break;
+      case PassResolution.CARRIED:
+        counts.carried += 1;
+        break;
+      case PassResolution.NEEDS_ADMIN:
+        counts.needsAdmin += 1;
+        break;
+      case null:
+        counts.unresolved += 1;
+        break;
+    }
+  }
+
+  return {
+    id: source.id,
+    ordinal: source.ordinal,
+    status: source.status,
+    openedAt: source.openedAt,
+    closedAt: source.closedAt,
+    memberCount: source.resolutions.length,
+    ...counts,
+  };
 }

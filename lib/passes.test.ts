@@ -18,6 +18,7 @@ import {
   ApplicantStatus,
   DecisionOutcome,
   PassResolution,
+  PassStatus,
   VoteValue,
 } from "@/generated/prisma/enums";
 import {
@@ -28,9 +29,11 @@ import {
   isMutableResolution,
   isTerminal,
   needsAdminAtClose,
+  passCreationBlock,
   resolveApplicant,
   resolvePass,
   statusFor,
+  summarizePass,
   type PassInput,
 } from "@/lib/passes";
 
@@ -427,5 +430,136 @@ describe("effectiveVote", () => {
     expect(effectiveVote(null, false)).toBe("OUTSTANDING");
     expect(effectiveVote(undefined, false)).toBe("OUTSTANDING");
     expect(effectiveVote(VoteValue.SKIP, false)).toBe("SKIP");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 7: the creation guards and the pass list
+// ---------------------------------------------------------------------------
+
+describe("passCreationBlock", () => {
+  const ready = {
+    inSecondRound: true,
+    openPassOrdinal: null,
+    poolSize: 40,
+    reviewerCount: 11,
+  };
+
+  it("allows creation when the round is open, nothing is open, and both sides are non-empty", () => {
+    expect(passCreationBlock(ready)).toBeNull();
+  });
+
+  it("blocks outside the second round, and says the round cannot be reopened", () => {
+    const block = passCreationBlock({ ...ready, inSecondRound: false });
+
+    expect(block).not.toBeNull();
+    expect(block).toMatch(/cannot be reopened/);
+  });
+
+  /// Clause 17c, the half the partial index does not cover: the index makes a
+  /// second OPEN row impossible, and this is what makes the refusal legible.
+  it("blocks a second pass while one is open, naming the one that is open", () => {
+    const block = passCreationBlock({ ...ready, openPassOrdinal: 2 });
+
+    expect(block).toMatch(/Pass 2 is still open/);
+  });
+
+  /// §7.4: "Block creation, tell the admin the pool is resolved."
+  it("blocks an empty pool", () => {
+    expect(passCreationBlock({ ...ready, poolSize: 0 })).toMatch(/Every applicant has been decided/);
+  });
+
+  /// Decision 79, whose message must "name the fix, which is the reviewer roster".
+  it("blocks an empty second-round roster and names the roster", () => {
+    expect(passCreationBlock({ ...ready, reviewerCount: 0 })).toMatch(/second-round roster/);
+  });
+
+  /// The order is the specification: in a COMPLETE instance the other three
+  /// questions are not worth asking, and an admin told "no reviewers" would go
+  /// fix the wrong thing.
+  it("reports the stage before any other block when several apply at once", () => {
+    const block = passCreationBlock({
+      inSecondRound: false,
+      openPassOrdinal: 1,
+      poolSize: 0,
+      reviewerCount: 0,
+    });
+
+    expect(block).toMatch(/second round/);
+    expect(block).not.toMatch(/roster/);
+  });
+
+  it("reports the open pass before the two emptiness blocks", () => {
+    const block = passCreationBlock({
+      ...ready,
+      openPassOrdinal: 3,
+      poolSize: 0,
+      reviewerCount: 0,
+    });
+
+    expect(block).toMatch(/Pass 3 is still open/);
+  });
+});
+
+describe("summarizePass", () => {
+  const source = {
+    id: "pass-1",
+    ordinal: 1,
+    status: PassStatus.CLOSED,
+    openedAt: new Date("2026-08-24T10:00:00Z"),
+    closedAt: new Date("2026-08-24T11:00:00Z"),
+    resolutions: [
+      PassResolution.SPARKLET,
+      PassResolution.SPARKLET,
+      PassResolution.REJECTED,
+      PassResolution.CARRIED,
+      PassResolution.NEEDS_ADMIN,
+      null,
+      null,
+    ],
+  };
+
+  it("counts each resolution, and nulls as unresolved", () => {
+    const summary = summarizePass(source);
+
+    expect(summary).toMatchObject({
+      memberCount: 7,
+      sparklet: 2,
+      rejected: 1,
+      carried: 1,
+      needsAdmin: 1,
+      unresolved: 2,
+    });
+  });
+
+  it("carries the pass's own identity through unchanged", () => {
+    const summary = summarizePass(source);
+
+    expect(summary.id).toBe("pass-1");
+    expect(summary.ordinal).toBe(1);
+    expect(summary.status).toBe(PassStatus.CLOSED);
+    expect(summary.closedAt).toEqual(source.closedAt);
+  });
+
+  /// Decision 72: closing writes no resolution, so a closed pass legitimately
+  /// carries nulls. They are unresolved, not a zero-member pass.
+  it("counts a freshly created pass as entirely unresolved", () => {
+    const summary = summarizePass({
+      ...source,
+      status: PassStatus.OPEN,
+      closedAt: null,
+      resolutions: [null, null, null],
+    });
+
+    expect(summary.memberCount).toBe(3);
+    expect(summary.unresolved).toBe(3);
+    expect(summary.sparklet + summary.rejected + summary.carried + summary.needsAdmin).toBe(0);
+  });
+
+  it("handles a pass with no members at all", () => {
+    const summary = summarizePass({ ...source, resolutions: [] });
+
+    expect(summary.memberCount).toBe(0);
+    expect(summary.unresolved).toBe(0);
   });
 });
