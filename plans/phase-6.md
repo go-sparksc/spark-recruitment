@@ -249,7 +249,7 @@ CLAUDE.md's mechanical guard, re-ticked against the diff before each commit. FR-
 
 **Slice 7 — pass creation and close.** `/instances/[id]/passes`: create (guards 17c, 17w, and decision 79's empty roster; membership per 17b; immediate `resolvePass` so an all-COI applicant carries `NEEDS_ADMIN` from the start), and close (17n — status and `closedAt`, nothing else).
 
-**Slice 8 — vote submission.** The vote control on both FR-16 surfaces, the action resolving the open pass server-side, recompute-and-persist through `lib/passes.ts` in the submitting transaction. Decision 75's upsert. Decision 69's `Decision` row on a terminal resolution and decision 70's silence on `NEEDS_ADMIN`.
+**Slice 8 — vote submission.** The vote control on FR-16's **profile only**, per decision 82 — the list stays a reading and recusal surface and renders no vote state. The action resolving the open pass server-side, recompute-and-persist through `lib/passes.ts` in the submitting transaction. Decision 75's upsert. Decision 69's `Decision` row on a terminal resolution and decision 70's silence on `NEEDS_ADMIN`.
 
 **Slice 9 — manual reject.** Decision 71: pass row, applicant status, `Decision(ADMIN)` and `AuditLog`, one transaction. Plus the permissive vote path stated above — a reviewer mid-tap on a just-rejected applicant gets no error, and their vote is read by nothing.
 
@@ -275,7 +275,7 @@ Delete, `AuditLog`, and recompute in one transaction, per 18f.
 
 ## Files
 
-**New:** `lib/passes.ts`, `lib/passes.test.ts`, `prisma/seed/second-round.ts`, `prisma/advance.ts`, `prisma/checks/passes.ts`, `prisma/migrations/<ts>_pass_one_open/migration.sql`, `app/r/[instanceId]/second-round/{page.tsx,load.ts,actions.ts,coi-control.tsx,vote-buttons.tsx}`, `app/r/[instanceId]/second-round/[applicantId]/page.tsx`, `app/instances/[id]/passes/{page.tsx,actions.ts,pass-controls.tsx}`, `app/instances/[id]/passes/[passId]/{page.tsx,coi-cell.tsx}`, `plans/phase-6.md`.
+**New:** `lib/passes.ts`, `lib/passes.test.ts`, `prisma/seed/second-round.ts`, `prisma/advance.ts`, `prisma/checks/passes.ts`, `prisma/migrations/<ts>_pass_one_open/migration.sql`, `app/r/[instanceId]/second-round/{page.tsx,load.ts,actions.ts,coi-control.tsx}`, `app/r/[instanceId]/second-round/[applicantId]/{page.tsx,vote-buttons.tsx}`, `app/instances/[id]/passes/{page.tsx,actions.ts,pass-controls.tsx}`, `app/instances/[id]/passes/[passId]/{page.tsx,coi-cell.tsx}`, `plans/phase-6.md`.
 
 **Modified:** `PRD.md` (§5, §6, §7.4, §10), `prisma/schema.prisma` (index only), `app/r/[instanceId]/list/page.tsx`, `app/instances/[id]/reviewers/actions.ts`, `app/instances/[id]/reviewers/page.tsx`, `app/instances/[id]/page.tsx`, `prisma/seed.ts`, `package.json`, `CLAUDE.md`, `BUILD_PLAN.md`.
 

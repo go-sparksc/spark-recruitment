@@ -946,6 +946,16 @@ rejects that applicant (17l), or the round closes into NEEDS_ADMIN. This
 is decision 78 working as intended — the alternative is the silent
 unanimity shift 78 exists to prevent. No tool is added for it in v1.
 
+82. **A second-round reviewer votes from the applicant's profile, not from the list. RESOLVED.** FR-16's list is a reading and recusal surface; the vote control lives on the profile and nowhere else, and the list renders no vote state of its own.
+
+    **This is deliberately not an application of the every-tap-counts rule.** That rule governs fast, independent review surfaces — FR-14's first-round list, where a vote is a reaction to two numbers and a paragraph, and where an extra tap really is a review that does not get completed. Second-round voting is not that surface. §7.4 and FR-16 both frame this round as reading the complete applicant profile — demographics, written responses, written scores and notes, interview scores and notes — and deliberating over it, and FR-17 requires an explicit submit for exactly that reason. **Requiring the profile to be open before voting is the correct tradeoff, not friction to be designed away.** A vote cast from a row nobody opened is the outcome the requirement is written to prevent, and saving a tap to allow it would be optimizing the wrong quantity.
+
+    The conflict control stays on the list, and that is not an inconsistency. A reviewer recuses because they recognized the name, which happens on the list; if the only way to declare a conflict were the profile, declaring one would mean first opening the demographics and essays of the person you are recusing from. Recusal is triggered by the row, voting is triggered by the profile, and each control sits where its trigger is.
+
+    **What this costs, recorded rather than hidden:** with no vote state on the list, a reviewer part-way through a pass cannot see at a glance which applicants they have already voted on. Accepted for v1 — the pass is worked through in one deliberation rather than resumed across sittings, and adding a per-row marker later is additive and breaks nothing. It would show only the reviewer's own vote; decision 74 forbids showing anyone else's, closed pass or not.
+
+    Consequence for the build: `plans/phase-6.md`'s Slice 8 line said "the vote control on both FR-16 surfaces" and is narrowed to the profile by this decision.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
