@@ -774,6 +774,11 @@ model Pass {
   instanceId String
   instance   Instance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   ordinal    Int
+  /// The OPEN/CLOSED half of the line above, enforced rather than remembered: a
+  /// PARTIAL unique index on ("instanceId") WHERE "status" = 'OPEN'. Prisma has
+  /// no syntax for the WHERE, so it lives in the 20260824000000_pass_one_open
+  /// migration rather than here, and prisma/checks/passes.ts asserts both that it
+  /// bites and that it is partial. Same posture as Field.groupRole's CHECK.
   status     PassStatus @default(OPEN)
   openedAt   DateTime   @default(now())
   closedAt   DateTime?

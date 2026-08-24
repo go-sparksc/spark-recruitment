@@ -258,6 +258,12 @@ Pass                           // second round
   id, instanceId, ordinal, openedAt, closedAt
   status: OPEN | CLOSED
   UNIQUE (instanceId, ordinal) // passes are sequential
+  UNIQUE (instanceId) WHERE status = OPEN
+                               // FR-17: exactly one pass is OPEN at a time.
+                               //   PARTIAL, so closed passes accumulate freely.
+                               //   Prisma cannot express the WHERE, so it is
+                               //   hand-written SQL; prisma/checks/passes.ts
+                               //   asserts it bites and that it is partial.
 
 PassApplicant                  // membership, fixed at pass creation per FR-17
   id, passId, applicantId
