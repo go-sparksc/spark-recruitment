@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { InstanceCrumbs } from "../instance-crumbs";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ApplicantStatus } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { EXPORT_TABLES } from "@/lib/export";
 import { prisma } from "@/lib/prisma";
@@ -33,13 +34,38 @@ export default async function ExportPage({ params }: { params: Promise<{ id: str
   // Counted rather than snapshotted. Rendering this page must not read the whole
   // instance into memory just to say how big it is — that is what the download
   // itself is for.
-  const [applicants, reviewers, scores, decisions, passVotes] = await Promise.all([
+  const [applicants, reviewers, scores, decisions, passVotes, sparklets] = await Promise.all([
     prisma.applicant.count({ where: { instanceId: id } }),
     prisma.reviewer.count({ where: { instanceId: id } }),
     prisma.score.count({ where: { assignment: { instanceId: id } } }),
     prisma.decision.count({ where: { applicant: { instanceId: id } } }),
     prisma.passVote.count({ where: { pass: { instanceId: id } } }),
+    prisma.applicant.count({ where: { instanceId: id, status: ApplicantStatus.SPARKLET } }),
   ]);
+
+  // Each row says what is actually in the file rather than what it is called.
+  // An admin choosing between four downloads is choosing on contents, and "0
+  // Sparklets" is a finding rather than an empty file to be puzzled over.
+  const csvs = [
+    {
+      artifact: "applicants.csv",
+      title: "All applicants with scores",
+      state: `${plural(applicants, "row")} · one column per rubric category`,
+    },
+    {
+      artifact: "decisions.csv",
+      title: "Decisions by stage",
+      state: `${plural(decisions, "row")} · stage, outcome, and who decided`,
+    },
+    {
+      artifact: "final-class.csv",
+      title: "Final class with emails",
+      state:
+        sparklets === 0
+          ? "no Sparklets yet — the second round has not produced any"
+          : `${plural(sparklets, "Sparklet")} · name and email`,
+    },
+  ];
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-16">
@@ -90,9 +116,41 @@ export default async function ExportPage({ params }: { params: Promise<{ id: str
         </CardContent>
       </Card>
 
+      <h2 className="mt-10 font-medium">Per-stage CSVs</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
+        For reading in a spreadsheet. These are derived from the JSON above and drop what a
+        spreadsheet cannot hold — restore from the JSON, not from these.
+      </p>
+
+      <Card className="mt-4">
+        <CardContent className="divide-y p-0">
+          {csvs.map((csv) => (
+            <div
+              key={csv.artifact}
+              className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-6 py-4"
+            >
+              <div>
+                <p className="font-medium">{csv.title}</p>
+                <p className="text-muted-foreground mt-1 text-sm tabular-nums">{csv.state}</p>
+              </div>
+              <a
+                href={`/instances/${instance.id}/export/${csv.artifact}`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+                download
+              >
+                Download CSV
+              </a>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
       <p className="text-muted-foreground mt-6 text-sm">
-        Per-stage CSVs — all applicants with scores, decisions by stage, and the final class with
-        emails — are not built yet and will appear here.
+        Cells are written exactly as they were recorded. A cell beginning{" "}
+        <code className="text-xs">=</code>, <code className="text-xs">+</code>,{" "}
+        <code className="text-xs">-</code> or <code className="text-xs">@</code> will be treated as
+        a formula by Excel and Sheets — import as text if that matters. The tool does not rewrite
+        what a person wrote.
       </p>
     </main>
   );
