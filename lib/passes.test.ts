@@ -747,3 +747,52 @@ describe("UNRESOLVED_AT_CLOSE agrees with needsAdminAtClose", () => {
     expect(selected.has(PassResolution.REJECTED)).toBe(false);
   });
 });
+
+describe("buildPassGrid tells a conflict skip from a stored skip (clause 18f)", () => {
+  const reviewers = ["r1", "r2", "r3"];
+
+  /// r1 has a conflict, r2 submitted a SKIP vote, r3 voted yes. All three of the
+  /// first two render as `SKIP`, and only one of them is removable.
+  const input: PassInput = {
+    reviewerIds: reviewers,
+    applicantIds: ["a"],
+    votes: [
+      { applicantId: "a", reviewerId: "r2", value: VoteValue.SKIP },
+      { applicantId: "a", reviewerId: "r3", value: VoteValue.YES },
+    ],
+    conflicts: [{ applicantId: "a", reviewerId: "r1" }],
+  };
+
+  const row = buildPassGrid(input).rows[0];
+
+  it("renders both as skip, because that is what FR-18 shows", () => {
+    expect(row.cells).toEqual(["SKIP", "SKIP", "YES"]);
+  });
+
+  it("marks only the conflict one as a conflict", () => {
+    expect(row.conflicts).toEqual([true, false, false]);
+  });
+
+  it("keeps the conflict flags aligned with the cells", () => {
+    expect(row.conflicts).toHaveLength(row.cells.length);
+    expect(row.conflicts).toHaveLength(reviewers.length);
+  });
+
+  /// Decision 68's invariant seen from the grid: a conflict outranks a vote, and
+  /// the cell is a removable skip rather than the vote that should not exist.
+  it("marks a conflict that coexists with a vote row", () => {
+    const withBoth = buildPassGrid({
+      ...input,
+      votes: [{ applicantId: "a", reviewerId: "r1", value: VoteValue.YES }],
+    }).rows[0];
+
+    expect(withBoth.cells[0]).toBe("SKIP");
+    expect(withBoth.conflicts[0]).toBe(true);
+  });
+
+  it("marks nothing where there are no conflicts at all", () => {
+    const clean = buildPassGrid({ ...input, conflicts: [] }).rows[0];
+
+    expect(clean.conflicts).toEqual([false, false, false]);
+  });
+});

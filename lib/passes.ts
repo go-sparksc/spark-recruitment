@@ -300,6 +300,16 @@ export interface PassGridRow {
   /// One cell per reviewer, in `reviewerIds` order. FR-18's "blank / yes / no /
   /// skip", where blank is `OUTSTANDING`.
   cells: EffectiveVote[];
+  /// Parallel to `cells`: whether that skip comes from a conflict.
+  ///
+  /// **Two different things render as `SKIP`** — an active conflict, and a
+  /// stored `SKIP` vote that the enum permits and nothing writes. Decision 76's
+  /// removal applies to the first and is meaningless on the second, so the grid
+  /// has to tell them apart rather than offering a control that would delete a
+  /// row that is not there. Derived here rather than re-derived by the page, for
+  /// the reason every other transformation is: a page that rebuilds this from
+  /// the raw conflicts puts the rebuild where nothing can test it.
+  conflicts: boolean[];
   tally: PassTally;
   /// What the pass row holds in the database.
   stored: PassResolution | null;
@@ -343,11 +353,16 @@ export function buildPassGrid(
       return effectiveVote(index.votes.get(key), index.conflicts.has(key));
     });
 
+    const conflicts = input.reviewerIds.map((reviewerId) =>
+      index.conflicts.has(pairKey(applicantId, reviewerId)),
+    );
+
     const storedResolution = stored.get(applicantId) ?? null;
 
     return {
       applicantId,
       cells,
+      conflicts,
       tally,
       stored: storedResolution,
       computed,

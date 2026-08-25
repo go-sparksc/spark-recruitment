@@ -16,9 +16,13 @@ import {
   SECOND_ROUND_POOL,
   UNRESOLVED_AT_CLOSE,
   closeRoundBlock,
+  decisionOutcomeFor,
+  isMutableResolution,
   isTerminal,
   passCreationBlock,
+  resolveApplicant,
   resolvePass,
+  statusFor,
 } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
@@ -512,5 +516,155 @@ export async function closeSecondRound(
             unresolved === 1 ? "needs" : "need"
           } an admin decision.`
         : " Every applicant was decided."),
+  };
+}
+
+/// Decision 76 and clause 18f: an admin removes a conflict of interest, audited.
+///
+/// **Three things this has to be right about**, all of which the confirm on the
+/// grid also says out loud:
+///
+///  1. **It is a round-wide removal shown on a per-pass screen.**
+///     `ConflictOfInterest` is keyed `(round, applicantId, reviewerId)` and
+///     carries no pass dimension, so removing one from pass 3's grid removes it
+///     from every pass.
+///  2. **The deleted vote does not come back.** Decision 68 destroyed it at flag
+///     time. The reviewer returns as OUTSTANDING — a row that now needs a vote it
+///     did not need a moment ago.
+///  3. **A terminal row is never reopened.** An applicant who resolved SPARKLET
+///     with two conflicts on the board stays SPARKLET when one is removed. That
+///     is `isMutableResolution`, the same rule that protects a manual reject.
+///
+/// The recompute is scoped to the OPEN pass, matching what `flagConflict` does
+/// in the other direction: a closed pass's stored resolution is a record of what
+/// happened, and §7.4 does not reopen one.
+export async function removeConflict(
+  _prev: PassActionState,
+  formData: FormData,
+): Promise<PassActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const applicantId = String(formData.get("applicantId") ?? "");
+  const reviewerId = String(formData.get("reviewerId") ?? "");
+  await requireInstance(instanceId, path(instanceId));
+
+  // Both ids are re-checked against this instance. They arrive from the request,
+  // and neither may name a row belonging to somebody else's cycle.
+  const [applicant, reviewer] = await Promise.all([
+    prisma.applicant.findFirst({ where: { id: applicantId, instanceId }, select: { id: true } }),
+    prisma.reviewer.findFirst({ where: { id: reviewerId, instanceId }, select: { id: true } }),
+  ]);
+
+  if (!applicant || !reviewer) {
+    return { error: "That applicant or reviewer is not part of this instance." };
+  }
+
+  const conflict = await prisma.conflictOfInterest.findUnique({
+    where: {
+      round_applicantId_reviewerId: {
+        round: Round.SECOND_ROUND,
+        applicantId,
+        reviewerId,
+      },
+    },
+    select: { id: true },
+  });
+
+  // Idempotent in the direction that matters: two admins on the same cell, or a
+  // stale tab, should not produce a failure for a state that is already correct.
+  if (!conflict) {
+    return { message: "That conflict has already been removed." };
+  }
+
+  const openPass = await prisma.pass.findFirst({
+    where: { instanceId, status: PassStatus.OPEN },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.conflictOfInterest.delete({ where: { id: conflict.id } });
+
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: "REMOVE_CONFLICT_OF_INTEREST",
+        // Ids, never names — §8 and clause 17t. The reviewer is on the row
+        // because "whose conflict was lifted" is the question this log answers.
+        entityType: "ConflictOfInterest",
+        entityId: conflict.id,
+        previousValue: { round: Round.SECOND_ROUND, applicantId, reviewerId },
+      },
+    });
+
+    if (!openPass) return;
+
+    const membership = await tx.passApplicant.findUnique({
+      where: { passId_applicantId: { passId: openPass.id, applicantId } },
+      select: { resolution: true },
+    });
+
+    // Not a member of the open pass, or already settled. The second is point 3
+    // above: SPARKLET, REJECTED and CARRIED all stay exactly as they are.
+    if (!membership || !isMutableResolution(membership.resolution)) return;
+
+    const [roster, votes, conflicts] = await Promise.all([
+      tx.reviewer.findMany({
+        where: { instanceId, rounds: { has: Round.SECOND_ROUND } },
+        select: { id: true },
+      }),
+      tx.passVote.findMany({
+        where: { passId: openPass.id, applicantId },
+        select: { applicantId: true, reviewerId: true, value: true },
+      }),
+      tx.conflictOfInterest.findMany({
+        where: { round: Round.SECOND_ROUND, applicantId },
+        select: { applicantId: true, reviewerId: true },
+      }),
+    ]);
+
+    const { resolution } = resolveApplicant(applicantId, {
+      reviewerIds: roster.map((entry) => entry.id),
+      applicantIds: [applicantId],
+      votes,
+      conflicts,
+    });
+
+    // In practice this lands on null every time: the reviewer just handed back
+    // their eligibility has no vote — decision 68 deleted it — so they are
+    // OUTSTANDING and the applicant cannot be resolved. Written through the
+    // state machine anyway rather than hardcoding null, so that the one place
+    // deciding resolutions stays the one place deciding resolutions.
+    await tx.passApplicant.update({
+      where: { passId_applicantId: { passId: openPass.id, applicantId } },
+      data: { resolution, resolvedAt: resolution === null ? null : new Date() },
+    });
+
+    const status = statusFor(resolution);
+    if (status !== null) {
+      await tx.applicant.update({ where: { id: applicantId }, data: { status } });
+    }
+
+    const outcome = decisionOutcomeFor(resolution);
+    if (outcome !== null) {
+      await tx.decision.upsert({
+        where: { applicantId_stage: { applicantId, stage: Round.SECOND_ROUND } },
+        create: {
+          applicantId,
+          stage: Round.SECOND_ROUND,
+          outcome,
+          actor: DecisionActor.SYSTEM,
+        },
+        update: { outcome, actor: DecisionActor.SYSTEM },
+      });
+    }
+  });
+
+  revalidateAll(instanceId);
+  revalidatePath(`/r/${instanceId}/second-round/${applicantId}`);
+
+  return {
+    message: openPass
+      ? "Conflict removed. That reviewer can vote on this applicant again, in this pass and any later one."
+      : "Conflict removed. That reviewer can vote on this applicant in the next pass.",
   };
 }
