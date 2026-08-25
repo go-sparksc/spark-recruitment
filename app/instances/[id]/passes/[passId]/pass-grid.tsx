@@ -56,7 +56,19 @@ export function PassGrid({
   );
 
   const selectedRow = rows.find((row) => row.applicantId === selected?.applicantId) ?? null;
-  const selectedReviewer = reviewers.find((r) => r.id === selected?.reviewerId) ?? null;
+  const selectedReviewerIndex = reviewers.findIndex((r) => r.id === selected?.reviewerId);
+  const selectedReviewer = selectedReviewerIndex < 0 ? null : reviewers[selectedReviewerIndex];
+
+  // **The same rule the close confirm follows: the panel lives only as long as
+  // the thing it confirms.** `selected` is an id pair, so it survived the
+  // removal it performed — the panel stayed open afterwards, still offering to
+  // remove a conflict that was already gone. Deriving from `row.conflicts`
+  // instead means the panel closes itself when the revalidated props come back
+  // without that conflict, and cannot be shown for a cell that is not one.
+  const stillConflicted =
+    selectedRow !== null &&
+    selectedReviewerIndex >= 0 &&
+    selectedRow.conflicts[selectedReviewerIndex] === true;
 
   return (
     <div className="mt-8 space-y-4">
@@ -138,7 +150,7 @@ export function PassGrid({
         </table>
       </div>
 
-      {selected && selectedRow && selectedReviewer ? (
+      {stillConflicted && selected && selectedRow && selectedReviewer ? (
         <form action={formAction} className="space-y-3 rounded-md border p-4">
           <input type="hidden" name="instanceId" value={instanceId} />
           <input type="hidden" name="applicantId" value={selected.applicantId} />

@@ -44,7 +44,14 @@ export function PassControls({
     closePass,
     {},
   );
-  const [confirmingClose, setConfirmingClose] = useState(false);
+  // **Keyed to the pass, not a bare boolean.** As a boolean this survived the
+  // pass changing underneath it: close pass 1, create pass 2, and the page came
+  // back rendering "Close pass 2?" already expanded, one stray click from
+  // closing a pass the admin had just made. Confirm state must not outlive the
+  // thing it confirms, so it stores WHICH pass was being confirmed and the
+  // render derives from the pass that is actually open now.
+  const [confirmingCloseFor, setConfirmingCloseFor] = useState<string | null>(null);
+  const confirmingClose = openPass !== null && confirmingCloseFor === openPass.id;
 
   return (
     <div className="mt-8 space-y-4">
@@ -87,7 +94,7 @@ export function PassControls({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setConfirmingClose(false)}
+                  onClick={() => setConfirmingCloseFor(null)}
                   disabled={closing}
                 >
                   Cancel
@@ -95,7 +102,7 @@ export function PassControls({
               </div>
             </div>
           ) : (
-            <Button type="button" variant="outline" onClick={() => setConfirmingClose(true)}>
+            <Button type="button" variant="outline" onClick={() => setConfirmingCloseFor(openPass.id)}>
               Close pass {openPass.ordinal}
             </Button>
           )}
