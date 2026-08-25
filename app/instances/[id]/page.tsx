@@ -2,7 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { AssignmentStatus, InstanceStage, PassStatus, Round } from "@/generated/prisma/enums";
+import {
+  ApplicantStatus,
+  AssignmentStatus,
+  InstanceStage,
+  PassResolution,
+  PassStatus,
+  Round,
+} from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
 import { requireInstance } from "@/lib/auth";
 import { SECOND_ROUND_POOL } from "@/lib/passes";
@@ -83,6 +90,11 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
     conflictCount,
     passCount,
     openPass,
+    // Applicants admitted this cycle. Deliberately not `sparkletCount` above,
+    // which counts Sparklet *reviewers* — one word, two populations, and the
+    // collision is exactly how a hub row comes to report the wrong number.
+    newSparkletCount,
+    finalPass,
   ] = await Promise.all([
       // Score has no instanceId of its own; it hangs off Assignment. Same read
       // the rubric page does, and it is what FR-4's lock turns on.
@@ -118,7 +130,35 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
         where: { instanceId: id, status: PassStatus.OPEN },
         select: { ordinal: true },
       }),
+      prisma.applicant.count({
+        where: { instanceId: id, status: ApplicantStatus.SPARKLET },
+      }),
+      prisma.pass.findFirst({
+        where: { instanceId: id },
+        orderBy: { ordinal: "desc" },
+        select: { id: true },
+      }),
     ]);
+
+  // FR-19's Unresolved group, counted the way that screen finds it: a
+  // NEEDS_ADMIN row **on the final pass** with no second-round `Decision` beside
+  // it (decision 89). Two things this must not do, both of which produce a
+  // number that disagrees with the screen it summarises.
+  //
+  // Not by `status`: FR-17 is explicit that these applicants stay ACTIVE.
+  //
+  // And not across every pass. The all-COI applicant carries NEEDS_ADMIN on pass
+  // 1 *and* on pass 2 (clause 17v), so an unscoped count returns one row per
+  // pass and reports more unresolved people than exist.
+  const unresolvedCount = finalPass
+    ? await prisma.passApplicant.count({
+        where: {
+          passId: finalPass.id,
+          resolution: PassResolution.NEEDS_ADMIN,
+          applicant: { decisions: { none: { stage: Round.SECOND_ROUND } } },
+        },
+      })
+    : 0;
 
   // "Applicants short one reviewer" is a count over a relation, which Prisma
   // cannot filter on directly. Same two-query shape the assignments page uses:
@@ -298,6 +338,17 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       waiting:
         instance.currentStage === InstanceStage.WRITTEN ||
         instance.currentStage === InstanceStage.FIRST_ROUND,
+    },
+    {
+      href: `/instances/${id}/final`,
+      title: "Final class",
+      state:
+        instance.currentStage === InstanceStage.COMPLETE
+          ? `${plural(newSparkletCount, "Sparklet")}${
+              unresolvedCount > 0 ? ` · ${unresolvedCount} unresolved` : ""
+            }`
+          : "the second round has not been closed",
+      waiting: instance.currentStage !== InstanceStage.COMPLETE,
     },
     {
       href: `/instances/${id}/export`,
