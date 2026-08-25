@@ -553,9 +553,20 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 
 **Unresolved** is every applicant whose row in the final pass carries `resolution = NEEDS_ADMIN` — which covers both an applicant every reviewer recused from and one who simply never reached a unanimous result before the round closed. Both require an explicit admin decision and must not be silently dropped. The group is identified by that pass row, never by `Applicant.status`, which stays `ACTIVE`; see FR-17. The underlying votes remain visible, so an admin can tell the two situations apart — eleven skips reads very differently from 7–4.
 
+**The admin decision each of them requires is made here**, on this screen and nowhere else — decision 70 says a `Decision` row is written "whenever an admin actually resolves that applicant" and names no surface for it. Admit or reject, writing `Decision` at `stage = SECOND_ROUND` with `actor = ADMIN`, `Applicant.status`, and an audit row, in one transaction.
+
+**An applicant resolved that way leaves the group without their pass row being rewritten**, per decision 89. The predicate is `resolution = NEEDS_ADMIN` on the final pass **and no `Decision` row at `stage = SECOND_ROUND`**. `PassApplicant.resolution` is left alone: the record that the pass itself could not decide them is not destroyed by the decision that followed it.
+
 Demographic breakdown of the Sparklet class against each preceding stage, replacing the manual `Overall Stats` sheet.
 
 **FR-20 Export.** One-click export of the entire instance as JSON, plus per-stage CSVs (all applicants with scores, decisions by stage, final class with emails). Non-negotiable for succession: the club must never be locked into this tool.
+
+**What "the entire instance" has to mean is fixed by the round trip**, which is BUILD_PLAN's Phase 7 gate and the only real test of this requirement: export, delete the database, restore from that file alone, and compare field by field. Four properties follow from it, each carrying its own decision.
+
+- **Every id is written back verbatim** rather than regenerated (decision 88). Three carriers of id make any remap unsound: `Applicant.data` is keyed by `Field.id`, `InterviewImport.mapping` embeds `InterviewCategory` ids inside its role strings, and `AuditLog.entityId` and `previousValue` hold ids from every table with no foreign key to follow.
+- **Every column is emitted, nulls included and explicit.** A missing key on restore is an error, never a default — which is what keeps `PassApplicant.resolution` five-valued, so `NEEDS_ADMIN`, `CARRIED` and `NULL` cannot collapse into one another.
+- **The file carries `Instance.passwordHash` and `RoundAccessCode.codeHash`** (decision 86), so a restored instance can be opened. The export is therefore credential-bearing as well as applicant-data-bearing, and the route is admin-only.
+- **The reimport is a verification script, not an admin surface** (decision 87), and the per-stage CSVs sit outside the round trip as lossy derivatives, written verbatim with no formula-injection prefixing (decision 90).
 
 ## 8. Security and data handling
 
