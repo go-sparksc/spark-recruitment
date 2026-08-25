@@ -23,6 +23,7 @@
 import {
   ApplicantStatus,
   DecisionOutcome,
+  InstanceStage,
   PassResolution,
   PassStatus,
   VoteValue,
@@ -572,4 +573,63 @@ export const RESOLUTION_LABEL: Record<PassResolution, string> = {
 /// answer from the four that have.
 export function resolutionLabel(resolution: PassResolution | null): string {
   return resolution === null ? "Unresolved" : RESOLUTION_LABEL[resolution];
+}
+
+// ---------------------------------------------------------------------------
+// Closing the second round
+// ---------------------------------------------------------------------------
+
+/// Decision 73's "still unresolved", as a Prisma filter.
+///
+/// **The same rule as `needsAdminAtClose`, in the shape a query needs.** That
+/// predicate answers for one stored value; this selects the rows. Two spellings
+/// of one rule is a drift risk, so `passes.test.ts` asserts they agree across
+/// every `PassResolution` and null — if someone adds a fifth resolution and
+/// teaches only one of them about it, that test fails.
+///
+/// `null` cannot be expressed through `in`: SQL's `IN (NULL)` matches nothing, so
+/// the OR is load-bearing rather than stylistic. Same posture as
+/// `SECOND_ROUND_POOL` — a where-fragment living beside the rule it encodes.
+/// **No `as const`, unlike `SECOND_ROUND_POOL`**, and not an oversight: Prisma's
+/// generated `WhereInput` types declare `OR` as a mutable array, so a readonly
+/// tuple is rejected at the call site. Re-adding it breaks the typecheck rather
+/// than tightening anything.
+export const UNRESOLVED_AT_CLOSE = {
+  OR: [{ resolution: null }, { resolution: PassResolution.CARRIED }],
+};
+
+export interface CloseRoundContext {
+  stage: InstanceStage;
+  /// Passes on this instance, at any status.
+  passCount: number;
+}
+
+/// Why the second round cannot be closed right now, or null when it can.
+///
+/// **`COMPLETE` returns a message here but is not an error at the action.** The
+/// page uses this to explain why the control is absent, and "already closed" is
+/// the honest explanation. The action must treat that state as an idempotent
+/// no-op instead, per 17r — running the close twice has to change nothing rather
+/// than fail — so it checks for `COMPLETE` before consulting this.
+export function closeRoundBlock(context: CloseRoundContext): string | null {
+  if (context.stage === InstanceStage.COMPLETE) {
+    return "The second round is closed.";
+  }
+
+  if (context.stage !== InstanceStage.SECOND_ROUND) {
+    return "The second round has not started. Finalize the first round first.";
+  }
+
+  // Clause 17s. Without a pass there is no `PassApplicant` row to carry
+  // NEEDS_ADMIN, so every applicant would end the cycle unresolved with nothing
+  // to find them by — and FR-19 would render an empty Unresolved group over a
+  // live pool.
+  if (context.passCount === 0) {
+    return (
+      "No pass has been created, so there is nowhere to record who was left undecided. Create " +
+      "a pass and run it before closing the round."
+    );
+  }
+
+  return null;
 }

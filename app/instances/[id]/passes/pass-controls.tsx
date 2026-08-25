@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 
-import { closePass, createPass, type PassActionState } from "./actions";
+import { closePass, closeSecondRound, createPass, type PassActionState } from "./actions";
 import { Button } from "@/components/ui/button";
 
 /// FR-17's two state changes: create a pass, close the open one.
@@ -16,6 +16,8 @@ export function PassControls({
   instanceId,
   openPass,
   createBlockedBecause,
+  closeRoundBlockedBecause,
+  unresolvedOnFinalPass,
   poolSize,
 }: {
   instanceId: string;
@@ -26,6 +28,13 @@ export function PassControls({
   /// in.
   createBlockedBecause: string | null;
   poolSize: number;
+  /// Null when the round can be closed. Computed server-side by
+  /// `closeRoundBlock`, the same function the action consults.
+  closeRoundBlockedBecause: string | null;
+  /// What the close would stamp NEEDS_ADMIN on, per decision 73. Shown in the
+  /// confirm because it is the number that should stop an admin who meant to run
+  /// one more pass.
+  unresolvedOnFinalPass: number;
 }) {
   const [createState, createAction, creating] = useActionState<PassActionState, FormData>(
     createPass,
@@ -95,6 +104,82 @@ export function PassControls({
 
       <Feedback state={createState} />
       <Feedback state={closeState} />
+
+      <CloseRound
+        instanceId={instanceId}
+        blockedBecause={closeRoundBlockedBecause}
+        unresolvedOnFinalPass={unresolvedOnFinalPass}
+      />
+    </div>
+  );
+}
+
+/// FR-17's "Close second round". The one control here that ends the cycle.
+///
+/// **Confirmed, and the confirm carries the number.** It moves the instance to
+/// COMPLETE, closes the final pass, and stamps NEEDS_ADMIN on everyone still
+/// undecided — and unlike closing a pass, there is no next thing after it. The
+/// count is in the confirm because "12 applicants will need an admin decision"
+/// is the fact that should stop an admin who meant to run one more pass.
+function CloseRound({
+  instanceId,
+  blockedBecause,
+  unresolvedOnFinalPass,
+}: {
+  instanceId: string;
+  blockedBecause: string | null;
+  unresolvedOnFinalPass: number;
+}) {
+  const [state, formAction, pending] = useActionState<PassActionState, FormData>(
+    closeSecondRound,
+    {},
+  );
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <div className="mt-8 border-t pt-6">
+      <h2 className="text-sm font-medium">Close the second round</h2>
+
+      {blockedBecause !== null ? (
+        <p className="text-muted-foreground mt-1 text-sm">{blockedBecause}</p>
+      ) : (
+        <form action={formAction} className="mt-2 space-y-3">
+          <input type="hidden" name="instanceId" value={instanceId} />
+
+          {confirming ? (
+            <>
+              <p className="text-sm">
+                This ends the cycle. The final pass closes if it is still open, and{" "}
+                {unresolvedOnFinalPass === 0
+                  ? "every applicant on it has already been decided"
+                  : `${unresolvedOnFinalPass} applicant${
+                      unresolvedOnFinalPass === 1 ? "" : "s"
+                    } still undecided on it will be marked as needing an admin decision`}
+                . It cannot be reopened.
+              </p>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={pending}>
+                  {pending ? "Closing…" : "Close second round"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConfirming(false)}
+                  disabled={pending}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
+              Close second round
+            </Button>
+          )}
+        </form>
+      )}
+
+      <Feedback state={state} />
     </div>
   );
 }

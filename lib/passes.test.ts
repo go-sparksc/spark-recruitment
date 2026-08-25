@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ApplicantStatus,
+  InstanceStage,
   DecisionOutcome,
   PassResolution,
   PassStatus,
@@ -23,6 +24,8 @@ import {
 } from "@/generated/prisma/enums";
 import {
   RESOLUTION_LABEL,
+  UNRESOLVED_AT_CLOSE,
+  closeRoundBlock,
   SECOND_ROUND_POOL,
   buildPassGrid,
   decisionOutcomeFor,
@@ -675,5 +678,72 @@ describe("resolutionLabel", () => {
     for (const value of Object.values(PassResolution)) {
       expect(RESOLUTION_LABEL[value]).toBeTruthy();
     }
+  });
+});
+
+describe("closeRoundBlock", () => {
+  const ready = { stage: InstanceStage.SECOND_ROUND, passCount: 3 };
+
+  it("allows the close in the second round with at least one pass", () => {
+    expect(closeRoundBlock(ready)).toBeNull();
+  });
+
+  /// Clause 17s, and the message has to name the fix rather than only the rule.
+  it("blocks with no pass and says to create one", () => {
+    const block = closeRoundBlock({ ...ready, passCount: 0 });
+
+    expect(block).toMatch(/Create a pass/i);
+  });
+
+  it("blocks before the round has started", () => {
+    expect(closeRoundBlock({ ...ready, stage: InstanceStage.WRITTEN })).toMatch(/not started/);
+    expect(closeRoundBlock({ ...ready, stage: InstanceStage.FIRST_ROUND })).toMatch(/not started/);
+  });
+
+  /// The page renders this as an explanation. The ACTION must not treat it as an
+  /// error — 17r makes a second close a no-op, not a failure — which is why the
+  /// action checks COMPLETE before it consults this.
+  it("reports a closed round rather than allowing a second close", () => {
+    expect(closeRoundBlock({ ...ready, stage: InstanceStage.COMPLETE })).toBe(
+      "The second round is closed.",
+    );
+  });
+
+  it("reports the closed round even with no pass, since the round is over either way", () => {
+    expect(closeRoundBlock({ stage: InstanceStage.COMPLETE, passCount: 0 })).toBe(
+      "The second round is closed.",
+    );
+  });
+});
+
+describe("UNRESOLVED_AT_CLOSE agrees with needsAdminAtClose", () => {
+  /// **One rule, two spellings, pinned together.** `needsAdminAtClose` answers
+  /// for a stored value and `UNRESOLVED_AT_CLOSE` selects the rows; decision 73
+  /// says both mean "NULL or CARRIED". Adding a fifth `PassResolution` and
+  /// teaching only one of them about it fails here rather than in production,
+  /// where it would look like a close that silently skipped some applicants.
+  const selected = new Set(
+    UNRESOLVED_AT_CLOSE.OR.map((clause) => clause.resolution as PassResolution | null),
+  );
+
+  const everyValue: (PassResolution | null)[] = [...Object.values(PassResolution), null];
+
+  it("selects exactly the values the predicate accepts", () => {
+    for (const value of everyValue) {
+      expect(selected.has(value)).toBe(needsAdminAtClose(value));
+    }
+  });
+
+  /// Decision 73 spelled out, so the agreement above cannot be satisfied by both
+  /// sides being wrong in the same direction.
+  it("means NULL or CARRIED and nothing else", () => {
+    expect(selected).toEqual(new Set([null, PassResolution.CARRIED]));
+  });
+
+  /// SPARKLET and REJECTED are never overwritten, which is what makes the action
+  /// idempotent as §7.4 requires.
+  it("never selects a terminal resolution", () => {
+    expect(selected.has(PassResolution.SPARKLET)).toBe(false);
+    expect(selected.has(PassResolution.REJECTED)).toBe(false);
   });
 });

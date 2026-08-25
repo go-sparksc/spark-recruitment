@@ -12,7 +12,14 @@ import {
   Round,
 } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
-import { SECOND_ROUND_POOL, isTerminal, passCreationBlock, resolvePass } from "@/lib/passes";
+import {
+  SECOND_ROUND_POOL,
+  UNRESOLVED_AT_CLOSE,
+  closeRoundBlock,
+  isTerminal,
+  passCreationBlock,
+  resolvePass,
+} from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export interface PassActionState {
@@ -382,4 +389,128 @@ export async function manuallyReject(
   revalidatePath(`/instances/${instanceId}/passes/${pass.id}`);
 
   return { message: `Applicant rejected in pass ${pass.ordinal}.` };
+}
+
+/// FR-17's "Close second round". Clauses 17p–17u and decision 73.
+///
+/// Passes do not end on their own; this is the explicit act that ends the round,
+/// and it is the *only* thing that produces FR-19's Unresolved group.
+///
+/// **`Applicant.status` is deliberately untouched** (17u). There is no
+/// `UNRESOLVED` status, because an applicant's fate at the end of the round is
+/// already recorded on their final pass row and a second copy could disagree
+/// with the first. They stay ACTIVE, and FR-19 finds them by the row.
+export async function closeSecondRound(
+  _prev: PassActionState,
+  formData: FormData,
+): Promise<PassActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  await requireInstance(instanceId, path(instanceId));
+
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { id: true, currentStage: true },
+  });
+  if (!instance) return { error: "No such instance." };
+
+  // **17r, and it has to come before the guard.** `closeRoundBlock` reports a
+  // COMPLETE instance as "the second round is closed", which is the right thing
+  // for the page to render and the wrong thing for this action to return: §7.4
+  // requires that running the close twice changes nothing, and an error is a
+  // change in what the admin is told. So a second run is a quiet no-op — no
+  // writes, and no second audit row.
+  if (instance.currentStage === InstanceStage.COMPLETE) {
+    return { message: "The second round is already closed." };
+  }
+
+  // The final pass is the highest ordinal, which is also the only one decision
+  // 73 touches: a CARRIED row on an earlier pass carried into a later one and is
+  // not unresolved, it is history.
+  const finalPass = await prisma.pass.findFirst({
+    where: { instanceId },
+    orderBy: { ordinal: "desc" },
+    select: { id: true, ordinal: true, status: true },
+  });
+
+  const block = closeRoundBlock({
+    stage: instance.currentStage,
+    passCount: finalPass === null ? 0 : 1,
+  });
+  if (block) return { error: block };
+
+  // Non-null once the block has passed: the only branch that permits a null
+  // final pass is the `passCount === 0` one, which blocks.
+  if (!finalPass) return { error: "No pass exists on this instance." };
+
+  const unresolved = await prisma.passApplicant.count({
+    where: { passId: finalPass.id, ...UNRESOLVED_AT_CLOSE },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // §7.4: "It also closes the final pass if it is still open, so a COMPLETE
+    // instance cannot hold an OPEN one." Skipped when already closed, so a
+    // closedAt recorded days ago is not rewritten to now.
+    if (finalPass.status === PassStatus.OPEN) {
+      await tx.pass.update({
+        where: { id: finalPass.id },
+        data: { status: PassStatus.CLOSED, closedAt: new Date() },
+      });
+    }
+
+    // 17q and decision 73: NULL **or** CARRIED, on the final pass only. A
+    // CARRIED row here is an applicant whose votes were mixed and who had no
+    // next pass to carry into — invisible to FR-19 if it kept its value, since
+    // FR-19 finds Unresolved by NEEDS_ADMIN and by nothing else.
+    //
+    // `updateMany` is what makes 17r true at the database rather than by
+    // argument: after the first run no row matches this filter.
+    await tx.passApplicant.updateMany({
+      where: { passId: finalPass.id, ...UNRESOLVED_AT_CLOSE },
+      data: { resolution: PassResolution.NEEDS_ADMIN, resolvedAt: new Date() },
+    });
+
+    // Decision 70: NEEDS_ADMIN writes no `Decision` row. Nothing has been
+    // decided yet — that is the entire meaning of the value — and the row is
+    // written later, whenever an admin actually resolves them.
+    //
+    // 17u: no `Applicant.status` write either. Deliberately.
+
+    await tx.instance.update({
+      where: { id: instanceId },
+      data: { currentStage: InstanceStage.COMPLETE },
+    });
+
+    // 17t. Counts only, no applicant names.
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        actor: "admin",
+        action: "CLOSE_SECOND_ROUND",
+        entityType: "Instance",
+        entityId: instanceId,
+        previousValue: {
+          previousInstanceStage: instance.currentStage,
+          finalPassOrdinal: finalPass.ordinal,
+          finalPassWasOpen: finalPass.status === PassStatus.OPEN,
+          markedNeedsAdmin: unresolved,
+        },
+      },
+    });
+  });
+
+  revalidateAll(instanceId);
+  revalidatePath(`/instances/${instanceId}/passes/${finalPass.id}`);
+  // The instance list renders currentStage, and the reviewer's list changes
+  // meaning at this moment — its "round is closed" empty state turns on it.
+  revalidatePath("/");
+
+  return {
+    message:
+      `Second round closed.` +
+      (unresolved > 0
+        ? ` ${unresolved} applicant${unresolved === 1 ? "" : "s"} left unresolved and ${
+            unresolved === 1 ? "needs" : "need"
+          } an admin decision.`
+        : " Every applicant was decided."),
+  };
 }

@@ -6,7 +6,12 @@ import { InstanceCrumbs } from "../instance-crumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { InstanceStage, PassStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
-import { SECOND_ROUND_POOL, passCreationBlock, summarizePass } from "@/lib/passes";
+import {
+  SECOND_ROUND_POOL,
+  closeRoundBlock,
+  passCreationBlock,
+  summarizePass,
+} from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Passes — Spark SC Recruitment" };
@@ -55,6 +60,13 @@ export default async function PassesPage({ params }: { params: Promise<{ id: str
 
   const openPass = summaries.find((summary) => summary.status === PassStatus.OPEN) ?? null;
 
+  // Passes are ordered by ordinal desc, so the first is the final pass — the
+  // only one decision 73 touches. A CARRIED row on an earlier pass carried into
+  // a later one and is history, not an undecided applicant.
+  const finalPass = summaries[0] ?? null;
+  const unresolvedOnFinalPass =
+    finalPass === null ? 0 : finalPass.unresolved + finalPass.carried;
+
   // **The same function the action enforces with.** The page explains, the
   // action refuses, and neither derives the reason separately — which is what
   // stops the button's absence and the error text from describing different
@@ -83,6 +95,11 @@ export default async function PassesPage({ params }: { params: Promise<{ id: str
         openPass={openPass ? { id: openPass.id, ordinal: openPass.ordinal } : null}
         createBlockedBecause={block}
         poolSize={poolSize}
+        closeRoundBlockedBecause={closeRoundBlock({
+          stage: instance.currentStage,
+          passCount: summaries.length,
+        })}
+        unresolvedOnFinalPass={unresolvedOnFinalPass}
       />
 
       {summaries.length === 0 ? (
