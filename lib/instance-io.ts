@@ -5,6 +5,16 @@ import "server-only";
 // back. Kept apart for the reason CLAUDE.md gives about pages: everything that
 // can be decided without a database should be, so it can be tested without one.
 //
+// **`server-only` makes this module unimportable from a plain `tsx` script**,
+// which matters because `prisma/checks/round-trip.ts` has to import it — a check
+// that re-implemented these reads would be verifying a second copy of the thing
+// under test. Run such a script with `tsx --conditions=react-server`, which
+// resolves the `server-only` package to its empty build rather than to the
+// module that throws. The flag form is used rather than `NODE_OPTIONS=` because
+// npm scripts run through cmd.exe on Windows, where the env-var prefix is not a
+// thing. The marker stays: this module reads `passwordHash` and every
+// `codeHash`, and keeping it out of a client bundle is worth one flag.
+//
 // **Nothing here may import `slugify` or `uniqueSlug` from lib/fields.ts.**
 // `FieldGroup.key` is immutable by decision 13 and travels through the export
 // verbatim; a restore that re-slugged it from `displayName` would reintroduce
