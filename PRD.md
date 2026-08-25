@@ -1007,6 +1007,18 @@ and decision 79, checked in the same place.
 
     **Recorded cost:** a club holding the export file and no developer cannot restore a backup unaided. If that day comes, the restore path already exists in `lib/instance-io.ts` and the missing half is a guarded upload page rather than a rewrite.
 
+88. **A restore preserves every id verbatim. RESOLVED.** Every `@default(cuid())` is written explicitly from the export, so no foreign key is ever remapped and the round trip is an identity. The alternative — fresh ids and an old→new map applied in foreign-key order — is not merely more work, it is **unsound on this schema**, because three places carry ids that are not foreign keys and that no remap can follow safely:
+
+    - `Applicant.data` is a JSONB object **keyed by `Field.id`**. Regenerating field ids orphans every value on every applicant unless the key set is rewritten in step.
+    - `InterviewImport.mapping` encodes roles as `CATEGORY:<interviewCategoryId>` inside a JSON string value.
+    - `AuditLog.entityId` and `AuditLog.previousValue` hold ids of rows from every table, as plain strings with no schema link to follow. `previousValue` is an arbitrary snapshot of a prior row and can carry any id in the model.
+
+    The first two are rewritable with care. The third is not, and a remap that silently left the audit log pointing at ids that no longer exist would break the one table whose entire purpose is attribution. Preserving ids removes the problem rather than managing it.
+
+    **Restore semantics:** the target instance id must not already exist, and a collision fails loudly rather than merging. Importing one export twice as two instances is not supported and is not what the gate asks for.
+
+    **What this buys the comparison, which is the reason it is a decision rather than a detail.** With ids preserved, and `createdAt` and `updatedAt` written explicitly from the export, *nothing* in the round trip is expected to differ — so "intact" is an exact field-by-field comparison rather than one carrying a list of exceptions. A comparison with expected drift in it is a comparison a real regression can hide inside.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
