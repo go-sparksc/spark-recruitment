@@ -13,7 +13,13 @@
 // second copy of that fact with no rule for which one wins when they disagree.
 
 import { ApplicantStatus, PassResolution, Round } from "@/generated/prisma/enums";
-import type { PassTally } from "@/lib/passes";
+import {
+  buildPassGrid,
+  type ConflictLike,
+  type EffectiveVote,
+  type PassTally,
+  type PassVoteLike,
+} from "@/lib/passes";
 
 /// One applicant as FR-19 needs them, whichever group they land in.
 export interface FinalApplicantSource {
@@ -146,6 +152,83 @@ export function stillDeciding(sources: readonly FinalApplicantSource[]): number 
       source.status === ApplicantStatus.ACTIVE &&
       !isUnresolved(source),
   ).length;
+}
+
+// ---------------------------------------------------------------------------
+// One applicant's second round, for the admin profile (clause 19b)
+// ---------------------------------------------------------------------------
+
+/// One reviewer's position on this applicant in one pass.
+export interface ApplicantPassVote {
+  reviewerId: string;
+  reviewerName: string;
+  vote: EffectiveVote;
+  /// Whether the `SKIP` is a conflict rather than a stored abstention. The same
+  /// distinction `buildPassGrid` draws, and for the same reason: two different
+  /// things render as `SKIP`, and only one of them is a recusal.
+  isConflict: boolean;
+}
+
+/// One pass, from one applicant's point of view.
+export interface ApplicantPassRow {
+  passId: string;
+  ordinal: number;
+  /// What the pass row holds. `stored` rather than recomputed, for
+  /// `PassGridRow.resolution`'s stated reason: a manual reject and the
+  /// close-round `NEEDS_ADMIN` are writes no recount reproduces.
+  resolution: PassResolution | null;
+  tally: PassTally;
+  votes: ApplicantPassVote[];
+}
+
+export interface PassHistorySource {
+  passId: string;
+  ordinal: number;
+  resolution: PassResolution | null;
+  votes: readonly PassVoteLike[];
+}
+
+/// This applicant's whole second round, pass by pass.
+///
+/// **Admin-only, and that is a §6 rule rather than a layout choice.** Decision
+/// 74 keeps pass votes from every reviewer, closed pass or not, and §6's last
+/// row makes the admin the only viewer who sees them. FR-18's grid renders one
+/// pass across every applicant; this renders one applicant across every pass,
+/// which is the cut an admin resolving a NEEDS_ADMIN row actually needs.
+///
+/// Conflicts are round-scoped and sticky (decision 67), so one set applies to
+/// every pass rather than being carried per pass.
+export function buildPassHistory(
+  applicantId: string,
+  passes: readonly PassHistorySource[],
+  reviewers: readonly { id: string; firstName: string; lastName: string }[],
+  conflicts: readonly ConflictLike[],
+): ApplicantPassRow[] {
+  const reviewerIds = reviewers.map((reviewer) => reviewer.id);
+
+  return passes.map((pass) => {
+    // One applicant, so the grid has exactly one row — reusing it rather than
+    // recomputing keeps this surface and FR-18's from ever disagreeing about
+    // what a cell says.
+    const grid = buildPassGrid(
+      { reviewerIds, applicantIds: [applicantId], votes: pass.votes, conflicts },
+      new Map([[applicantId, pass.resolution]]),
+    );
+    const row = grid.rows[0];
+
+    return {
+      passId: pass.passId,
+      ordinal: pass.ordinal,
+      resolution: row.stored,
+      tally: row.tally,
+      votes: reviewers.map((reviewer, index) => ({
+        reviewerId: reviewer.id,
+        reviewerName: `${reviewer.firstName} ${reviewer.lastName}`,
+        vote: row.cells[index],
+        isConflict: row.conflicts[index],
+      })),
+    };
+  });
 }
 
 /// What the votes say about *why* an applicant is unresolved.

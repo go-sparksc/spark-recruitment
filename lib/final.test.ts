@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApplicantStatus, PassResolution, Round } from "@/generated/prisma/enums";
 import {
+  buildPassHistory,
   groupFinalApplicants,
   isUnresolved,
   stillDeciding,
@@ -179,6 +180,83 @@ describe("stillDeciding", () => {
 
   it("is zero on a closed round", () => {
     expect(stillDeciding([source(), source({ status: ApplicantStatus.SPARKLET })])).toBe(0);
+  });
+});
+
+describe("buildPassHistory — one applicant across every pass", () => {
+  const reviewers = [
+    { id: "r1", firstName: "Mary Anne", lastName: "Chen" },
+    { id: "r2", firstName: "Alex", lastName: "Kim" },
+    { id: "r3", firstName: "Sam", lastName: "Osei" },
+  ];
+
+  it("names every reviewer's position in each pass", () => {
+    const history = buildPassHistory(
+      "app-1",
+      [
+        {
+          passId: "p1",
+          ordinal: 1,
+          resolution: PassResolution.CARRIED,
+          votes: [
+            { applicantId: "app-1", reviewerId: "r1", value: "YES" },
+            { applicantId: "app-1", reviewerId: "r2", value: "NO" },
+            { applicantId: "app-1", reviewerId: "r3", value: "YES" },
+          ],
+        },
+      ],
+      reviewers,
+      [],
+    );
+
+    expect(history).toHaveLength(1);
+    expect(history[0].votes.map((vote) => `${vote.reviewerName}:${vote.vote}`)).toEqual([
+      "Mary Anne Chen:YES",
+      "Alex Kim:NO",
+      "Sam Osei:YES",
+    ]);
+    expect(history[0].tally).toMatchObject({ yes: 2, no: 1, eligible: 3 });
+  });
+
+  it("marks a conflict apart from a stored skip", () => {
+    // Two different things render as SKIP and only one is a recusal — the same
+    // distinction buildPassGrid draws for FR-18's cell.
+    const history = buildPassHistory(
+      "app-1",
+      [{ passId: "p1", ordinal: 1, resolution: null, votes: [] }],
+      reviewers,
+      [{ applicantId: "app-1", reviewerId: "r2" }],
+    );
+
+    expect(history[0].votes[1]).toMatchObject({ vote: "SKIP", isConflict: true });
+    expect(history[0].votes[0]).toMatchObject({ vote: "OUTSTANDING", isConflict: false });
+  });
+
+  it("reports the stored resolution rather than recomputing it", () => {
+    // A manual reject is a write no recount reproduces: recomputing this row
+    // gives null, and rendering that would tell an admin the rejection they
+    // performed had not happened.
+    const history = buildPassHistory(
+      "app-1",
+      [{ passId: "p1", ordinal: 1, resolution: PassResolution.REJECTED, votes: [] }],
+      reviewers,
+      [],
+    );
+    expect(history[0].resolution).toBe(PassResolution.REJECTED);
+  });
+
+  it("carries one applicant through several passes in order", () => {
+    const history = buildPassHistory(
+      "app-1",
+      [
+        { passId: "p1", ordinal: 1, resolution: PassResolution.CARRIED, votes: [] },
+        { passId: "p2", ordinal: 2, resolution: PassResolution.NEEDS_ADMIN, votes: [] },
+      ],
+      reviewers,
+      [],
+    );
+    expect(history.map((row) => row.ordinal)).toEqual([1, 2]);
+    expect(history.map((row) => row.resolution)).toEqual(["CARRIED", "NEEDS_ADMIN"]);
   });
 });
 

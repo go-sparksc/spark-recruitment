@@ -6,8 +6,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildPassHistory } from "@/lib/final";
+import { resolutionLabel } from "@/lib/passes";
 import { buildApplicantView } from "@/lib/review";
 import { formatAverage, formatVariance, reviewerAverage, scoreSummary } from "@/lib/results";
+import { buildInterviewCards } from "@/lib/second-round";
 
 export const metadata = { title: "Applicant — Spark SC Recruitment" };
 
@@ -28,7 +31,19 @@ export default async function ApplicantResultPage({
   const { id, applicantId } = await params;
   await requireInstance(id, `/instances/${id}/results/${applicantId}`);
 
-  const [instance, applicant, fields, groups, categories] = await Promise.all([
+  const [
+    instance,
+    applicant,
+    fields,
+    groups,
+    categories,
+    interviewCategories,
+    interviewResults,
+    interviewNotes,
+    passes,
+    secondRoundReviewers,
+    conflicts,
+  ] = await Promise.all([
     prisma.instance.findUnique({ where: { id }, select: { id: true, name: true } }),
     // Scoped to the instance: an applicant id in a URL is an untrusted
     // reference until it has been confirmed to belong to this cycle.
@@ -88,6 +103,52 @@ export default async function ApplicantResultPage({
       orderBy: { ordinal: "asc" },
       select: { id: true, name: true, minPoints: true, maxPoints: true },
     }),
+    // The first round's imported evidence. Rendered only where it exists —
+    // clause 12q's rule that the dashboard shows whichever half arrived, which
+    // is what keeps this page correct on a written-round-only instance.
+    prisma.interviewCategory.findMany({
+      where: { instanceId: id },
+      orderBy: { ordinal: "asc" },
+      select: { id: true, name: true, maxPoints: true },
+    }),
+    prisma.interviewResult.findMany({
+      where: { applicantId },
+      orderBy: { interviewerName: "asc" },
+      select: {
+        id: true,
+        interviewerName: true,
+        score: true,
+        categoryScores: { select: { interviewCategoryId: true, points: true } },
+      },
+    }),
+    prisma.interviewNotes.findUnique({
+      where: { applicantId },
+      select: { interviewerName: true, body: true },
+    }),
+    // The second round. §6's last row makes the admin the only viewer who sees a
+    // pass vote at all, and decision 74 is why no reviewer surface renders one.
+    prisma.pass.findMany({
+      where: { instanceId: id, members: { some: { applicantId } } },
+      orderBy: { ordinal: "asc" },
+      select: {
+        id: true,
+        ordinal: true,
+        members: { where: { applicantId }, select: { resolution: true } },
+        votes: {
+          where: { applicantId },
+          select: { applicantId: true, reviewerId: true, value: true },
+        },
+      },
+    }),
+    prisma.reviewer.findMany({
+      where: { instanceId: id, rounds: { has: Round.SECOND_ROUND } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, firstName: true, lastName: true },
+    }),
+    prisma.conflictOfInterest.findMany({
+      where: { round: Round.SECOND_ROUND, applicantId },
+      select: { applicantId: true, reviewerId: true },
+    }),
   ]);
 
   if (!instance || !applicant) notFound();
@@ -111,6 +172,24 @@ export default async function ApplicantResultPage({
     .map((assignment) => reviewerAverage(assignment.scores.map((s) => s.points), categories.length))
     .filter((value): value is number => value !== null);
   const summary = scoreSummary(averages);
+
+  // Both transformations live in `lib/`, per CLAUDE.md's Phase 5 lesson. The
+  // page holds the queries and nothing else.
+  const interviewCards = buildInterviewCards(
+    interviewResults,
+    interviewCategories.map((category) => category.id),
+  );
+  const passHistory = buildPassHistory(
+    applicantId,
+    passes.map((pass) => ({
+      passId: pass.id,
+      ordinal: pass.ordinal,
+      resolution: pass.members[0]?.resolution ?? null,
+      votes: pass.votes,
+    })),
+    secondRoundReviewers,
+    conflicts,
+  );
 
   return (
     <main className="mx-auto w-full max-w-4xl space-y-8 px-6 py-12">
@@ -215,6 +294,108 @@ export default async function ApplicantResultPage({
           </div>
         ) : null}
       </section>
+
+      {/* FR-12's imported evidence. Absent entirely on an instance that never
+          reached the first round, rather than rendered as an empty shell. */}
+      {interviewCards.length > 0 || interviewNotes !== null ? (
+        <section className="space-y-3">
+          <h2 className="text-lg font-medium">First-round interviews</h2>
+
+          {interviewCards.map((card) => (
+            <Card key={card.resultId}>
+              <CardContent className="space-y-3 p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">{card.interviewerName}</span>
+                  {/* The average as imported, never recomputed from the
+                      categories — if the two disagree the sheet wins, because
+                      that is the number the interviewers recorded. */}
+                  <span className="text-muted-foreground text-sm tabular-nums">
+                    average {card.score}
+                  </span>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+                  {interviewCategories.map((category, index) => (
+                    <div key={category.id}>
+                      <dt className="text-muted-foreground text-xs">{category.name}</dt>
+                      <dd className="font-medium tabular-nums">
+                        {card.points[index] ?? "—"}{" "}
+                        <span className="text-muted-foreground text-xs font-normal">
+                          / {category.maxPoints}
+                        </span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </CardContent>
+            </Card>
+          ))}
+
+          {interviewNotes ? (
+            <Card>
+              <CardContent className="space-y-1 p-4">
+                <p className="text-muted-foreground text-xs">
+                  Interview notes
+                  {interviewNotes.interviewerName ? ` · ${interviewNotes.interviewerName}` : null}
+                </p>
+                <p className="text-sm whitespace-pre-wrap">{interviewNotes.body}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <p className="text-muted-foreground rounded-md border p-4 text-sm">
+              No interview notes were imported for this applicant.
+            </p>
+          )}
+        </section>
+      ) : null}
+
+      {/* FR-18's data, cut the other way: one applicant across every pass.
+          §6's last row makes the admin the only viewer who ever sees a pass
+          vote, and decision 74 is why no reviewer surface renders one. */}
+      {passHistory.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="text-lg font-medium">Second round</h2>
+          {passHistory.map((pass) => (
+            <Card key={pass.passId}>
+              <CardContent className="space-y-3 p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">
+                    Pass {pass.ordinal}
+                    {" · "}
+                    <Link
+                      href={`/instances/${instance.id}/passes/${pass.passId}`}
+                      className="text-muted-foreground text-sm font-normal hover:underline"
+                    >
+                      grid
+                    </Link>
+                  </span>
+                  <span className="text-muted-foreground text-sm tabular-nums">
+                    {resolutionLabel(pass.resolution)}
+                    {" — "}
+                    {pass.tally.yes} yes · {pass.tally.no} no
+                    {pass.tally.skip > 0 ? ` · ${pass.tally.skip} recused` : null}
+                    {pass.tally.outstanding > 0 ? ` · ${pass.tally.outstanding} outstanding` : null}
+                  </span>
+                </div>
+
+                <ul className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                  {pass.votes.map((vote) => (
+                    <li key={vote.reviewerId} className="flex items-baseline justify-between gap-3">
+                      <span>{vote.reviewerName}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {vote.vote === "OUTSTANDING"
+                          ? "—"
+                          : vote.vote === "SKIP" && vote.isConflict
+                            ? "conflict"
+                            : vote.vote.toLowerCase()}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ))}
+        </section>
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Application</h2>
