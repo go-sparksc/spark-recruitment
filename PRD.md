@@ -1031,6 +1031,12 @@ and decision 79, checked in the same place.
 
     **Recorded consequence rather than left to be discovered:** a cell beginning with one of those characters will evaluate when the file is opened in a spreadsheet. That is a property of the spreadsheet, and the remedy is to import the CSV as text — not to change what the export writes.
 
+91. **A seeded complete second round, reversing `prisma/advance.ts`'s stated position. RESOLVED.** `advance.ts` says in a comment that it creates no `Pass` rows, because "those are what an admin creates on FR-17's screen, and seeding them would develop FR-18 against a state nothing produced." That was right for Phase 6, which was building FR-18 and needed the grid developed against passes a person had actually run. It inverts for Phase 7.
+
+    FR-19 renders the *outcome* of a second round, and `npm run seed:advance` stops exactly where an admin would create pass 1 — so the seed produces no second round at all, and FR-19's three groups, its funnel and FR-20's round trip would every one of them be developed against empty sets. BUILD_PLAN's own Phase 6 record already states that producing the all-COI case through the UI takes twelve reviewer sign-ins, so "drive it by hand each time" is not an available answer either, and whatever is driven by hand does not survive the deleted database the Phase 7 gate requires.
+
+    `npm run seed:passes` writes **exactly what the FR-17 actions write** — the posture `advance.ts` already takes toward `finalizeFirstRound`, and for the same reason: a seed whose idea of a finished round differs from the action's would develop every surface against a state the application cannot produce. It yields all four `PassResolution` values plus `NULL` rows, both `Decision` actors at `stage = SECOND_ROUND`, and a non-empty Sparklet class. `advance.ts`'s comment is updated to point at it rather than left contradicting the repository.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
