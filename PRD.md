@@ -971,6 +971,12 @@ and decision 79, checked in the same place.
 
     The admin's FR-18 grid is unaffected and remains the only surface in the product that renders a pass vote.
 
+83a. **Correction to decision 83's "leaves their list" claim. CONFIRMED BY GATE.** That claim is true for terminal outcomes — `SPARKLET` and `REJECTED` — where the applicant leaves the reviewer's list. It is **false for `CARRIED`**: that applicant stays present, with a settled control and no vote control.
+
+    This does not weaken 83's reasoning. "Settled but still present" reveals only that a mixed result occurred — not which reviewers voted which way, and not what the vote was. That is the boundary 83 was actually protecting, and it holds.
+
+    The original wording overclaimed uniform disappearance. `CARRIED` was the one resolution that does not behave that way, and the gate is what found it.
+
 84. **The second-round roster locks when the first pass is created, not when the round begins. RESOLVED, amending decisions 66 and 78.** Both of those fixed the roster at `Instance.currentStage = SECOND_ROUND`. The trigger moves to the existence of a `Pass` on the instance: before the first pass exists the roster is freely editable in both directions, and from the moment pass 1 is created it is completely fixed, adds and removals alike. Same single hard cutover 66 and 78 already describe — moved to the condition that actually carries their reasoning.
 
     **What 66 and 78 protect is a denominator with votes riding on it.** Adding a reviewer mid-round changes how many votes it takes to decide an applicant; withdrawing one shrinks the denominator retroactively and can make an applicant unanimous the instant they leave. Both of those are facts about a pass that is already open. **Before any pass exists there is no denominator and no vote in flight, however many reviewers are listed**, so the old trigger was locking against a risk that had not yet come into being.
