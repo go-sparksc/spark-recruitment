@@ -1001,6 +1001,12 @@ and decision 79, checked in the same place.
 
 86. **Export includes `Instance.passwordHash` and `RoundAccessCode.codeHash`. RESOLVED.** CLAUDE.md rule 4 says password hashes are never returned in an API response. FR-20's export is a deliberate exception: the values are argon2id hashes, not recoverable passwords, and omitting them would make a restored instance unusable without a manual reset of both credential types, plus two permanent exceptions in the export/reimport comparison. The export route is admin-only and the file itself is sensitive for this reason, which `ADMIN_GUIDE` (Phase 8) must state.
 
+87. **FR-20's reimport is a verification script, not a product surface. RESOLVED.** FR-20 names export and nothing else. The gate needs a reimport in order to prove the export is complete, which is a property of the artifact rather than a user story. An admin route accepting an uploaded file and writing password hashes and applicant data straight into the database would be the most dangerous surface in the product, and it would have none of the staging-preview-commit machinery FR-2/FR-3 and FR-12 both insist on for far less consequential imports. The lock-in FR-20 exists to prevent is about the JSON being open and complete, not about this tool being able to load it back.
+
+    `prisma/checks/round-trip.ts`, run by hand like the other scripts in that directory: it needs a seeded database, it writes to it, and it cleans up after itself.
+
+    **Recorded cost:** a club holding the export file and no developer cannot restore a backup unaided. If that day comes, the restore path already exists in `lib/instance-io.ts` and the missing half is a guarded upload page rather than a rewrite.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
