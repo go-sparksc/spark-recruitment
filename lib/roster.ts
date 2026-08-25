@@ -293,6 +293,15 @@ export interface RemovalImpact {
   /// Of those, how many carry a `ReviewNote`. Counted separately from scores: a
   /// reviewer can leave a note without scoring, and the note is still their work.
   notedAssignmentCount: number;
+  /// `ConflictOfInterest` rows the removal destroys, per decision 85. **Not a
+  /// subset of the assignment counts** — a second-round reviewer holds no
+  /// written assignments and may still have flagged conflicts — so it is
+  /// validated for sanity but never compared against `assignmentCount`.
+  ///
+  /// It does not block: decision 85 is explicit that re-flagging is trivial, and
+  /// a conflict is not submitted work in the way a score or a note is. It is
+  /// here so the audit row can record what the removal deleted.
+  conflictCount: number;
 }
 
 export interface RemovalRequest {
@@ -325,8 +334,11 @@ export function checkReviewerRemoval(
   request: RemovalRequest,
   impact: RemovalImpact,
 ): RemovalVerdict {
-  const { assignmentCount, scoredAssignmentCount, notedAssignmentCount } = impact;
-  const counts = [assignmentCount, scoredAssignmentCount, notedAssignmentCount];
+  const { assignmentCount, scoredAssignmentCount, notedAssignmentCount, conflictCount } = impact;
+  // `conflictCount` joins the sanity check but not the subset check below: it
+  // counts a different thing, so exceeding `assignmentCount` is ordinary rather
+  // than a sign the caller counted two different sets.
+  const counts = [assignmentCount, scoredAssignmentCount, notedAssignmentCount, conflictCount];
 
   if (counts.some((n) => !Number.isInteger(n) || n < 0)) {
     return {

@@ -541,6 +541,7 @@ describe("checkReviewerRemoval — PRD decision 24", () => {
     assignmentCount: 15,
     scoredAssignmentCount: 0,
     notedAssignmentCount: 0,
+    conflictCount: 0,
     ...over,
   });
 
@@ -691,6 +692,9 @@ describe("checkReviewerRemoval — PRD decision 24", () => {
       ["Infinity", { assignmentCount: Number.POSITIVE_INFINITY }],
       ["more scored than assigned", { assignmentCount: 2, scoredAssignmentCount: 3 }],
       ["more noted than assigned", { assignmentCount: 2, notedAssignmentCount: 3 }],
+      // Decision 85's count is sanity-checked like the other three.
+      ["a negative conflict count", { conflictCount: -1 }],
+      ["a NaN conflict count", { conflictCount: Number.NaN }],
     ];
 
     for (const [name, over] of bad) {
@@ -704,6 +708,38 @@ describe("checkReviewerRemoval — PRD decision 24", () => {
 
       expect(verdict.allowed).toBe(false);
       if (!verdict.allowed) expect(verdict.reason).toContain("bug");
+    });
+  });
+
+  describe("conflicts are recorded, not protected (decision 85)", () => {
+    /// The distinction the field exists to hold. A score or a note is submitted
+    /// work and blocks the removal; a conflict is re-flaggable in one tap and
+    /// does not. It rides on `RemovalImpact` so the audit row can say what was
+    /// deleted, which is a different job from deciding whether to allow it.
+    it("does not block a removal, however many conflicts there are", () => {
+      const verdict = checkReviewerRemoval(priyaRound, impact({ conflictCount: 40 }));
+
+      expect(verdict.allowed).toBe(true);
+    });
+
+    /// **Not a subset of the assignments**, unlike the scored and noted counts.
+    /// A second-round reviewer holds no written assignments and may still have
+    /// flagged conflicts on every applicant, so the subset check that catches a
+    /// miscounted score must not fire here.
+    it("may exceed the assignment count without reading as a miscount", () => {
+      const verdict = checkReviewerRemoval(
+        priyaRound,
+        impact({ assignmentCount: 0, conflictCount: 12 }),
+      );
+
+      expect(verdict.allowed).toBe(true);
+    });
+
+    it("does not leak into the consequence text, which is about assignments", () => {
+      const withConflicts = checkReviewerRemoval(priyaRound, impact({ conflictCount: 7 }));
+      const without = checkReviewerRemoval(priyaRound, impact({ conflictCount: 0 }));
+
+      expect(withConflicts).toEqual(without);
     });
   });
 

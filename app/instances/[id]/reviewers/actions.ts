@@ -369,13 +369,24 @@ export async function setSparklet(
 async function removalImpact(instanceId: string, reviewerId: string, round: Round | null) {
   const where = { instanceId, reviewerId, ...(round === null ? {} : { round }) };
 
-  const [assignmentCount, scoredAssignmentCount, notedAssignmentCount] = await Promise.all([
-    prisma.assignment.count({ where }),
-    prisma.assignment.count({ where: { ...where, scores: { some: {} } } }),
-    prisma.assignment.count({ where: { ...where, note: { isNot: null } } }),
-  ]);
+  const [assignmentCount, scoredAssignmentCount, notedAssignmentCount, conflictCount] =
+    await Promise.all([
+      prisma.assignment.count({ where }),
+      prisma.assignment.count({ where: { ...where, scores: { some: {} } } }),
+      prisma.assignment.count({ where: { ...where, note: { isNot: null } } }),
+      // Decision 85. `ConflictOfInterest` carries no `instanceId`, and needs
+      // none: a `Reviewer` belongs to exactly one instance, so the reviewer id
+      // is already instance-scoped.
+      //
+      // `round === null` counts every round deliberately — that path deletes the
+      // reviewer row, and the cascade takes their conflicts in all rounds, not
+      // just this one.
+      prisma.conflictOfInterest.count({
+        where: { reviewerId, ...(round === null ? {} : { round }) },
+      }),
+    ]);
 
-  return { assignmentCount, scoredAssignmentCount, notedAssignmentCount };
+  return { assignmentCount, scoredAssignmentCount, notedAssignmentCount, conflictCount };
 }
 
 /// What a removal would cost, without doing it. The grid calls this to build its
@@ -482,6 +493,11 @@ export async function removeReviewer(
           rounds: reviewer.rounds,
           round,
           deletedAssignmentCount: impact.assignmentCount,
+          // Decision 85's deletion, recorded on the same terms as the
+          // assignments beside it: §8 wants the row to say what was there, and a
+          // conflict that vanishes with no trace is exactly what an admin would
+          // later need to account for.
+          deletedConflictCount: impact.conflictCount,
         },
       },
     });
