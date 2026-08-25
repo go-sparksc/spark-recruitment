@@ -20,6 +20,16 @@
 //
 // It creates no Pass rows. Those are what an admin creates on FR-17's screen,
 // and seeding them would develop FR-18 against a state nothing produced.
+//
+// **`npm run seed:passes` does seed them, and that is not a contradiction of the
+// paragraph above — see PRD decision 91.** The reasoning there was about Phase
+// 6, which was building FR-18 and needed the grid developed against passes a
+// person had actually run. It inverts for Phase 7: FR-19 renders the *outcome*
+// of a second round, and this script stops exactly where an admin would create
+// pass 1, so FR-19's three groups, its funnel and FR-20's round trip would every
+// one of them be built against empty sets. `prisma/passes.ts` writes what the
+// FR-17 actions write, which is the posture this file already takes toward
+// `finalizeFirstRound`, so the state it produces stays one the application can.
 
 import {
   ApplicantStatus,

@@ -13,6 +13,7 @@
     "verify": "npm run typecheck && npm run lint && npm run test",
     "seed": "tsx prisma/seed.ts",
     "seed:advance": "tsx prisma/advance.ts",
+    "seed:passes": "tsx prisma/passes.ts",
     "seed:inspect": "tsx prisma/inspect.ts",
     "check:round-trip": "tsx --conditions=react-server prisma/checks/round-trip.ts",
     "hash-secret": "tsx scripts/hash-secret.ts"
