@@ -14,6 +14,7 @@
     "seed": "tsx prisma/seed.ts",
     "seed:advance": "tsx prisma/advance.ts",
     "seed:inspect": "tsx prisma/inspect.ts",
+    "check:round-trip": "tsx --conditions=react-server prisma/checks/round-trip.ts",
     "hash-secret": "tsx scripts/hash-secret.ts"
   },
   "dependencies": {

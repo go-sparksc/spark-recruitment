@@ -91,6 +91,59 @@ export type ExportTableName = (typeof EXPORT_TABLES)[number]["table"];
 /// The table names in write order, which is the order `EXPORT_TABLES` declares.
 export const EXPORT_TABLE_NAMES: readonly ExportTableName[] = EXPORT_TABLES.map((entry) => entry.table);
 
+/// Columns that are `DateTime` in the schema, per table.
+///
+/// Only the restore needs these. Reading, JSON carries an ISO string happily;
+/// writing, Prisma wants a `Date` and refuses a string — loudly, at the insert,
+/// which is what makes a mistake here a failed check rather than a silent
+/// corruption. `lib/export.test.ts` additionally asserts every name below is a
+/// real column of its table, which catches the typo case that would otherwise
+/// leave a timestamp quietly unconverted.
+export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> = {
+  Instance: ["createdAt", "updatedAt", "archivedAt", "importCommittedAt"],
+  FieldGroup: ["createdAt", "updatedAt"],
+  Field: ["createdAt", "updatedAt"],
+  ImportRow: ["createdAt"],
+  RubricCategory: ["createdAt", "updatedAt"],
+  InterviewCategory: ["createdAt", "updatedAt"],
+  RoundAccessCode: ["createdAt", "updatedAt"],
+  Reviewer: ["createdAt", "updatedAt"],
+  Applicant: ["createdAt", "updatedAt"],
+  Assignment: ["returnedAt", "createdAt", "updatedAt"],
+  Score: ["createdAt", "updatedAt"],
+  ReviewNote: ["createdAt", "updatedAt"],
+  InterviewResult: ["createdAt", "updatedAt"],
+  InterviewCategoryScore: ["createdAt", "updatedAt"],
+  InterviewNotes: ["createdAt", "updatedAt"],
+  InterviewImport: ["uploadedAt"],
+  InterviewImportRow: ["createdAt", "updatedAt"],
+  FirstRoundVote: ["submittedAt", "updatedAt"],
+  ConflictOfInterest: ["createdAt"],
+  Pass: ["openedAt", "closedAt"],
+  PassApplicant: ["resolvedAt", "createdAt", "updatedAt"],
+  PassVote: ["submittedAt", "updatedAt"],
+  Decision: ["decidedAt", "updatedAt"],
+  AuditLog: ["createdAt"],
+};
+
+/// Columns that are **nullable** `Json` in the schema.
+///
+/// These are the only two places where `null` cannot be written as `null`:
+/// Prisma wants `Prisma.DbNull` for a SQL NULL in a nullable Json column and
+/// `Prisma.JsonNull` for a JSON `null` literal, and passing a bare `null` is a
+/// type error rather than a silent wrong write. Non-nullable Json columns
+/// (`ImportRow.cells`, `Applicant.data`, `InterviewImport.headers` and
+/// `.mapping`, `InterviewImportRow.cells`) never hold null and need no mapping.
+///
+/// Getting `Instance.importProposals` wrong is caught by the
+/// `importCommittedAt IS NULL OR importProposals IS NULL` CHECK on any committed
+/// instance, which is the guard §5 added for a different reason and which
+/// happens to cover this one too.
+export const NULLABLE_JSON_COLUMNS: Readonly<Partial<Record<ExportTableName, readonly string[]>>> = {
+  Instance: ["importProposals"],
+  AuditLog: ["previousValue"],
+};
+
 // Keyed by plain `string` rather than by `ExportTableName`: the whole job of
 // `parseExport` is to decide whether a name read out of an untrusted file is one
 // of ours, and a map that only accepts names already known cannot answer that.

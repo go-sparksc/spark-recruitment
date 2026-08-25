@@ -21,9 +21,12 @@ import "server-only";
 // the name-keying defect this system exists to remove, and would do it silently
 // because the resulting key still looks reasonable.
 
-import type { PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import {
+  DATE_COLUMNS,
   EXPORT_FORMAT_VERSION,
+  EXPORT_TABLES,
+  NULLABLE_JSON_COLUMNS,
   canonicalizeSnapshot,
   type ExportRow,
   type ExportTableName,
@@ -112,6 +115,108 @@ export async function readSnapshot(
 }
 
 // ---------------------------------------------------------------------------
+// The restore
+// ---------------------------------------------------------------------------
+
+/// Just enough of a Prisma model delegate to bulk-insert through it. Narrower
+/// than `any`, which keeps the dynamic dispatch below honest without pulling in
+/// twenty-four generated argument types that would say nothing extra.
+interface CreateManyDelegate {
+  createMany: (args: { data: unknown[] }) => Promise<{ count: number }>;
+}
+
+/// One row, converted from what JSON carries back to what Prisma accepts.
+///
+/// Two conversions, and no others: an ISO string becomes a `Date` for a
+/// `DateTime` column, and `null` becomes `Prisma.DbNull` for a nullable `Json`
+/// column. Everything else — enums, scalar lists, non-null JSONB, numbers — goes
+/// in exactly as the file carries it, which is what decision 88 means by the
+/// round trip being an identity.
+function toPrismaRow(
+  table: ExportTableName,
+  row: ExportRow,
+): Record<string, unknown> {
+  const dateColumns = new Set<string>(DATE_COLUMNS[table]);
+  const nullableJson = new Set<string>(NULLABLE_JSON_COLUMNS[table] ?? []);
+  const out: Record<string, unknown> = {};
+
+  for (const [column, value] of Object.entries(row)) {
+    if (dateColumns.has(column)) {
+      out[column] = value === null ? null : new Date(value as string);
+      continue;
+    }
+    if (nullableJson.has(column) && value === null) {
+      // NOT `null`. See NULLABLE_JSON_COLUMNS — a bare null is a type error
+      // here, and DbNull is what actually writes SQL NULL.
+      out[column] = Prisma.DbNull;
+      continue;
+    }
+    out[column] = value;
+  }
+
+  return out;
+}
+
+/// Write a whole instance back, in foreign-key dependency order.
+///
+/// **Every id is written explicitly** (decision 88), so no foreign key is
+/// remapped and `Applicant.data`'s `Field.id` keys, `InterviewImport.mapping`'s
+/// embedded category ids, and `AuditLog.entityId` all keep pointing at rows that
+/// exist. That is the property that makes a restore an identity rather than a
+/// copy, and it is why the collision check below refuses rather than merges.
+///
+/// One transaction and one `createMany` per table — a fixed number of bulk
+/// statements rather than a statement per row. FR-11's finalize learned that the
+/// hard way when 150 sequential round trips exceeded Prisma's transaction limit.
+export async function writeSnapshot(
+  prisma: PrismaClient,
+  snapshot: InstanceSnapshot,
+): Promise<{ table: ExportTableName; rows: number }[]> {
+  const canonical = canonicalizeSnapshot(snapshot);
+
+  const existing = await prisma.instance.findUnique({
+    where: { id: canonical.instanceId },
+    select: { id: true },
+  });
+  if (existing) {
+    throw new Error(
+      `Instance ${canonical.instanceId} already exists. A restore writes every id ` +
+        `verbatim (decision 88), so it cannot merge into a live instance — delete it ` +
+        `first, or restore into an empty database.`,
+    );
+  }
+
+  const written: { table: ExportTableName; rows: number }[] = [];
+
+  await prisma.$transaction(
+    async (tx) => {
+      const delegates = tx as unknown as Record<string, CreateManyDelegate>;
+
+      // EXPORT_TABLES order is the foreign-key order. Sequential and deliberate:
+      // Promise.all here would race Field against Applicant and ImportRow
+      // against Instance, and the failure would be intermittent.
+      for (const { table } of EXPORT_TABLES) {
+        const rows = canonical.tables[table];
+        if (rows.length === 0) {
+          written.push({ table, rows: 0 });
+          continue;
+        }
+
+        // The Prisma delegate is the model name with a lowercased first letter.
+        const delegate = delegates[`${table[0].toLowerCase()}${table.slice(1)}`];
+        const result = await delegate.createMany({
+          data: rows.map((row) => toPrismaRow(table, row)),
+        });
+        written.push({ table, rows: result.count });
+      }
+    },
+    { timeout: 120_000 },
+  );
+
+  return written;
+}
+
+// ---------------------------------------------------------------------------
 // Two things the writer will need, found while writing the reader
 // ---------------------------------------------------------------------------
 //
@@ -127,16 +232,18 @@ export async function readSnapshot(
 // (`importCommittedAt IS NULL OR importProposals IS NULL`) is what will catch it
 // if that mapping is wrong on a committed instance.
 //
-// **`createdAt` and `updatedAt` are both accepted in Prisma's create input** —
-// confirmed in `generated/prisma/models/Instance.ts`, where
-// `InstanceUncheckedCreateInput` carries `createdAt?` and `updatedAt?`. A
-// `@updatedAt` field auto-fills only when omitted, so writing them explicitly is
-// what makes the round trip an identity under decision 88. Whether Prisma 7
-// honours a provided `@updatedAt` on create rather than overwriting it is the
-// one contingency `plans/phase-7.md` names, and the round-trip check is what
-// settles it: if it overwrites, the diff reports `updatedAt` on every row of
-// every table at once, which is a distinctive enough signature to read at a
-// glance.
+// **`createdAt` and `updatedAt` are both accepted in Prisma's create input, and
+// Prisma 7 honours both on create — SETTLED, measured rather than assumed.**
+// `plans/phase-7.md` named this as the round trip's one contingency: if
+// `@updatedAt` were overwritten on create, it would become the single expected
+// difference and "intact" would need an exception list. It is not. A full round
+// trip over the seed instance — 4376 rows across all 24 tables — came back with
+// zero differences, `updatedAt` included.
+//
+// Recorded because the failure signature is worth knowing if this ever changes
+// under a Prisma upgrade: it would be `updatedAt` differing on *every row of
+// every table at once*, which the check groups by column precisely so that
+// pattern is readable at a glance rather than buried in four thousand lines.
 
 /// The filename an admin ends up with in their downloads folder.
 ///

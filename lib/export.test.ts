@@ -17,6 +17,8 @@ import { describe, expect, it } from "vitest";
 
 import { Prisma } from "@/generated/prisma/client";
 import {
+  DATE_COLUMNS,
+  NULLABLE_JSON_COLUMNS,
   canonicalValue,
   canonicalizeSnapshot,
   diffSnapshots,
@@ -103,6 +105,32 @@ describe("EXPORT_TABLES covers the schema", () => {
 
   it("has no duplicate tables", () => {
     expect(new Set(EXPORT_TABLE_NAMES).size).toBe(EXPORT_TABLE_NAMES.length);
+  });
+
+  it("names only real columns in DATE_COLUMNS and NULLABLE_JSON_COLUMNS", () => {
+    // These two maps drive the restore's only type conversions. A wrong type is
+    // caught loudly by Prisma at insert; a **typo** is not — the column simply
+    // never converts, and a timestamp goes in as a string or a JSON null goes in
+    // as a bare null. Both are the restore silently doing the wrong thing, so
+    // the names are pinned to the manifest here.
+    const columnsByTable = new Map<string, ReadonlySet<string>>(
+      EXPORT_TABLES.map((entry) => [entry.table, new Set<string>(entry.columns)]),
+    );
+
+    for (const [table, dateColumns] of Object.entries(DATE_COLUMNS)) {
+      for (const column of dateColumns) {
+        expect(columnsByTable.get(table)?.has(column), `${table}.${column}`).toBe(true);
+      }
+    }
+    for (const [table, jsonColumns] of Object.entries(NULLABLE_JSON_COLUMNS)) {
+      for (const column of jsonColumns ?? []) {
+        expect(columnsByTable.get(table)?.has(column), `${table}.${column}`).toBe(true);
+      }
+    }
+  });
+
+  it("declares a DATE_COLUMNS entry for every table, so a new table cannot be forgotten", () => {
+    expect(Object.keys(DATE_COLUMNS).sort()).toEqual([...EXPORT_TABLE_NAMES].sort());
   });
 });
 
