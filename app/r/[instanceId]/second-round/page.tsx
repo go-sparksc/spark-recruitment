@@ -4,8 +4,9 @@ import { notFound, redirect } from "next/navigation";
 import { ConflictControl } from "./conflict-control";
 import { loadSecondRoundList } from "./load";
 import { SignOutButton } from "../sign-out-button";
-import { InstanceStage, Round } from "@/generated/prisma/enums";
+import { InstanceStage, PassStatus, Round } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { applicantLabel } from "@/lib/review";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { conflictCount } from "@/lib/second-round";
 
@@ -31,12 +32,21 @@ export default async function SecondRoundListPage({
   // an empty second-round one.
   if (session.rd !== Round.SECOND_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [instance, rows] = await Promise.all([
+  const [instance, rows, openPass] = await Promise.all([
     prisma.instance.findUnique({
       where: { id: instanceId },
       select: { name: true, currentStage: true },
     }),
     loadSecondRoundList(instanceId, reviewer.id),
+    // **The same state the profile reads to show or hide the vote control.**
+    // This page used to assert "voting happens in a pass, which an admin opens"
+    // as a fixed string, which went on saying so after a pass was open — telling
+    // a reviewer there was nothing to do while every profile offered them a
+    // vote. The list had never learned that passes exist.
+    prisma.pass.findFirst({
+      where: { instanceId, status: PassStatus.OPEN },
+      select: { id: true },
+    }),
   ]);
 
   if (!instance) notFound();
@@ -88,8 +98,9 @@ export default async function SecondRoundListPage({
             {rows.length} applicant{rows.length === 1 ? "" : "s"} in the round
           </p>
           <p className="text-muted-foreground mt-1 text-sm">
-            Open an applicant to read their full profile. Voting happens in a pass, which an admin
-            opens — until then this is here to read.
+            {openPass
+              ? "A pass is open. Open an applicant to read their full profile and vote."
+              : "Open an applicant to read their full profile. Voting happens in a pass, which an admin opens — until then this is here to read."}
             {flagged > 0 ? ` You have flagged a conflict on ${flagged} of them.` : null}
           </p>
 
@@ -102,7 +113,15 @@ export default async function SecondRoundListPage({
                   // ergonomics the written round's list was built to.
                   className="hover:bg-muted active:bg-muted flex min-h-14 items-center justify-between gap-3 px-4 py-3"
                 >
-                  <span className="font-medium">{row.displayName}</span>
+                  {/* The label beside the name, not instead of it: §6 gives a
+                      second-round reviewer the name, and names are not unique.
+                      Two applicants here are both called "Diego Hoffmann". */}
+                  <span className="font-medium">
+                    {row.displayName}
+                    <span className="text-muted-foreground ml-2 text-xs font-normal">
+                      {applicantLabel(row.sourceRowIndex)}
+                    </span>
+                  </span>
                   <span className="flex shrink-0 items-center gap-2">
                     <span className="text-muted-foreground text-sm">
                       {row.interviewResultCount === 0 && !row.hasInterviewNotes

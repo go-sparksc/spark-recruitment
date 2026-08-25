@@ -15,6 +15,7 @@ import {
   summarizePass,
 } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
+import { applicantLabel } from "@/lib/review";
 
 export const metadata = { title: "Pass — Spark SC Recruitment" };
 
@@ -47,7 +48,9 @@ export default async function PassDetailPage({
           orderBy: { applicant: { sourceRowIndex: "asc" } },
           select: {
             resolution: true,
-            applicant: { select: { id: true, displayName: true, status: true } },
+            applicant: {
+              select: { id: true, displayName: true, sourceRowIndex: true, status: true },
+            },
           },
         },
         votes: { select: { applicantId: true, reviewerId: true, value: true } },
@@ -104,6 +107,11 @@ export default async function PassDetailPage({
     return {
       applicantId: row.applicantId,
       applicantName: member?.applicant.displayName ?? "—",
+      // Names are not unique — this instance holds two "Diego Hoffmann" — and
+      // this grid is one click from a reject. The written round's own handle,
+      // reused rather than reinvented.
+      applicantHandle:
+        member === undefined ? "" : applicantLabel(member.applicant.sourceRowIndex),
       cells: row.cells,
       conflicts: row.conflicts,
       tally: row.tally,
@@ -193,7 +201,12 @@ export default async function PassDetailPage({
               {rejectable.map((member) => (
                 <div key={member.applicant.id} className="px-6 py-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                    <span className="font-medium">{member.applicant.displayName}</span>
+                    <span className="font-medium">
+                      {member.applicant.displayName}
+                      <span className="text-muted-foreground ml-2 text-xs font-normal">
+                        {applicantLabel(member.applicant.sourceRowIndex)}
+                      </span>
+                    </span>
                     <span className="text-muted-foreground text-sm">
                       {resolutionLabel(member.resolution)}
                     </span>
@@ -204,6 +217,7 @@ export default async function PassDetailPage({
                     passId={pass.id}
                     applicantId={member.applicant.id}
                     applicantName={member.applicant.displayName}
+                    applicantHandle={applicantLabel(member.applicant.sourceRowIndex)}
                   />
                 </div>
               ))}

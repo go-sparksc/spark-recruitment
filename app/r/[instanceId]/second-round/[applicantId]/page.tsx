@@ -7,7 +7,7 @@ import { PassStatus, Round } from "@/generated/prisma/enums";
 import { SECOND_ROUND_POOL, voteAvailability } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
-import { buildApplicantView } from "@/lib/review";
+import { applicantLabel, buildApplicantView } from "@/lib/review";
 import { formatAverage, formatVariance } from "@/lib/results";
 import { buildInterviewCards, buildWrittenReviews } from "@/lib/second-round";
 
@@ -186,7 +186,16 @@ export default async function SecondRoundApplicantPage({
         ← Second round
       </Link>
 
-      <h1 className="mt-3 text-xl font-semibold tracking-tight">{applicant.displayName}</h1>
+      {/* The handle beside the name here too. A reviewer arrives from a list
+          that now shows it, and the profile is where they decide — "am I on the
+          right Diego Hoffmann" has to be answerable without reading the email
+          and knowing which one it belongs to. */}
+      <h1 className="mt-3 text-xl font-semibold tracking-tight">
+        {applicant.displayName}
+        <span className="text-muted-foreground ml-2 text-sm font-normal">
+          {applicantLabel(applicant.sourceRowIndex)}
+        </span>
+      </h1>
       {view.identified && view.email ? (
         <p className="text-muted-foreground text-sm">{view.email}</p>
       ) : null}

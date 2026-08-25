@@ -15,6 +15,10 @@ export interface GridReviewer {
 export interface GridRow {
   applicantId: string;
   applicantName: string;
+  /// "Applicant 47", from `sourceRowIndex`. Rendered beside the name because
+  /// names collide — this instance has two "Diego Hoffmann" — and every control
+  /// on this page acts on one specific person.
+  applicantHandle: string;
   cells: EffectiveVote[];
   conflicts: boolean[];
   tally: PassTally;
@@ -94,6 +98,9 @@ export function PassGrid({
                   className="bg-background sticky left-0 z-10 px-3 py-2 text-left font-normal whitespace-nowrap"
                 >
                   {row.applicantName}
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {row.applicantHandle}
+                  </span>
                 </th>
 
                 {reviewers.map((reviewer, index) => (
@@ -138,7 +145,8 @@ export function PassGrid({
           <input type="hidden" name="reviewerId" value={selected.reviewerId} />
 
           <p className="text-sm font-medium">
-            Remove {selectedReviewer.name}&rsquo;s conflict on {selectedRow.applicantName}?
+            Remove {selectedReviewer.name}&rsquo;s conflict on {selectedRow.applicantName} (
+            {selectedRow.applicantHandle})?
           </p>
 
           {/* The three things decision 76 requires this to say. */}

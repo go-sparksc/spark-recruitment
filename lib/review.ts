@@ -283,6 +283,23 @@ export interface ApplicantViewField {
 }
 
 /// **A discriminated union rather than optional properties**, so a component
+/// The stable, unambiguous handle for one applicant, from `sourceRowIndex`.
+///
+/// Written reviewers see this *instead* of a name, per §6's blind review. Every
+/// other surface shows it *beside* the name, and for a different reason: names
+/// are not unique. The seed alone carries two applicants called "Diego Hoffmann"
+/// — deliberately, because the real S26 file did — and a list that identifies
+/// people by name alone puts an admin one click from rejecting the wrong one.
+/// That is the spreadsheet's core defect arriving at the presentation layer,
+/// after the data model correctly refused it: every row is keyed by
+/// `applicantId`, and the human still needs something to read.
+///
+/// `Applicant_instanceId_sourceRowIndex_key` is what makes this safe to rely on
+/// — the index names exactly one person per instance, enforced at the database.
+export function applicantLabel(sourceRowIndex: number): string {
+  return `Applicant ${sourceRowIndex}`;
+}
+
 /// cannot reach for a name that is not there. `view.displayName` does not
 /// typecheck until `view.identified` has been narrowed to true, which makes §6's
 /// blind-review rule a compile error rather than a code review.
@@ -358,7 +375,7 @@ export function buildApplicantView(
     })
     .filter((entry): entry is ApplicantViewField => entry !== null);
 
-  const label = `Applicant ${applicant.sourceRowIndex}`;
+  const label = applicantLabel(applicant.sourceRowIndex);
   const promoted = resolvePromoted(viewer);
 
   if (!promoted.name) {

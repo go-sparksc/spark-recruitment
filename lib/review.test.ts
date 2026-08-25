@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FieldCategory, FieldGroupRole } from "@/generated/prisma/enums";
 import {
+  applicantLabel,
   buildApplicantView,
   claimEligibility,
   completionOf,
@@ -640,5 +641,27 @@ describe("buildApplicantView — the other viewers", () => {
     expect(view.identified).toBe(true);
     if (!view.identified) throw new Error("unreachable");
     expect(view.email).toBeNull();
+  });
+});
+
+describe("applicantLabel", () => {
+  it("is the written round's format, unchanged", () => {
+    expect(applicantLabel(47)).toBe("Applicant 47");
+    expect(applicantLabel(1)).toBe("Applicant 1");
+  });
+
+  /// **The point of exporting it.** The blind written round and the named
+  /// second-round surfaces now render the same handle, one showing it instead of
+  /// a name and the others beside one. Two spellings of "Applicant N" would let
+  /// an admin and a reviewer refer to the same person by different handles.
+  it("matches the label buildApplicantView puts on a blind view", () => {
+    const view = buildApplicantView(
+      { sourceRowIndex: 47, displayName: "Diego Hoffmann", email: null, data: {} },
+      [],
+      [],
+      "WRITTEN_REVIEWER",
+    );
+
+    expect(view.label).toBe(applicantLabel(47));
   });
 });

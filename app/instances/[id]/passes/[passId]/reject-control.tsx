@@ -19,11 +19,16 @@ export function RejectControl({
   passId,
   applicantId,
   applicantName,
+  applicantHandle,
 }: {
   instanceId: string;
   passId: string;
   applicantId: string;
   applicantName: string;
+  /// "Applicant 47". In the confirm because this is the irreversible control on
+  /// a page listing people whose names repeat — "Reject Diego Hoffmann?" is not
+  /// a question an admin can safely answer when there are two of them.
+  applicantHandle: string;
 }) {
   const [state, formAction, pending] = useActionState<PassActionState, FormData>(
     manuallyReject,
@@ -40,8 +45,8 @@ export function RejectControl({
       {confirming ? (
         <div className="space-y-2">
           <p className="text-sm">
-            Reject {applicantName}? They are excluded from this and every later pass, and any
-            vote still in flight on them stops counting.
+            Reject {applicantName} ({applicantHandle})? They are excluded from this and every
+            later pass, and any vote still in flight on them stops counting.
           </p>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={pending}>
