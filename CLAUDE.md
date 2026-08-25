@@ -16,7 +16,7 @@ Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
 3. **Real applicant data never enters the repo.** `.gitignore` covers `*.csv`, `*.xlsx`, `/data`, `/uploads`. Development uses `prisma/seed.ts` synthetic data. The real data includes essays about family trauma, immigration status, self-reported ethnicity, and first-generation status.
 
-4. **Passwords are hashed with argon2id.** Never logged, never returned in an API response, never displayed.
+4. **Passwords are hashed with argon2id.** Never logged, never displayed, and never returned in an API response except FR-20's instance export (decision 86), which is admin-only and treated as a sensitive file for that reason.
 
 5. **The reviewer dashboard is used once, on a phone, by someone who has never seen it.** Every additional tap is a review that does not get completed. When in doubt, remove a step.
 
