@@ -1025,6 +1025,12 @@ and decision 79, checked in the same place.
 
     **Rejected: overwriting `PassApplicant.resolution` to `SPARKLET` or `REJECTED`.** It empties the group correctly and destroys the record that the pass itself could not decide them — which is the fact `NEEDS_ADMIN` exists to carry, and which §5 is emphatic is a property of the applicant *within a pass* rather than of the applicant. The admin's decision is a later event, not a correction of what the pass did.
 
+90. **FR-20's CSV cells are written verbatim, RFC 4180-quoted, with no formula-injection prefixing. RESOLVED.** A cell whose text begins `=`, `+`, `-` or `@` is executed as a formula by Excel and Sheets, and applicant free text can begin with any of them. The usual mitigation is to prefix such cells with a tab or an apostrophe, which alters the exported value. Refused here. Every importer in this system is emphatic that the source wins and the tool does not silently rewrite what a human recorded — FR-12 on a disagreeing average, decision 55 on clamping an out-of-range score, decision 59 on rounding a decimal — and an export that mangled an essay in order to defend a spreadsheet application would be the only place in the product that breaks that rule.
+
+    The JSON is the lossless artifact. The CSVs are convenience derivatives and sit outside the round trip decision 88 defines, because a decision row rendered with an applicant's name in it cannot reconstruct a `Decision`.
+
+    **Recorded consequence rather than left to be discovered:** a cell beginning with one of those characters will evaluate when the file is opened in a spreadsheet. That is a property of the spreadsheet, and the remedy is to import the CSV as text — not to change what the export writes.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
