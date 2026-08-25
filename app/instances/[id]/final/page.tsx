@@ -13,6 +13,7 @@ import {
   type FinalRow,
   type UnresolvedReason,
 } from "@/lib/final";
+import { FUNNEL_COHORTS, formatShare, formatWeighted } from "@/lib/funnel";
 import type { PassTally } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
@@ -122,7 +123,7 @@ export default async function FinalPage({ params }: { params: Promise<{ id: stri
   });
   if (!instance) notFound();
 
-  const { sources, finalPass } = await loadFinalPage(id);
+  const { sources, finalPass, funnel } = await loadFinalPage(id);
   const groups = groupFinalApplicants(sources);
   const undecided = stillDeciding(sources);
 
@@ -181,6 +182,101 @@ export default async function FinalPage({ params }: { params: Promise<{ id: stri
         emptyText="Every applicant reached a decision."
         showTally
       />
+
+      {/* FR-19's last clause, replacing the manual `Overall Stats` sheet. */}
+      <section className="mt-12">
+        <h2 className="text-lg font-semibold tracking-tight">Composition</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
+          The Sparklet class against each preceding stage. Percentages are of that stage, so a row
+          reads across — the cohorts are nested, and every Sparklet is counted in all four.
+        </p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          {/* §10.7: a panel showing fractional people with no explanation reads
+              as a bug to a successor. So it is explained, on the screen, once. */}
+          An applicant who selected <em>n</em> options contributes <em>1/n</em> to each, so the
+          weighted figures sum to the number of people rather than to the number of boxes ticked.
+          The raw count of who ticked each box is beside it.
+        </p>
+
+        {funnel.columns.length === 0 ? (
+          <Card className="mt-4">
+            <CardContent className="p-6">
+              <p className="text-muted-foreground text-sm">
+                No column in this instance is categorised as Demographics, so there is nothing to
+                break down. Categories are set on the columns page and freeze at import.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          funnel.columns.map((column) => (
+            <Card key={column.key} className="mt-4">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  {/* Wide content scrolls inside its own container; the page
+                      body must not be what scrolls sideways. */}
+                  <table className="w-full text-sm">
+                    <caption className="px-6 pt-5 pb-2 text-left font-medium">
+                      {column.label}
+                    </caption>
+                    <thead>
+                      <tr className="border-b">
+                        <th scope="col" className="text-muted-foreground px-6 py-2 text-left text-xs font-normal">
+                          Option
+                        </th>
+                        {FUNNEL_COHORTS.map((cohort) => (
+                          <th
+                            key={cohort.key}
+                            scope="col"
+                            className="text-muted-foreground px-3 py-2 text-right text-xs font-normal whitespace-nowrap"
+                          >
+                            {cohort.label}
+                            <span className="ml-1 tabular-nums">
+                              ({funnel.cohortSizes[cohort.key]})
+                            </span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {column.rows.map((row) => (
+                        <tr key={row.label}>
+                          <th scope="row" className="px-6 py-2 text-left font-normal">
+                            {row.label}
+                          </th>
+                          {FUNNEL_COHORTS.map((cohort) => {
+                            const cell = row.cells[cohort.key];
+                            return (
+                              <td
+                                key={cohort.key}
+                                className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
+                              >
+                                {formatShare(cell.share)}
+                                <span className="text-muted-foreground ml-2 text-xs">
+                                  {formatWeighted(cell.weighted)} / {cell.headcount}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {column.sparkletWriteIns.length > 0 ? (
+                  <div className="border-t px-6 py-4">
+                    <p className="text-muted-foreground text-xs">
+                      Written in by Sparklets — a real answer the count cannot read, which is why
+                      its author sits in &ldquo;Not specified&rdquo; above
+                    </p>
+                    <p className="mt-1 text-sm">{column.sparkletWriteIns.join(" · ")}</p>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </section>
 
       {undecided > 0 && closed ? (
         <p className="text-muted-foreground mt-8 text-sm">
