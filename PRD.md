@@ -999,6 +999,8 @@ and decision 79, checked in the same place.
 
     No separate audit entry: the withdrawal already writes one `AuditLog` row for the removal inside the same transaction, and the deletion is part of that action rather than a second one.
 
+86. **Export includes `Instance.passwordHash` and `RoundAccessCode.codeHash`. RESOLVED.** CLAUDE.md rule 4 says password hashes are never returned in an API response. FR-20's export is a deliberate exception: the values are argon2id hashes, not recoverable passwords, and omitting them would make a restored instance unusable without a manual reset of both credential types, plus two permanent exceptions in the export/reimport comparison. The export route is admin-only and the file itself is sensitive for this reason, which `ADMIN_GUIDE` (Phase 8) must state.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
