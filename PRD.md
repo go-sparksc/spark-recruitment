@@ -1019,6 +1019,12 @@ and decision 79, checked in the same place.
 
     **What this buys the comparison, which is the reason it is a decision rather than a detail.** With ids preserved, and `createdAt` and `updatedAt` written explicitly from the export, *nothing* in the round trip is expected to differ — so "intact" is an exact field-by-field comparison rather than one carrying a list of exceptions. A comparison with expected drift in it is a comparison a real regression can hide inside.
 
+89. **An applicant an admin has since resolved leaves FR-19's Unresolved group, and their pass row is not rewritten. RESOLVED.** FR-19 finds Unresolved by `resolution = NEEDS_ADMIN` on the final pass, and says the group is identified by that row "never by `Applicant.status`". Decision 70 says an admin who later resolves that applicant writes a `Decision` row. Read together the two contradict: an admin who admits one of them sets `status = SPARKLET`, and the applicant is then in **both** the New Sparklet group (by status) and the Unresolved group (by a pass row nothing has changed).
+
+    The predicate therefore gains one clause: `resolution = NEEDS_ADMIN` on the final pass **and no `Decision` row at `stage = SECOND_ROUND`**. The admin's admit-or-reject writes that `Decision` row, `Applicant.status`, and an `AuditLog` row in one transaction, and leaves `PassApplicant.resolution` alone. FR-19's rule that the group is found by the pass row and never by status survives intact; what is added is a second question — *has this been dealt with since* — answered by the table that already exists to record exactly that.
+
+    **Rejected: overwriting `PassApplicant.resolution` to `SPARKLET` or `REJECTED`.** It empties the group correctly and destroys the record that the pass itself could not decide them — which is the fact `NEEDS_ADMIN` exists to carry, and which §5 is emphatic is a property of the applicant *within a pass* rather than of the applicant. The admin's decision is a later event, not a correction of what the pass did.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
