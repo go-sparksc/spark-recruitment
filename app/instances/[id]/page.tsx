@@ -300,6 +300,17 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
         instance.currentStage === InstanceStage.FIRST_ROUND,
     },
     {
+      href: `/instances/${id}/export`,
+      title: "Export",
+      // Never "waiting". FR-20 is succession insurance, and an export of a
+      // half-finished cycle is exactly as valid as an export of a closed one —
+      // the moment an admin most wants a backup is the moment something has gone
+      // wrong, which is not a moment the hub gets to predict.
+      state: committed
+        ? `${plural(counts.applicants, "applicant")} · JSON`
+        : "draft — nothing imported yet",
+    },
+    {
       href: `/instances/${id}/settings`,
       title: "Settings",
       state: "instance password and deletion",
