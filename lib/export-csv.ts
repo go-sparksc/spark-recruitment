@@ -47,6 +47,34 @@ export function csvCell(value: string | number | boolean | null | undefined): st
 
 export type CsvValue = string | number | boolean | null | undefined;
 
+/// The UTF-8 byte order mark, `EF BB BF`.
+export const UTF8_BOM = "﻿";
+
+/// Prefix a CSV with the BOM, for a file that will be opened in a spreadsheet.
+///
+/// **Excel needs this and nothing else will do.** A `charset=utf-8` on the
+/// Content-Type tells the *browser* how to decode the response body; the moment
+/// those bytes are written to disk that metadata is gone, and Excel opening a
+/// `.csv` by double-click falls back to the system ANSI codepage — Windows-1252
+/// here — where the correct UTF-8 bytes for `ó` (`C3 B3`) render as `Ã³`. The
+/// BOM is the one in-band signal Excel honours.
+///
+/// Found by the Phase 7 gate, at the only step that could find it: the file's
+/// bytes were valid UTF-8 the whole time, so nothing short of opening it in the
+/// application the club actually uses would have shown the problem.
+///
+/// **Applied at the download boundary rather than inside `toCsv`.** A BOM is an
+/// encoding hint for a consumer, not part of RFC 4180's grammar — the builders
+/// keep producing clean CSV text, and anything that consumes one
+/// programmatically is not handed a stray `U+FEFF` on its first header cell.
+///
+/// **Never applied to the JSON export.** `JSON.parse` rejects a leading BOM, so
+/// a BOM there would break `parseExport` and with it the round trip — the export
+/// would stop being restorable, which is the one thing FR-20 must never do.
+export function withUtf8Bom(csv: string): string {
+  return csv.startsWith(UTF8_BOM) ? csv : `${UTF8_BOM}${csv}`;
+}
+
 /// A whole file: a header row and its rows, CRLF-delimited.
 ///
 /// **CRLF, not LF.** RFC 4180 specifies it, and Excel on Windows is the tool

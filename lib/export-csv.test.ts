@@ -17,11 +17,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  UTF8_BOM,
   buildApplicantsCsv,
   buildDecisionsCsv,
   buildFinalClassCsv,
   csvCell,
   toCsv,
+  withUtf8Bom,
   type CsvApplicantRow,
 } from "@/lib/export-csv";
 
@@ -74,6 +76,40 @@ describe("toCsv", () => {
     // admitted — and a file with headers says that, where an empty file reads
     // as a failed export.
     expect(toCsv(["Applicant", "Name"], [])).toBe("Applicant,Name\r\n");
+  });
+});
+
+describe("withUtf8Bom", () => {
+  it("prefixes the byte order mark", () => {
+    // Found by the gate: the bytes were valid UTF-8 the whole time, and Excel
+    // decoded them as Windows-1252 anyway, so `Róisín` arrived as `RÃ³isÃ­n`.
+    // The Content-Type charset governs the browser and does not survive the file
+    // being written to disk; this is the only in-band signal Excel honours.
+    const csv = toCsv(["Name"], [["Róisín"]]);
+    expect(withUtf8Bom(csv)).toBe(`${UTF8_BOM}${csv}`);
+    expect(Buffer.from(withUtf8Bom(csv), "utf8").subarray(0, 3)).toEqual(
+      Buffer.from([0xef, 0xbb, 0xbf]),
+    );
+  });
+
+  it("does not double up if one is already there", () => {
+    const once = withUtf8Bom(toCsv(["Name"], [["x"]]));
+    expect(withUtf8Bom(once)).toBe(once);
+  });
+
+  it("leaves the content after it untouched", () => {
+    const csv = toCsv(["Name"], [['Róisín "Ro" O’Brien, Jr.']]);
+    expect(withUtf8Bom(csv).slice(UTF8_BOM.length)).toBe(csv);
+  });
+});
+
+describe("toCsv does not carry the BOM itself", () => {
+  it("produces clean CSV, with the mark added at the download boundary", () => {
+    // A BOM is an encoding hint for a consumer, not part of RFC 4180's grammar.
+    // Keeping it out of the builders means anything consuming a CSV
+    // programmatically is not handed a stray U+FEFF on its first header cell.
+    expect(toCsv(["a"], [["b"]]).startsWith(UTF8_BOM)).toBe(false);
+    expect(buildFinalClassCsv([]).startsWith(UTF8_BOM)).toBe(false);
   });
 });
 

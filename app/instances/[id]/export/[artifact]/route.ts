@@ -16,7 +16,12 @@
 import { loadApplicantsCsv, loadDecisionsCsv, loadFinalClassCsv } from "../load";
 import { requireInstance } from "@/lib/auth";
 import { serializeExport } from "@/lib/export";
-import { buildApplicantsCsv, buildDecisionsCsv, buildFinalClassCsv } from "@/lib/export-csv";
+import {
+  buildApplicantsCsv,
+  buildDecisionsCsv,
+  buildFinalClassCsv,
+  withUtf8Bom,
+} from "@/lib/export-csv";
 import { exportFilename, readSnapshot } from "@/lib/instance-io";
 import { prisma } from "@/lib/prisma";
 
@@ -97,7 +102,11 @@ export async function GET(
     });
   }
 
-  const { body, stem } = await buildCsv(artifact, id);
+  const { body: csv, stem } = await buildCsv(artifact, id);
+  // See `withUtf8Bom`. Without it Excel decodes these as Windows-1252 and any
+  // non-ASCII name arrives as mojibake — the header below is not enough, because
+  // it does not survive the file being written to disk.
+  const body = withUtf8Bom(csv);
   const filename = exportFilename(`${instance.name} ${stem}`, new Date().toISOString()).replace(
     /\.json$/,
     ".csv",

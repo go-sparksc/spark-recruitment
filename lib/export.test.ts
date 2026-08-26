@@ -347,6 +347,15 @@ describe("serializeExport / parseExport", () => {
   it("refuses text that is not JSON at all", () => {
     expect(() => parseExport("not json")).toThrow(ExportFormatError);
   });
+
+  it("refuses a file carrying a UTF-8 BOM, which is why the JSON export never gets one", () => {
+    // The CSVs are served with a BOM so Excel decodes them as UTF-8. The JSON
+    // must NOT be: `JSON.parse` rejects a leading U+FEFF, so a BOM here would
+    // make the export unrestorable — the one thing FR-20 cannot allow. Pinned so
+    // that "add a BOM to the downloads" is never applied uniformly.
+    const text = `﻿${serializeExport(emptySnapshot())}`;
+    expect(() => parseExport(text)).toThrow(ExportFormatError);
+  });
 });
 
 // ---------------------------------------------------------------------------
