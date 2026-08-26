@@ -173,6 +173,33 @@ export function buildApplicantProfiles(rng: Rng, count: number): ApplicantProfil
     });
   }
 
+  // **One applicant carries punctuation in their name, deliberately.**
+  //
+  // FR-20's CSVs put `displayName` in a comma-separated field, and the quoting
+  // that protects it is only exercised if some name actually needs quoting. A
+  // fixture of clean two-word names lets an RFC 4180 bug ship: an unquoted comma
+  // does not fail loudly, it ends the record early and shifts every later column
+  // into the wrong one, in a file that still opens.
+  //
+  // Four hazards in one string: a comma (the separator), a double quote (the
+  // standard's own escape, which must be doubled), an apostrophe (which must NOT
+  // be escaped), and a non-ASCII character (which needs the charset header to be
+  // right). All four are things real name fields contain.
+  //
+  // Applied AFTER the generation loop so the RNG stream is untouched — no other
+  // applicant's name, email or answers move because of this.
+  //
+  // Row 1 specifically, because it sorts first everywhere and is therefore easy
+  // to find by eye in any of the three CSVs. It also reaches the Sparklet class
+  // under the current `seed:passes` plan, which puts it in `final-class.csv` too
+  // — a bonus rather than something this depends on.
+  const punctuated = profiles.find((profile) => profile.sourceRowIndex === 1);
+  if (punctuated) {
+    punctuated.firstName = `Róisín "Ro"`;
+    punctuated.lastName = "O'Brien, Jr.";
+    punctuated.displayName = `${punctuated.firstName} ${punctuated.lastName}`;
+  }
+
   return profiles;
 }
 
