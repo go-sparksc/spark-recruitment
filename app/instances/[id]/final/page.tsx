@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { loadFinalPage } from "./load";
+import { ResolveControl } from "./resolve-control";
 import { InstanceCrumbs } from "../instance-crumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { InstanceStage } from "@/generated/prisma/enums";
@@ -43,6 +44,7 @@ function Group({
   rows,
   emptyText,
   showTally = false,
+  resolvable = false,
   instanceId,
 }: {
   title: string;
@@ -50,6 +52,8 @@ function Group({
   rows: FinalRow[];
   emptyText: string;
   showTally?: boolean;
+  /// Only the Unresolved group, and only on a closed round. See `decideApplicant`.
+  resolvable?: boolean;
   instanceId: string;
 }) {
   return (
@@ -97,6 +101,15 @@ function Group({
                       ? null
                       : ` — ${REASON_LABEL[unresolvedReason(row.tally)!]}`}
                   </p>
+                ) : null}
+
+                {resolvable ? (
+                  <ResolveControl
+                    instanceId={instanceId}
+                    applicantId={row.applicantId}
+                    applicantName={row.displayName}
+                    applicantHandle={`Applicant ${row.sourceRowIndex}`}
+                  />
                 ) : null}
               </div>
             ))
@@ -181,6 +194,12 @@ export default async function FinalPage({ params }: { params: Promise<{ id: stri
         rows={groups.unresolved}
         emptyText="Every applicant reached a decision."
         showTally
+        // Only once the round is closed. Mid-round an all-COI applicant already
+        // carries NEEDS_ADMIN (clause 17v), and admitting them from here would
+        // decide someone with no vote while passes were still running — so the
+        // control is absent rather than present and refusing, and the action
+        // refuses too.
+        resolvable={closed}
       />
 
       {/* FR-19's last clause, replacing the manual `Overall Stats` sheet. */}
