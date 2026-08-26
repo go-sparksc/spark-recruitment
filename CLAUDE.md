@@ -71,6 +71,10 @@ Everything else gets light smoke coverage. Do not chase coverage percentage.
 
 `prisma/checks/` holds constraint verification scripts. They are not part of `npm run verify` — they need a seeded database and they write to it — so re-run them by hand after any schema change. They assert against the database rather than the Prisma client: a duplicate insert goes through raw SQL and must come back as SQLSTATE 23505 naming the expected index, because Prisma can reject a duplicate client-side without the statement ever reaching Postgres. Each script cleans up whatever it creates and verifies that it did.
 
+## Security notes
+
+`SESSION_SECRET` rotated on 2026-08-25 in both local `.env` and Vercel production, after a forged admin+instance token was minted during Phase 7 testing (session cookie signed with the old secret, used for HTTP verification instead of a real browser login). The two environments intentionally hold different secret values; they are not meant to match.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
