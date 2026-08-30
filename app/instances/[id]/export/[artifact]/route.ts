@@ -14,7 +14,7 @@
 // cacheable.
 
 import { loadApplicantsCsv, loadDecisionsCsv, loadFinalClassCsv } from "../load";
-import { requireInstance } from "@/lib/auth";
+import { requireInstanceUnlocked } from "@/lib/auth";
 import { serializeExport } from "@/lib/export";
 import {
   buildApplicantsCsv,
@@ -70,7 +70,7 @@ export async function GET(
   // Same gate as every other admin surface. `requireInstance` redirects rather
   // than throwing, which in a Route Handler is a 307 to /login or /unlock —
   // the right answer for a link someone followed from a bookmark.
-  await requireInstance(id, `/instances/${id}/export`);
+  await requireInstanceUnlocked(id, `/instances/${id}/export`);
 
   if (!isArtifact(artifact)) {
     return new Response(`No such export artifact: ${artifact}`, {

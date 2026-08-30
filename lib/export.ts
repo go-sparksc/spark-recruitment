@@ -59,7 +59,7 @@ export interface TableManifest {
 /// compile time — a table added here with no query fails `npm run typecheck`
 /// rather than exporting as an empty array.
 export const EXPORT_TABLES = [
-  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "archivedAt", "importCommittedAt", "importProposals"] },
+  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "archivedAt", "archiveSummary", "importCommittedAt", "importProposals"] },
   { table: "FieldGroup", columns: ["id", "instanceId", "key", "displayName", "category", "isMultiSelect", "isIncluded", "ordinal", "visibleToWrittenReviewer", "visibleToFirstRoundReviewer", "createdAt", "updatedAt"] },
   { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "visibleToWrittenReviewer", "visibleToFirstRoundReviewer", "createdAt", "updatedAt"] },
   { table: "ImportRow", columns: ["id", "instanceId", "rowIndex", "cells", "discarded", "createdAt"] },
@@ -164,7 +164,11 @@ export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> 
 /// instance, which is the guard §5 added for a different reason and which
 /// happens to cover this one too.
 export const NULLABLE_JSON_COLUMNS: Readonly<Partial<Record<ExportTableName, readonly string[]>>> = {
-  Instance: ["importProposals"],
+  // archiveSummary rides here so an archived cycle's frozen statistics survive
+  // the FR-20 round trip. It is the one thing left describing that cycle's
+  // demographics after the purge, so an export that dropped it would be lossy in
+  // exactly the way decision 86 says an export must not be.
+  Instance: ["importProposals", "archiveSummary"],
   AuditLog: ["previousValue"],
 };
 

@@ -11,20 +11,28 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { actorLabel, auditPageWindow, humanizeAction, AUDIT_PAGE_SIZE } from "@/lib/audit";
-import { requireInstance } from "@/lib/auth";
+import { requireInstanceUnlocked } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Activity — Spark SC Recruitment" };
 
 /// §8's audit log, made readable. PRD decisions 16 and 93.
 ///
-/// **`requireInstance`, NOT `requireAdmin` — a deliberate departure from the
+/// **The instance gate, NOT `requireAdmin` — a deliberate departure from the
 /// settings page this is linked from.** §8 says in as many words that
 /// `previousValue` payloads can carry applicant data, and settings gates on the
 /// app password alone so that an admin who has lost an instance's password can
 /// still reach FR-5's recovery path. Rendering audit rows under that gate would
 /// hand applicant data to someone who has never unlocked the cycle. The recovery
 /// path does not need to read the log, so the two pages gate differently.
+///
+/// **`requireInstanceUnlocked` rather than `requireInstance`**, so this page
+/// survives an archive-and-purge — one of decision 95's four named exemptions.
+/// The purge nulls every `previousValue` on the cycle, so the applicant data
+/// that justified the stricter gate above is precisely what is no longer here;
+/// and the purge writes its own `ARCHIVE_AND_PURGE` row into this table, so
+/// hiding this page would leave the most consequential act in a cycle's life
+/// visible only inside a JSON export.
 ///
 /// Writing the log has been in place since Phase 2; nothing read it until now
 /// except FR-20's export. That is what made decision 16's attribution worth
@@ -40,7 +48,7 @@ export default async function AuditPage({
   const { id } = await params;
   const { page: requestedPage } = await searchParams;
 
-  await requireInstance(id, `/instances/${id}/audit`);
+  await requireInstanceUnlocked(id, `/instances/${id}/audit`);
 
   const instance = await prisma.instance.findUnique({
     where: { id },

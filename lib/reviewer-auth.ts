@@ -52,6 +52,27 @@ export function signInPath(instanceId: string, round?: Round): string {
   return round ? `/r/${instanceId}?round=${round}` : `/r/${instanceId}`;
 }
 
+/// Where a reviewer lands when the cycle has been archived. PRD decision 95.
+export function closedPath(instanceId: string): string {
+  return `/r/${instanceId}/closed`;
+}
+
+/// Whether this cycle has been archived and purged.
+///
+/// **The reviewer gate needs its own check.** It never passes through
+/// `requireInstance`, so the admin-side redirect does not cover it — a reviewer
+/// holding a cookie issued before the purge would otherwise reach a dashboard of
+/// applicants whose names and essays are gone, which reads as the system having
+/// lost their work rather than as retention. Deleting the access codes closes
+/// new sign-ins; this closes the sessions already outstanding.
+async function archived(instanceId: string): Promise<boolean> {
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { archivedAt: true },
+  });
+  return instance?.archivedAt != null;
+}
+
 /// Read the reviewer session for one instance, without redirecting.
 ///
 /// The instance id is passed through to `decodeReviewerSession`, which refuses a
@@ -93,6 +114,13 @@ export async function signInReviewer(
   reviewerId: string,
   code: string,
 ): Promise<AttemptResult> {
+  // Before the limiter, and deliberately not counted as a failed attempt. The
+  // purge deletes every RoundAccessCode, so an archived cycle would refuse this
+  // sign-in anyway — but it would do it by burning one of ten attempts against a
+  // code that no longer exists, and would tell the reviewer their code was wrong
+  // when the truth is that the cycle is over. PRD decision 95.
+  if (await archived(instanceId)) return { ok: false, archived: true };
+
   const key = await attemptKey(`reviewer:${instanceId}:${round}`);
   const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
   if (!verdict.allowed) {
@@ -136,6 +164,13 @@ export async function signInReviewer(
 export async function requireReviewer(instanceId: string): Promise<ReviewerSessionPayload> {
   const session = await readReviewer(instanceId);
   if (!session) redirect(signInPath(instanceId));
+
+  // Checked AFTER the session, so an archived cycle does not become a way to
+  // enumerate instance ids: a stranger with a guessed id gets the sign-in form
+  // either way, and only someone already holding a valid reviewer cookie learns
+  // that this particular cycle has been archived.
+  if (await archived(instanceId)) redirect(closedPath(instanceId));
+
   return session;
 }
 

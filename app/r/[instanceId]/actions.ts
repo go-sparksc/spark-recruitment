@@ -45,6 +45,12 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
   const result = await signInReviewer(instanceId, round, reviewerId, code);
 
   if (!result.ok) {
+    // Said plainly rather than folded into "wrong code". The cycle being over is
+    // not a secret from someone holding its link, and telling a reviewer their
+    // code is wrong when the truth is that there is nothing left to review sends
+    // them to ask an admin for a code that no longer exists. PRD decision 95.
+    if (result.archived) redirect(`/r/${instanceId}/closed`);
+
     if (result.lockedForSeconds !== undefined) {
       const minutes = Math.max(1, Math.ceil(result.lockedForSeconds / 60));
       return {

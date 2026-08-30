@@ -100,6 +100,9 @@ export interface AttemptResult {
   ok: boolean;
   /// Populated when the attempt was refused without checking the password.
   lockedForSeconds?: number;
+  /// Set when the cycle has been archived and purged, so the caller can say so
+  /// instead of reporting a wrong code. Reviewer sign-in only — PRD decision 95.
+  archived?: boolean;
 }
 
 /// Verify the app-level password and start a session.
@@ -201,6 +204,45 @@ export async function requireAdmin(next?: string): Promise<SessionPayload> {
 /// reset and instance deletion, per FR-5 — call requireAdmin() instead, and
 /// deliberately not this.
 export async function requireInstance(instanceId: string, next?: string): Promise<SessionPayload> {
+  const session = await requireInstanceUnlocked(instanceId, next);
+
+  // An archived cycle is read-only. Its live screens would render blank names
+  // and empty essays beside real scores, which reads as data loss rather than as
+  // retention — so every surface that goes through this gate lands on the
+  // archive summary instead. PRD decision 95.
+  //
+  // The check is here rather than on each page for the same reason the gate
+  // itself is: a server action is a POST endpoint reachable without rendering
+  // the page that hosts it, and an action that mutated a purged cycle would be
+  // writing against applicant rows that no longer hold applicants.
+  const archived = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { archivedAt: true },
+  });
+  if (archived?.archivedAt != null) redirect(`/instances/${instanceId}/archive`);
+
+  return session;
+}
+
+/// The instance gate WITHOUT the archived check.
+///
+/// Three callers, and each would break under `requireInstance`:
+///
+///   - the archive summary page itself, which would redirect to itself forever;
+///   - FR-20's export, which is the escape hatch an archived cycle most needs —
+///     decision 95 keeps `Instance.passwordHash` precisely so these two stay
+///     openable;
+///   - the audit view, whose whole subject is what was done to the cycle,
+///     including the purge.
+///
+/// **Not a way around the read-only rule.** Anything that mutates, or that
+/// renders applicant data the purge emptied, calls `requireInstance`. If you are
+/// reaching for this to make a page load, the page wants the archive summary
+/// instead.
+export async function requireInstanceUnlocked(
+  instanceId: string,
+  next?: string,
+): Promise<SessionPayload> {
   const session = await requireAdmin(next);
   if (!session.ins.includes(instanceId)) {
     redirect(`/instances/${instanceId}/unlock${next ? `?next=${encodeURIComponent(next)}` : ""}`);

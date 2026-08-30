@@ -4,7 +4,7 @@ import { InstanceCrumbs } from "../instance-crumbs";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplicantStatus } from "@/generated/prisma/enums";
-import { requireInstance } from "@/lib/auth";
+import { requireInstanceUnlocked } from "@/lib/auth";
 import { EXPORT_TABLES } from "@/lib/export";
 import { prisma } from "@/lib/prisma";
 
@@ -23,7 +23,7 @@ function plural(count: number, noun: string, plural?: string): string {
 /// who taps a dead button learns nothing about when it will be alive.
 export default async function ExportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireInstance(id, `/instances/${id}/export`);
+  await requireInstanceUnlocked(id, `/instances/${id}/export`);
 
   const instance = await prisma.instance.findUnique({
     where: { id },

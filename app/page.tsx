@@ -123,6 +123,16 @@ export default async function Home() {
           )}
         </CardContent>
       </Card>
+
+      {/* The only way in to §8's retention screen. Deliberately a quiet link
+          rather than a button beside "New instance": it is housekeeping done
+          once or twice a year, and its one action is irreversible. */}
+      <p className="text-muted-foreground mt-6 text-xs">
+        <Link href="/archive" className="hover:underline">
+          Retention
+        </Link>{" "}
+        — what the club keeps from past cycles, and what it deletes.
+      </p>
     </main>
   );
 }
