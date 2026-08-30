@@ -75,6 +75,10 @@ Everything else gets light smoke coverage. Do not chase coverage percentage.
 
 `SESSION_SECRET` rotated on 2026-08-25 in both local `.env` and Vercel production, after a forged admin+instance token was minted during Phase 7 testing (session cookie signed with the old secret, used for HTTP verification instead of a real browser login). The two environments intentionally hold different secret values; they are not meant to match.
 
+**Nine orphaned `AuditLog` rows were deleted from the development database on 2026-08-30**, by the first run of `prisma/checks/archive-purge.ts` during Phase 8. They are not recoverable. The check builds a throwaway cycle old enough to purge, and its first version dated the *filler* cycles it creates alongside to the present — which pushed the retention cutoff to today. Archive-and-purge ages out orphaned rows (§8's instance-deletion records) **by date**, so the cutoff swept every one of them, not only the 1999 fixture the check had planted. Fixed by backdating the fillers to 2001, which keeps the cutoff and the blast radius in 2001, and by a do-not-run-against-production warning in the script header.
+
+The lesson generalises past this one script, which is why it is here rather than only in that file: **a check's own fixtures can destroy real data through the exact mechanism the check is testing.** The purge behaved correctly at every step — the bug was that a fixture date decided what "old" meant for rows the check had never heard of. Any check that exercises a date-, rank-, or threshold-driven deletion needs its fixture values chosen to sit deliberately outside the range of anything real, and needs that reasoning written down next to them. `prisma/checks/*` scripts are otherwise held to "clean up whatever they create"; this is the case where that rule is not sufficient, because the rows destroyed were ones the script never created.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
