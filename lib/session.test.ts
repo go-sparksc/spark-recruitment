@@ -3,8 +3,10 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  adminDisplayName,
   decodeSession,
   encodeSession,
+  MAX_ADMIN_NAME_LENGTH,
   newSession,
   safeRedirect,
   withInstance,
@@ -16,6 +18,7 @@ const NOW = 1_700_000_000;
 
 const session = (overrides: Partial<SessionPayload> = {}): SessionPayload => ({
   adm: true,
+  nm: "Ada Lovelace",
   ins: [],
   exp: NOW + 3600,
   ...overrides,
@@ -61,10 +64,16 @@ describe("encode/decode round trip", () => {
     // a mismatched signature instead would make this test pass for the wrong
     // reason and never exercise the shape validation at all.
     const shapes = [
-      '{"adm":"yes","ins":[],"exp":9999999999}', // adm not a boolean
-      '{"adm":true,"exp":9999999999}', // ins missing
-      '{"adm":true,"ins":[1],"exp":9999999999}', // ins not all strings
-      '{"adm":true,"ins":[],"exp":"soon"}', // exp not a number
+      '{"adm":"yes","nm":"A B","ins":[],"exp":9999999999}', // adm not a boolean
+      '{"adm":true,"nm":"A B","exp":9999999999}', // ins missing
+      '{"adm":true,"nm":"A B","ins":[1],"exp":9999999999}', // ins not all strings
+      '{"adm":true,"nm":"A B","ins":[],"exp":"soon"}', // exp not a number
+      // The Phase 8 additions. A session minted before the name prompt existed
+      // is exactly the first of these, and it has to be refused rather than
+      // defaulted — see the case below.
+      '{"adm":true,"ins":[],"exp":9999999999}', // nm missing
+      '{"adm":true,"nm":"","ins":[],"exp":9999999999}', // nm empty
+      '{"adm":true,"nm":42,"ins":[],"exp":9999999999}', // nm not a string
       "[]",
       "null",
       '"a string"',
@@ -88,10 +97,59 @@ describe("encode/decode round trip", () => {
   });
 });
 
+describe("a session minted before the name prompt existed", () => {
+  it("is refused rather than defaulted, so no unattributed row can be written", () => {
+    // The Phase 8 upgrade case, stated as its own test because the consequence
+    // of getting it wrong is invisible: a cookie issued yesterday carries no
+    // `nm`, and accepting it would let that admin keep writing audit rows with
+    // no name on them for the remaining twelve hours of its life. Refusing
+    // costs one sign-in, which is where the name is collected.
+    const legacy = { adm: true, ins: ["inst_a"], exp: NOW + 3600 };
+    const encoded = Buffer.from(JSON.stringify(legacy)).toString("base64url");
+    const signature = createHmac("sha256", SECRET).update(encoded).digest("base64url");
+
+    expect(decodeSession(`${encoded}.${signature}`, SECRET, NOW)).toBeNull();
+  });
+});
+
+describe("adminDisplayName", () => {
+  it("joins the two halves", () => {
+    expect(adminDisplayName("Ada", "Lovelace")).toBe("Ada Lovelace");
+  });
+
+  it("trims and collapses whitespace", () => {
+    expect(adminDisplayName("  Ada  ", "  Lovelace  ")).toBe("Ada Lovelace");
+    expect(adminDisplayName("Ada\tGrace", "Lovelace")).toBe("Ada Grace Lovelace");
+  });
+
+  it("accepts one half alone", () => {
+    // A mononym, or someone who only fills one box. Attribution to "Prince" is
+    // worth more than refusing the sign-in.
+    expect(adminDisplayName("Prince", "")).toBe("Prince");
+    expect(adminDisplayName("", "Lovelace")).toBe("Lovelace");
+  });
+
+  it("returns null when there is nothing to attribute to", () => {
+    // The caller turns this into a form error. Storing a blank signature would
+    // be indistinguishable from a pre-Phase-8 row, which means something else.
+    expect(adminDisplayName("", "")).toBeNull();
+    expect(adminDisplayName("   ", "\t\n")).toBeNull();
+  });
+
+  it("truncates rather than refusing an over-long name", () => {
+    // The audit table is not free storage for anyone holding the app password,
+    // and a 4000-character "name" would also bloat every cookie it rides in.
+    const long = adminDisplayName("x".repeat(200), "y".repeat(200));
+
+    expect(long).toHaveLength(MAX_ADMIN_NAME_LENGTH);
+  });
+});
+
 describe("newSession and withInstance", () => {
   it("starts admin-cleared with no instances unlocked", () => {
-    const fresh = newSession(NOW);
+    const fresh = newSession("Ada Lovelace", NOW);
     expect(fresh.adm).toBe(true);
+    expect(fresh.nm).toBe("Ada Lovelace");
     expect(fresh.ins).toEqual([]);
     expect(fresh.exp).toBeGreaterThan(NOW);
   });
@@ -99,7 +157,7 @@ describe("newSession and withInstance", () => {
   it("adds an instance without moving the expiry", () => {
     // Absolute expiry from sign-in: unlocking instances must not extend a
     // session indefinitely.
-    const fresh = newSession(NOW);
+    const fresh = newSession("Ada Lovelace", NOW);
     const unlocked = withInstance(fresh, "inst_a");
 
     expect(unlocked.ins).toEqual(["inst_a"]);
@@ -107,12 +165,12 @@ describe("newSession and withInstance", () => {
   });
 
   it("is idempotent", () => {
-    const once = withInstance(newSession(NOW), "inst_a");
+    const once = withInstance(newSession("Ada Lovelace", NOW), "inst_a");
     expect(withInstance(once, "inst_a").ins).toEqual(["inst_a"]);
   });
 
   it("does not mutate the input", () => {
-    const fresh = newSession(NOW);
+    const fresh = newSession("Ada Lovelace", NOW);
     withInstance(fresh, "inst_a");
     expect(fresh.ins).toEqual([]);
   });

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { auditActor } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
@@ -30,7 +31,7 @@ export async function resetInstancePassword(
   _prev: ResetPasswordState,
   formData: FormData,
 ): Promise<ResetPasswordState> {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const instanceId = String(formData.get("instanceId") ?? "");
   const password = String(formData.get("password") ?? "");
@@ -54,7 +55,7 @@ export async function resetInstancePassword(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "RESET_INSTANCE_PASSWORD",
         entityType: "Instance",
         entityId: instanceId,
@@ -80,7 +81,7 @@ export async function deleteInstance(
   _prev: DeleteState,
   formData: FormData,
 ): Promise<DeleteState> {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const instanceId = String(formData.get("instanceId") ?? "");
   const typedName = String(formData.get("confirmName") ?? "").trim();
@@ -114,7 +115,7 @@ export async function deleteInstance(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "DELETE_INSTANCE",
         entityType: "Instance",
         entityId: instance.id,

@@ -19,6 +19,7 @@ import "server-only";
 // prisma/checks/rate-limit.ts asserts that property against a real database,
 // because no unit test can reach it.
 
+import { SYSTEM_ACTOR } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import {
   bucketAfterFailure,
@@ -136,7 +137,9 @@ export async function recordFailure(
       await tx.auditLog.create({
         data: {
           instanceId,
-          actor: "system",
+          // Nobody did this; the limiter did. actorName stays null, which means
+          // something different from a person whose name went unrecorded.
+          ...SYSTEM_ACTOR,
           action: "RATE_LIMIT_LOCKOUT",
           entityType: "RateLimitBucket",
           entityId: key,

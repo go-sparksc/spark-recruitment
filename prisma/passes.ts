@@ -63,6 +63,15 @@ const SEEDED_AUDIT_ACTIONS = [
   "CLOSE_SECOND_ROUND",
 ];
 
+/// `actorName` follows the same principle as `actor` above to the opposite
+/// conclusion, after decision 93. Leaving it null would make these rows
+/// indistinguishable from pre-Phase-8 ones, and those mean something specific:
+/// an action taken before the name prompt existed. No admin typed a name here
+/// because no admin was involved, so the rows say so, in the same
+/// self-identifying way as every other piece of synthetic content in this
+/// repository.
+const SEED_ACTOR_NAME = "SYNTHETIC Seed Script";
+
 /// Undo a previous run, so this is re-runnable against an instance that already
 /// has a second round on it.
 ///
@@ -153,6 +162,7 @@ async function createPass(ordinal: number): Promise<{ passId: string; applicantI
         data: {
           instanceId: SEED_INSTANCE_ID,
           actor: "admin",
+          actorName: SEED_ACTOR_NAME,
           action: "CREATE_PASS",
           entityType: "Pass",
           entityId: created.id,
@@ -270,6 +280,7 @@ async function manuallyReject(passId: string, ordinal: number, applicantId: stri
       data: {
         instanceId: SEED_INSTANCE_ID,
         actor: "admin",
+        actorName: SEED_ACTOR_NAME,
         action: "MANUAL_REJECT_IN_PASS",
         entityType: "Applicant",
         entityId: applicantId,
@@ -298,6 +309,7 @@ async function closePass(passId: string, ordinal: number): Promise<void> {
       data: {
         instanceId: SEED_INSTANCE_ID,
         actor: "admin",
+        actorName: SEED_ACTOR_NAME,
         action: "CLOSE_PASS",
         entityType: "Pass",
         entityId: passId,
@@ -340,6 +352,7 @@ async function closeSecondRound(finalPassId: string, ordinal: number): Promise<n
       data: {
         instanceId: SEED_INSTANCE_ID,
         actor: "admin",
+        actorName: SEED_ACTOR_NAME,
         action: "CLOSE_SECOND_ROUND",
         entityType: "Instance",
         entityId: SEED_INSTANCE_ID,

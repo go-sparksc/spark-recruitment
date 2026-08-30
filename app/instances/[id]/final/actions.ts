@@ -19,6 +19,7 @@ import {
   PassResolution,
   Round,
 } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -51,7 +52,7 @@ export async function decideApplicant(
   const applicantId = String(formData.get("applicantId") ?? "");
   const raw = String(formData.get("outcome") ?? "");
 
-  await requireInstance(instanceId, `/instances/${instanceId}/final`);
+  const session = await requireInstance(instanceId, `/instances/${instanceId}/final`);
 
   if (raw !== DecisionOutcome.SPARKLET && raw !== DecisionOutcome.REJECT) {
     return { error: "Choose admit or reject." };
@@ -127,7 +128,7 @@ export async function decideApplicant(
       await tx.auditLog.create({
         data: {
           instanceId,
-          actor: "admin",
+          ...auditActor(session),
           action: "RESOLVE_UNRESOLVED_APPLICANT",
           // The id, never the name — the same rule clause 17t puts on every
           // other audit row in this round.

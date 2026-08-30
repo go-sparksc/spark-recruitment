@@ -9,6 +9,7 @@ import {
   InstanceStage,
   Round,
 } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -40,7 +41,7 @@ export async function finalizeWritten(
   formData: FormData,
 ): Promise<FinalizeState> {
   const instanceId = String(formData.get("instanceId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
@@ -107,7 +108,7 @@ export async function finalizeWritten(
         // One shared admin password, so the actor cannot yet name an
         // individual — see open decision 16. Same literal every other audited
         // override uses.
-        actor: "admin",
+        ...auditActor(session),
         action: "FINALIZE_WRITTEN_ROUND",
         entityType: "Instance",
         entityId: instanceId,

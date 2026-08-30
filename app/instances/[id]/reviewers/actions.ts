@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { Round } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
@@ -443,7 +444,7 @@ export async function removeReviewer(
   reviewerId: string,
   round: Round | null,
 ): Promise<ActionState> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const reviewer = await prisma.reviewer.findFirst({
     where: { id: reviewerId, instanceId },
@@ -483,7 +484,7 @@ export async function removeReviewer(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: round === null ? "REMOVE_REVIEWER" : "REMOVE_REVIEWER_FROM_ROUND",
         entityType: "Reviewer",
         entityId: reviewerId,
@@ -595,7 +596,7 @@ export async function setRoundCode(
   }
   const round = roundValue as Round;
 
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   // Reviewers type this on a phone keyboard from a Slack message. A code with a
   // leading or trailing space is one nobody can enter, and trimming it silently
@@ -630,7 +631,7 @@ export async function setRoundCode(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: rotated ? "ROTATE_ROUND_CODE" : "SET_ROUND_CODE",
         entityType: "RoundAccessCode",
         entityId: existing?.id ?? `${instanceId}:${round}`,

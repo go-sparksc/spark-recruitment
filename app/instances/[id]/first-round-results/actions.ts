@@ -9,6 +9,7 @@ import {
   InstanceStage,
   Round,
 } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
@@ -46,7 +47,7 @@ export async function finalizeFirstRound(
   formData: FormData,
 ): Promise<FinalizeFirstRoundState> {
   const instanceId = String(formData.get("instanceId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
@@ -102,7 +103,7 @@ export async function finalizeFirstRound(
           // One shared admin password, so the actor cannot yet name an
           // individual — open decision 16. Same literal every other audited
           // override uses. Counts only, no applicant names or ids.
-          actor: "admin",
+          ...auditActor(session),
           action: "FINALIZE_FIRST_ROUND",
           entityType: "Instance",
           entityId: instanceId,

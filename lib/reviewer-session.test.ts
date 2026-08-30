@@ -119,7 +119,7 @@ describe("the reviewer cookie and the admin cookie do not cross", () => {
     // Both are signed with SESSION_SECRET, so the signature check passes and the
     // shape check is the only thing standing between an admin cookie pasted into
     // the reviewer slot and a valid reviewer session. It must reject.
-    const adminToken = encodeSession(newSession(NOW), SECRET);
+    const adminToken = encodeSession(newSession("Ada Lovelace", NOW), SECRET);
 
     expect(decodeReviewerSession(adminToken, SECRET, INSTANCE, NOW)).toBeNull();
   });
@@ -128,7 +128,7 @@ describe("the reviewer cookie and the admin cookie do not cross", () => {
     // The closest thing to a real confusion: a signed admin token naming this
     // instance in `ins`. It is an array there and a string here, and it carries
     // no reviewer id, so there is no reading under which it becomes a reviewer.
-    const adminToken = encodeSession({ adm: true, ins: [INSTANCE], exp: NOW + 3600 }, SECRET);
+    const adminToken = encodeSession({ adm: true, nm: "Ada Lovelace", ins: [INSTANCE], exp: NOW + 3600 }, SECRET);
 
     expect(decodeReviewerSession(adminToken, SECRET, INSTANCE, NOW)).toBeNull();
   });

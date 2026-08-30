@@ -11,6 +11,7 @@ import {
   type FeasibilityReport,
   type Pair,
 } from "@/lib/assignment";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -134,7 +135,7 @@ export async function generate(
   round: Round,
   options: { relaxSparkletLoad?: boolean; discardPreserved?: boolean } = {},
 ): Promise<GenerateResult> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   // Read, plan and write in one transaction, so the preserved set the plan was
   // built from is the set the delete runs against. See `loadInput`.
@@ -184,7 +185,7 @@ export async function generate(
       await tx.auditLog.create({
         data: {
           instanceId,
-          actor: "admin",
+          ...auditActor(session),
           action: "GENERATE_ASSIGNMENTS",
           entityType: "Instance",
           entityId: instanceId,
@@ -270,7 +271,7 @@ export async function assignReviewer(
   applicantId: string,
   reviewerId: string,
 ): Promise<ActionState> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const [reviewer, current] = await Promise.all([
     prisma.reviewer.findFirst({
@@ -325,7 +326,7 @@ export async function assignReviewer(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "ASSIGN_REVIEWER",
         entityType: "Applicant",
         entityId: applicantId,
@@ -366,7 +367,7 @@ export async function swapReviewer(
   outReviewerId: string,
   inReviewerId: string,
 ): Promise<ActionState> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   if (outReviewerId === inReviewerId) return { error: "That is the same reviewer." };
 
@@ -422,7 +423,7 @@ export async function swapReviewer(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "SWAP_REVIEWER",
         entityType: "Applicant",
         entityId: applicantId,
@@ -477,7 +478,7 @@ export async function unassignReviewer(
   applicantId: string,
   reviewerId: string,
 ): Promise<ActionState> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const assignment = await prisma.assignment.findFirst({
     where: { instanceId, round, applicantId, reviewerId },
@@ -495,7 +496,7 @@ export async function unassignReviewer(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "UNASSIGN_REVIEWER",
         entityType: "Applicant",
         entityId: applicantId,

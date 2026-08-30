@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { validateRubric, type RubricCategoryInput } from "@/lib/rubric";
@@ -69,7 +70,7 @@ export async function saveRubric(
 /// requires deliberately discarding the grading. Audited, per §8 — this destroys
 /// reviewer work and the log is what makes that answerable afterwards.
 export async function resetWrittenScores(instanceId: string): Promise<RubricState> {
-  await requireInstance(instanceId, `/instances/${instanceId}/rubric`);
+  const session = await requireInstance(instanceId, `/instances/${instanceId}/rubric`);
 
   const existing = await scoreCount(instanceId);
   if (existing === 0) return { error: "There are no written scores to reset." };
@@ -78,7 +79,7 @@ export async function resetWrittenScores(instanceId: string): Promise<RubricStat
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "RESET_WRITTEN_SCORES",
         entityType: "Instance",
         entityId: instanceId,

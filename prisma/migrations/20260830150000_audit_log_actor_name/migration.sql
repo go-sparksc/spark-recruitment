@@ -1,0 +1,29 @@
+-- Admin identity on the audit row. PRD decisions 16 and 93.
+--
+-- §8 puts one app-level password behind 2-6 admins, so every override, password
+-- reset and instance deletion has been attributable to "an admin" and nothing
+-- finer. Decision 16 resolved that with a name prompt at sign-in; this is the
+-- column it lands in.
+--
+-- A NEW column rather than writing the name into "actor". "actor" carries the
+-- ROLE -- "admin", or "system" for the lockout rows decision 92 added -- and
+-- keeping the two apart is what lets a query still separate "a person did this"
+-- from "the system did this" without matching on strings. Writing a name into
+-- "actor" would have destroyed that, and would have left the FR-20 export's
+-- actor column holding a mix of roles and names.
+--
+-- Note that "Decision"."actor" is a different column of the same name and a
+-- different type -- the DecisionActor enum, where SYSTEM means a unanimous tally
+-- resolved an applicant. It is deliberately untouched here: for half its rows
+-- there is no person to name, and decision 69 depends on that staying true.
+--
+-- NULLABLE, and deliberately NOT backfilled. Every existing row predates the
+-- name prompt and genuinely has no known person behind it; stamping one on would
+-- be a falsehood in the one table whose entire purpose is attribution. The audit
+-- view renders null as "an admin", which is exactly what §8 could promise
+-- before decision 16.
+--
+-- No default, for the same reason. A default would make every future row that
+-- forgot to set the name claim to have been signed by whoever the default names.
+
+ALTER TABLE "AuditLog" ADD COLUMN "actorName" TEXT;

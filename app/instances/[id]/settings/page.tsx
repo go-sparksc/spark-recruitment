@@ -77,6 +77,19 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
         This page needs only the app password, not this instance&apos;s own — otherwise a forgotten
         instance password would leave a row nobody could open, reset, or remove.
       </p>
+
+      {/* Both actions on this page are audited. The log lives one gate up, on
+          this instance's own password, because its entries can quote applicant
+          data — see the note at the top of the audit page. Linking rather than
+          inlining is the honest version: the reader is told the record exists
+          and what it costs to read it. */}
+      <p className="text-muted-foreground mt-2 text-xs">
+        Password resets and deletions are recorded in this cycle&apos;s{" "}
+        <Link href={`/instances/${instance.id}/audit`} className="hover:underline">
+          activity log
+        </Link>
+        , which needs the instance password to open.
+      </p>
     </main>
   );
 }

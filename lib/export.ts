@@ -82,7 +82,7 @@ export const EXPORT_TABLES = [
   { table: "PassApplicant", columns: ["id", "passId", "applicantId", "resolution", "resolvedAt", "createdAt", "updatedAt"] },
   { table: "PassVote", columns: ["id", "passId", "applicantId", "reviewerId", "value", "submittedAt", "updatedAt"] },
   { table: "Decision", columns: ["id", "applicantId", "stage", "outcome", "actor", "decidedAt", "updatedAt"] },
-  { table: "AuditLog", columns: ["id", "instanceId", "actor", "action", "entityType", "entityId", "previousValue", "createdAt"] },
+  { table: "AuditLog", columns: ["id", "instanceId", "actor", "actorName", "action", "entityType", "entityId", "previousValue", "createdAt"] },
 ] as const satisfies readonly TableManifest[];
 
 /// Every table the export carries, as a literal union.

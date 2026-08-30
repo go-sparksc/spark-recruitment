@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { Prisma } from "@/generated/prisma/client";
 import { FieldCategory, FieldGroupRole, PromotedRole } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { uniqueSlug } from "@/lib/fields";
 import { prisma } from "@/lib/prisma";
@@ -62,8 +63,12 @@ async function openDraft(instanceId: string) {
 /// is not. Auditing every checkbox flip during setup would bury the rows that
 /// matter under the ones that do not — there are no applicants and no reviewers
 /// yet, so there is nothing for the entry to be about.
+///
+/// Returns the session alongside the instance because both callers audit, and
+/// decision 93 puts the signing admin's name on the row. Re-reading the cookie
+/// at the call site would be a second source of truth for who is acting.
 async function openInstance(instanceId: string) {
-  await requireInstance(instanceId, `/instances/${instanceId}/mapping`);
+  const session = await requireInstance(instanceId, `/instances/${instanceId}/mapping`);
 
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
@@ -71,7 +76,7 @@ async function openInstance(instanceId: string) {
   });
 
   if (!instance) throw new Error("No such instance.");
-  return instance;
+  return { instance, session };
 }
 
 function readProposals(value: unknown): GroupProposal[] {
@@ -147,7 +152,7 @@ export async function setFieldRoundSettings(
     visibleToFirstRoundReviewer?: boolean | null;
   },
 ): Promise<ActionState> {
-  const instance = await openInstance(instanceId);
+  const { instance, session } = await openInstance(instanceId);
 
   const field = await prisma.field.findFirst({
     where: { id: fieldId, instanceId },
@@ -191,7 +196,7 @@ export async function setFieldRoundSettings(
       await tx.auditLog.create({
         data: {
           instanceId,
-          actor: "admin",
+          ...auditActor(session),
           action: "SET_FIELD_VISIBILITY",
           entityType: "Field",
           entityId: fieldId,
@@ -410,7 +415,7 @@ export async function setGroupRoundSettings(
     visibleToFirstRoundReviewer?: boolean | null;
   },
 ): Promise<ActionState> {
-  const instance = await openInstance(instanceId);
+  const { instance, session } = await openInstance(instanceId);
 
   const group = await prisma.fieldGroup.findFirst({
     where: { id: groupId, instanceId },
@@ -440,7 +445,7 @@ export async function setGroupRoundSettings(
       await tx.auditLog.create({
         data: {
           instanceId,
-          actor: "admin",
+          ...auditActor(session),
           action: "SET_GROUP_VISIBILITY",
           entityType: "FieldGroup",
           entityId: groupId,

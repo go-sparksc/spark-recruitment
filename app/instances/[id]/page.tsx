@@ -58,6 +58,7 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       _count: {
         select: {
           applicants: true,
+          auditLogs: true,
           fields: true,
           fieldGroups: true,
           importRows: true,
@@ -360,6 +361,16 @@ export default async function InstancePage({ params }: { params: Promise<{ id: s
       state: committed
         ? `${plural(counts.applicants, "applicant")} · JSON`
         : "draft — nothing imported yet",
+    },
+    {
+      href: `/instances/${id}/audit`,
+      title: "Activity",
+      // Never "waiting" either, and for a related reason: this is the page you
+      // want when something looks wrong, not a step in the cycle.
+      state:
+        counts.auditLogs > 0
+          ? plural(counts.auditLogs, "recorded change")
+          : "nothing recorded yet",
     },
     {
       href: `/instances/${id}/settings`,

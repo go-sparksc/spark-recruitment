@@ -877,6 +877,19 @@ model AuditLog {
   /// tally resolved an applicant. It must never carry a name; this one must
   /// never stop carrying a role. See PRD decisions 69 and 93.
   actor         String
+  /// The name typed at sign-in (PRD decision 16), copied off the session.
+  ///
+  /// Nullable and deliberately NOT backfilled. Every row written before Phase 8
+  /// predates the name prompt, and every "system" row has no person behind it at
+  /// all — inventing a name for either would be a falsehood in the one table
+  /// whose entire purpose is attribution. The audit view renders null as
+  /// "an admin", which is exactly what §8 could promise before decision 16.
+  ///
+  /// Not a credential. It is checked against nothing, and anyone holding the
+  /// shared app password can type anything: a signature on a shared account,
+  /// not a login. A prompt that looked like authentication would be worse than
+  /// none, because it would imply a guarantee the shared password cannot make.
+  actorName     String?
   action        String
   entityType    String
   entityId      String

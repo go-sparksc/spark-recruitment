@@ -106,7 +106,12 @@ export interface AttemptResult {
 ///
 /// The limiter is consulted BEFORE the argon2 verify, so a locked-out caller
 /// costs nothing to refuse and learns nothing about the password.
-export async function signInAsAdmin(password: string): Promise<AttemptResult> {
+/// `name` is the signature decision 16 asks for, already collapsed to "First
+/// Last" by `adminDisplayName`. It is recorded, never verified — see
+/// SessionPayload.nm. Deliberately not part of the rate-limit key either: a
+/// second field an attacker controls would let them mint a fresh allowance per
+/// guess just by changing the name.
+export async function signInAsAdmin(name: string, password: string): Promise<AttemptResult> {
   const key = await attemptKey("admin");
   const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
   if (!verdict.allowed) {
@@ -128,13 +133,17 @@ export async function signInAsAdmin(password: string): Promise<AttemptResult> {
   // Opportunistic, and deliberately not awaited for correctness — a failed prune
   // must not fail a correct sign-in. See pruneSpent for why there is no cron.
   await pruneSpent(PASSWORD_ATTEMPT_POLICY).catch(() => {});
-  await writeSession(newSession(nowSeconds()));
+  await writeSession(newSession(name, nowSeconds()));
   return { ok: true };
 }
 
 /// Verify one instance's password and add it to the session.
 export async function unlockInstance(instanceId: string, password: string): Promise<AttemptResult> {
-  await requireAdmin();
+  // Keep the session requireAdmin already read. Re-reading it below and falling
+  // back to a fresh one would mint a session with no name on it, which
+  // decodeSession now refuses — so the admin would unlock the instance and be
+  // signed out by their next request.
+  const session = await requireAdmin();
 
   const key = await attemptKey(`instance:${instanceId}`);
   const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
@@ -160,15 +169,20 @@ export async function unlockInstance(instanceId: string, password: string): Prom
   }
 
   await resetKey(key);
-  const session = (await readSession()) ?? newSession(nowSeconds());
   await writeSession(withInstance(session, instanceId));
   return { ok: true };
 }
 
 /// Grant access to an instance the caller just created. They typed its password
 /// a moment ago; asking again immediately is friction with no security value.
-export async function grantInstance(instanceId: string): Promise<void> {
-  const session = (await readSession()) ?? newSession(nowSeconds());
+///
+/// Takes the session rather than re-reading it, for the reason unlockInstance
+/// gives: there is no correct nameless session to fall back to, and every caller
+/// has already been through requireAdmin.
+export async function grantInstance(
+  session: SessionPayload,
+  instanceId: string,
+): Promise<void> {
   await writeSession(withInstance(session, instanceId));
 }
 

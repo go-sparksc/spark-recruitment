@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -127,7 +128,7 @@ export async function saveInterviewRubric(
 export async function resetInterviewScores(
   instanceId: string,
 ): Promise<InterviewRubricState> {
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const existing = await interviewScoreCount(instanceId);
   if (existing === 0) return { error: "There are no imported interview scores to discard." };
@@ -142,7 +143,7 @@ export async function resetInterviewScores(
         instanceId,
         // One shared admin password, so the actor cannot yet name an individual
         // — open decision 16. Same literal every other audited override uses.
-        actor: "admin",
+        ...auditActor(session),
         action: "RESET_INTERVIEW_SCORES",
         entityType: "Instance",
         entityId: instanceId,

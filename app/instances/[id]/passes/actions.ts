@@ -11,6 +11,7 @@ import {
   PassStatus,
   Round,
 } from "@/generated/prisma/enums";
+import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import {
   SECOND_ROUND_POOL,
@@ -56,7 +57,7 @@ export async function createPass(
   formData: FormData,
 ): Promise<PassActionState> {
   const instanceId = String(formData.get("instanceId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
@@ -148,7 +149,7 @@ export async function createPass(
             instanceId,
             // One shared admin password, so the actor cannot yet name an
             // individual — open decision 16. Counts only, no applicant names.
-            actor: "admin",
+            ...auditActor(session),
             action: "CREATE_PASS",
             entityType: "Pass",
             entityId: created.id,
@@ -215,7 +216,7 @@ export async function closePass(
 ): Promise<PassActionState> {
   const instanceId = String(formData.get("instanceId") ?? "");
   const passId = String(formData.get("passId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const pass = await prisma.pass.findFirst({
     // instanceId in the filter, not just the id: the id arrives from the
@@ -245,7 +246,7 @@ export async function closePass(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "CLOSE_PASS",
         entityType: "Pass",
         entityId: pass.id,
@@ -294,7 +295,7 @@ export async function manuallyReject(
   const instanceId = String(formData.get("instanceId") ?? "");
   const passId = String(formData.get("passId") ?? "");
   const applicantId = String(formData.get("applicantId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const pass = await prisma.pass.findFirst({
     where: { id: passId, instanceId },
@@ -372,7 +373,7 @@ export async function manuallyReject(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "MANUAL_REJECT_IN_PASS",
         // The applicant id, which is what §8's entityId is for, and never the
         // name — 17t. `previousValue` carries what this overwrote, so the row
@@ -409,7 +410,7 @@ export async function closeSecondRound(
   formData: FormData,
 ): Promise<PassActionState> {
   const instanceId = String(formData.get("instanceId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   const instance = await prisma.instance.findUnique({
     where: { id: instanceId },
@@ -488,7 +489,7 @@ export async function closeSecondRound(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "CLOSE_SECOND_ROUND",
         entityType: "Instance",
         entityId: instanceId,
@@ -545,7 +546,7 @@ export async function removeConflict(
   const instanceId = String(formData.get("instanceId") ?? "");
   const applicantId = String(formData.get("applicantId") ?? "");
   const reviewerId = String(formData.get("reviewerId") ?? "");
-  await requireInstance(instanceId, path(instanceId));
+  const session = await requireInstance(instanceId, path(instanceId));
 
   // Both ids are re-checked against this instance. They arrive from the request,
   // and neither may name a row belonging to somebody else's cycle.
@@ -586,7 +587,7 @@ export async function removeConflict(
     await tx.auditLog.create({
       data: {
         instanceId,
-        actor: "admin",
+        ...auditActor(session),
         action: "REMOVE_CONFLICT_OF_INTEREST",
         // Ids, never names — §8 and clause 17t. The reviewer is on the row
         // because "whose conflict was lifted" is the question this log answers.

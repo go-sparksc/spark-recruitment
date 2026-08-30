@@ -26,7 +26,7 @@ export async function createInstance(
 ): Promise<CreateInstanceState> {
   // Inside the action, not only in the page. A server action is reachable
   // without rendering the page that hosts it.
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -96,7 +96,7 @@ export async function createInstance(
 
   // They typed this password a moment ago; asking again immediately is friction
   // with no security value.
-  await grantInstance(instance.id);
+  await grantInstance(session, instance.id);
 
   redirect(`/instances/${instance.id}/mapping`);
 }
