@@ -30,7 +30,9 @@ import { RUBRIC_CATEGORIES, SPARKLET_COUNT, buildReviewerSpecs } from "./seed/ro
 const RNG_SEED = 20260805;
 const APPLICANT_COUNT = 150;
 
-const SEED_INSTANCE_NAME = "S26 Recruitment (synthetic seed)";
+/// Overridable alongside SEED_INSTANCE_ID, so `npm run seed:demo` can label its
+/// reference cycle as a demo rather than as the development seed. PRD decision 97.
+const SEED_INSTANCE_NAME = process.env.SEED_INSTANCE_NAME ?? "S26 Recruitment (synthetic seed)";
 
 // Development credentials for synthetic data. Printed below so a new maintainer
 // can actually open the thing. Stored only as argon2id hashes, per PRD section 8.

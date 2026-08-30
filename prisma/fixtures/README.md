@@ -29,6 +29,43 @@ together, because they are indexed against each other.
 `s26-shape.csv` below follows this file's column vocabulary but invents every
 value beneath it.
 
+## `demo-cycle.csv`
+
+**Entirely synthetic. Contains no real applicant data.** Every address is on
+`example.com`; every free-text cell begins with `SYNTHETIC`.
+
+The training file. A board member learning the tool imports this as their own
+practice cycle and runs it start to finish against `ADMIN_GUIDE.md` — which is
+BUILD_PLAN's Phase 8 gate. **25 applicants**, because that gate asks for a
+complete cycle in one sitting and 150 is not clickable in one; a trainee who
+shortcuts the scoring is no longer testing the documentation. See PRD decision 97.
+
+### Regenerating
+
+`npm run seed:demo`, which also rebuilds the reference cycle. Unlike the files
+below, this one is **generated rather than hand-maintained**: it comes from
+`prisma/seed/corpus.ts` and `prisma/seed/applicants.ts` under a fixed RNG seed,
+through the same `buildApplicantData` the database seed uses. There is no second
+synthetic dataset to keep honest, and the one-hot encoding cannot drift between
+this file and the seed because one function produces both.
+
+Regeneration is byte-stable. If it ever stops being, the screenshots in
+`ADMIN_GUIDE.md` start describing a file that no longer exists.
+
+### Two rules the generator applies that the seed does not
+
+The seed writes `@usc.edu` addresses and unprefixed prose, because its rows live
+only in the database. This file is **committed**, which is a different standard:
+
+- **Addresses are rewritten to `example.com`.** A synthetic name at a real domain
+  is exactly the near-miss that makes a fixture unsafe to commit.
+- **Prose is prefixed `SYNTHETIC`** — but *only* prose. The ten one-hot ethnicity
+  columns keep their own header label verbatim, because that is what "checked"
+  means in §10.7; prefixing them would silently break demographic counting on the
+  very file someone is learning from. Structured answers (major, graduation date,
+  pronouns) are left alone too, since the mapping step matches them against fixed
+  vocabularies.
+
 ## `s26-shape.csv`
 
 **This file is entirely synthetic. It contains no real applicant data.**
