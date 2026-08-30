@@ -1141,6 +1141,14 @@ and decision 79, checked in the same place.
 
     **No second synthetic dataset**: same corpus, same generators, same safety properties as the existing fixtures (`example.com` addresses, every free-text cell prefixed `SYNTHETIC`). A second body of fake applicants would be a second thing to keep honest, and the first one already has a README enumerating every hazard it deliberately contains.
 
+    **The two halves are deliberately different sizes, and only the CSV is small.** The demo CSV is 25 rows because a trainee clicks through every one of them. The reference cycle is seeded at production scale — 150 applicants, 30 reviewers — for two reasons.
+
+    The first is mechanical: `prisma/advance.ts` and `prisma/passes.ts` are written against real cohort constants (`FIRST_ROUND_ADVANCE_COUNT`, `SECOND_ROUND_ADVANCE_COUNT`, the pass plans in `prisma/seed/passes.ts`), and running them over 25 applicants asks for more advancing applicants than exist. Making those proportional means rewriting the seed's internals, which is exactly what this decision's "reuse the existing seed rather than building a second synthetic dataset" rules out.
+
+    The second is that it is better this way, not a compromise. **The reference exists to be looked at, not clicked through**, and a finished cycle at real scale is a more faithful picture of what a real one looks like: 158 applicants narrowing to 7 Sparklets, a funnel with enough people in it for the demographic shares to mean anything, and a second round whose pass structure is not degenerate. A 25-applicant reference would show a trainee a shape no real cycle has. The thing they compare their own work against should be the real thing.
+
+    So: **screenshots in `ADMIN_GUIDE.md` come from the 25-row CSV**, since that is what a board member actually does in the gate. The reference cycle is what the guide points at when it needs to show a finished funnel or a resolved pass.
+
 ## 11. Out of scope for v1, worth noting for v2
 
 - AI-assisted flagging of likely AI-written applications. The `Scores` sheet already has an `AI Detected?` column, so the club is doing this manually. Automating it is a defensible v2 feature and a strong portfolio addition, but it is a judgment call with real fairness stakes and should not ride along with the core rewrite.
