@@ -26,6 +26,7 @@ import {
   EXPORT_TABLES,
   EXPORT_TABLE_NAMES,
   ExportFormatError,
+  NON_INSTANCE_TABLES,
   parseExport,
   rowCounts,
   serializeExport,
@@ -89,18 +90,35 @@ describe("EXPORT_TABLES covers the schema", () => {
     }
   });
 
-  it("covers every model in the schema, so no table is quietly left out of the export", () => {
+  it("accounts for every model in the schema, so no table is quietly left out of the export", () => {
     // The other direction, and the one that actually bites: a model ADDED to the
     // schema is invisible to the test above, because that test only walks tables
     // the manifest already knows. Without this case a new table would export as
     // nothing at all and the round trip would still pass.
+    //
+    // Phase 8 added the first table that genuinely belongs to no instance, so
+    // "accounted for" now means exported OR named in NON_INSTANCE_TABLES with a
+    // reason (decision 96). The guarantee is unchanged — a new table still fails
+    // this test until someone writes down which it is. What would have broken the
+    // guarantee is relaxing the comparison instead of naming the exception.
     const namespace = Prisma as unknown as Record<string, unknown>;
     const modelsInClient = Object.keys(namespace)
       .filter((key) => key.endsWith("ScalarFieldEnum"))
       .map((key) => key.slice(0, -"ScalarFieldEnum".length))
       .sort();
 
-    expect(modelsInClient).toEqual([...EXPORT_TABLE_NAMES].sort());
+    const accountedFor = [...EXPORT_TABLE_NAMES, ...NON_INSTANCE_TABLES].sort();
+
+    expect(modelsInClient).toEqual(accountedFor);
+  });
+
+  it("does not let a table be both exported and excluded", () => {
+    // The two lists are the whole of the decision, so an overlap would mean the
+    // repository states both answers at once and the test above still passes.
+    const exported = new Set<string>(EXPORT_TABLE_NAMES);
+    const overlap = NON_INSTANCE_TABLES.filter((table) => exported.has(table));
+
+    expect(overlap).toEqual([]);
   });
 
   it("has no duplicate tables", () => {

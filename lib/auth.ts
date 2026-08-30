@@ -17,7 +17,8 @@ import { redirect } from "next/navigation";
 
 import { verifySecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
-import { createAttemptLimiter, PASSWORD_ATTEMPT_POLICY } from "@/lib/rate-limit";
+import { PASSWORD_ATTEMPT_POLICY } from "@/lib/rate-limit";
+import { checkKey, pruneSpent, recordFailure, resetKey } from "@/lib/rate-limit-store";
 import {
   decodeSession,
   encodeSession,
@@ -59,22 +60,15 @@ function adminPasswordHash(): string {
   return value;
 }
 
-// Module-level so it survives between requests within a process. See PRD open
-// decision 19 for what this does and does not cover.
-//
-// Exported because lib/reviewer-auth.ts gates the round access code through the
-// same limiter rather than standing up a second one. Buckets are namespaced by
-// scope, so the two never share an allowance; what sharing the instance buys is
-// one bounded map and one prune, instead of two that grow independently.
-export const limiter = createAttemptLimiter(PASSWORD_ATTEMPT_POLICY);
-
 /// Best-effort client identifier for rate limiting. On Vercel x-forwarded-for is
 /// set by the platform; locally it usually is not. Falling back to a shared
 /// bucket is deliberate — an attacker who strips the header lands in the same
 /// bucket as everyone else rather than escaping the limiter entirely.
 ///
-/// Exported for the same reason as the limiter: a second copy of this parsing is
-/// a place the two gates can come to disagree about who a caller is.
+/// Exported because lib/reviewer-auth.ts keys its gate the same way: a second
+/// copy of this parsing is a place the two gates can come to disagree about who
+/// a caller is. Scopes keep their buckets apart, so sharing the shape costs no
+/// gate any of another's allowance.
 export async function attemptKey(scope: string): Promise<string> {
   const forwarded = (await headers()).get("x-forwarded-for");
   const ip = forwarded?.split(",")[0]?.trim() || "unknown";
@@ -114,21 +108,26 @@ export interface AttemptResult {
 /// costs nothing to refuse and learns nothing about the password.
 export async function signInAsAdmin(password: string): Promise<AttemptResult> {
   const key = await attemptKey("admin");
-  const verdict = limiter.check(key);
+  const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
   if (!verdict.allowed) {
     return { ok: false, lockedForSeconds: Math.ceil(verdict.retryAfterMs / 1000) };
   }
 
   const valid = await verifySecret(adminPasswordHash(), password);
   if (!valid) {
-    const after = limiter.recordFailure(key);
+    // null: the app-level gate belongs to no instance, so its lockout row is
+    // orphaned by design and sits outside every export. Decision 92.
+    const { verdict: after } = await recordFailure(key, null, PASSWORD_ATTEMPT_POLICY);
     return {
       ok: false,
       ...(after.allowed ? {} : { lockedForSeconds: Math.ceil(after.retryAfterMs / 1000) }),
     };
   }
 
-  limiter.reset(key);
+  await resetKey(key);
+  // Opportunistic, and deliberately not awaited for correctness — a failed prune
+  // must not fail a correct sign-in. See pruneSpent for why there is no cron.
+  await pruneSpent(PASSWORD_ATTEMPT_POLICY).catch(() => {});
   await writeSession(newSession(nowSeconds()));
   return { ok: true };
 }
@@ -138,7 +137,7 @@ export async function unlockInstance(instanceId: string, password: string): Prom
   await requireAdmin();
 
   const key = await attemptKey(`instance:${instanceId}`);
-  const verdict = limiter.check(key);
+  const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
   if (!verdict.allowed) {
     return { ok: false, lockedForSeconds: Math.ceil(verdict.retryAfterMs / 1000) };
   }
@@ -151,14 +150,16 @@ export async function unlockInstance(instanceId: string, password: string): Prom
 
   const valid = await verifySecret(instance.passwordHash, password);
   if (!valid) {
-    const after = limiter.recordFailure(key);
+    // This gate belongs to an instance, so its lockout row carries that id and
+    // shows up in the instance's audit view and its FR-20 export.
+    const { verdict: after } = await recordFailure(key, instanceId, PASSWORD_ATTEMPT_POLICY);
     return {
       ok: false,
       ...(after.allowed ? {} : { lockedForSeconds: Math.ceil(after.retryAfterMs / 1000) }),
     };
   }
 
-  limiter.reset(key);
+  await resetKey(key);
   const session = (await readSession()) ?? newSession(nowSeconds());
   await writeSession(withInstance(session, instanceId));
   return { ok: true };

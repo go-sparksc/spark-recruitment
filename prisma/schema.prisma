@@ -869,6 +869,13 @@ model AuditLog {
   /// lives in entityId and previousValue, not in the dead reference.
   instanceId    String?
   instance      Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  /// The ROLE that acted: "admin", or "system" for a lockout the limiter wrote
+  /// on nobody's behalf. Deliberately NOT a person.
+  ///
+  /// Note that `Decision.actor` is a different column of the same name and a
+  /// different type — the `DecisionActor` enum, where `SYSTEM` means a unanimous
+  /// tally resolved an applicant. It must never carry a name; this one must
+  /// never stop carrying a role. See PRD decisions 69 and 93.
   actor         String
   action        String
   entityType    String
@@ -877,4 +884,43 @@ model AuditLog {
   createdAt     DateTime  @default(now())
 
   @@index([instanceId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+/// One attempt bucket per rate-limit key, for §8's password gates. PRD decision 92.
+///
+/// **The only model here that belongs to no instance**, which is why it carries
+/// no `instanceId` and why `lib/export.ts` names it in `NON_INSTANCE_TABLES`
+/// (decision 96): it is keyed by client address and belongs to the deployment,
+/// so restoring one deployment's lockouts into another's database would be
+/// incoherent.
+///
+/// **The state machine is not here and is not in SQL.** `lib/rate-limit.ts`
+/// decides every transition; `lib/rate-limit-store.ts` locks the row, hands the
+/// record to those functions, and writes back what they return. A second copy of
+/// the transitions in a CASE expression is a place the two can disagree about
+/// when a key resets.
+///
+/// Rows are deleted once spent rather than kept as history — the durable record
+/// of a lockout is its `AuditLog` row. Nothing reads this table to answer a
+/// question about the past.
+model RateLimitBucket {
+  /// "<scope>:<client ip>", built by `attemptKey` in lib/auth.ts. Scopes are
+  /// namespaced ("admin", "instance:<id>", "reviewer:<id>:<round>") so that one
+  /// gate being hammered cannot spend another's allowance.
+  key             String    @id
+  failures        Int
+  windowStartedAt DateTime
+  /// Null while the key is not locked. No sentinel value to misread.
+  lockedUntil     DateTime?
+  /// Lifetime count, so a key that has locked repeatedly is visible to whoever
+  /// reads this table during an incident. Nothing branches on it.
+  lockoutCount    Int       @default(0)
+  updatedAt       DateTime  @updatedAt
+
+  /// Pruning scans for spent buckets on a timestamp, never by key.
+  @@index([lockedUntil, windowStartedAt])
 }

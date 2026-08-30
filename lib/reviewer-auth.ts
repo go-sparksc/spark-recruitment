@@ -20,9 +20,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { Round } from "@/generated/prisma/enums";
-import { attemptKey, limiter, type AttemptResult } from "@/lib/auth";
+import { attemptKey, type AttemptResult } from "@/lib/auth";
 import { verifySecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { PASSWORD_ATTEMPT_POLICY } from "@/lib/rate-limit";
+import { checkKey, recordFailure, resetKey } from "@/lib/rate-limit-store";
 import {
   decodeReviewerSession,
   encodeReviewerSession,
@@ -92,7 +94,7 @@ export async function signInReviewer(
   code: string,
 ): Promise<AttemptResult> {
   const key = await attemptKey(`reviewer:${instanceId}:${round}`);
-  const verdict = limiter.check(key);
+  const verdict = await checkKey(key, PASSWORD_ATTEMPT_POLICY);
   if (!verdict.allowed) {
     return { ok: false, lockedForSeconds: Math.ceil(verdict.retryAfterMs / 1000) };
   }
@@ -115,14 +117,16 @@ export async function signInReviewer(
   // as a wrong code. Counting them as failures is deliberate: otherwise an
   // unlimited stream of requests with a bogus reviewer id costs nothing.
   if (!accessCode || !reviewer || !(await verifySecret(accessCode.codeHash, code))) {
-    const after = limiter.recordFailure(key);
+    // Scoped to the instance, so this lockout is visible in that instance's
+    // audit view rather than orphaned the way the app gate's is.
+    const { verdict: after } = await recordFailure(key, instanceId, PASSWORD_ATTEMPT_POLICY);
     return {
       ok: false,
       ...(after.allowed ? {} : { lockedForSeconds: Math.ceil(after.retryAfterMs / 1000) }),
     };
   }
 
-  limiter.reset(key);
+  await resetKey(key);
   await writeReviewerSession(newReviewerSession(instanceId, round, reviewer.id, nowSeconds()));
   return { ok: true };
 }

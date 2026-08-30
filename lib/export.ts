@@ -91,6 +91,30 @@ export type ExportTableName = (typeof EXPORT_TABLES)[number]["table"];
 /// The table names in write order, which is the order `EXPORT_TABLES` declares.
 export const EXPORT_TABLE_NAMES: readonly ExportTableName[] = EXPORT_TABLES.map((entry) => entry.table);
 
+/// Tables that deliberately sit OUTSIDE the export, each with the reason it does.
+/// PRD decision 96.
+///
+/// `lib/export.test.ts` asserts that the models in the generated Prisma client
+/// are exactly `EXPORT_TABLE_NAMES` plus this list, so a table added to the
+/// schema still fails `npm run verify` until someone decides, in writing and in
+/// this file, which side of the line it falls on. That is the same guarantee the
+/// original set-equality assertion gave; what changed is that the answer can now
+/// be "not exported", stated explicitly, rather than only "exported".
+///
+/// **Adding an entry here is a decision about FR-20's completeness.** The bar is
+/// that the table cannot belong to an instance — not that exporting it would be
+/// inconvenient. Anything an instance owns is part of what "the entire instance"
+/// means, and decision 86 already settled that credential-bearing rows are in.
+export const NON_INSTANCE_TABLES: readonly string[] = [
+  // Keyed by client address and owned by the deployment, not by any cycle.
+  // Restoring one deployment's lockouts into another's database would be
+  // incoherent — the addresses mean nothing there, and the rows would refuse
+  // real admins on the strength of an attack that happened somewhere else.
+  // Its durable record is the AuditLog row a lockout writes, which IS exported
+  // for the two instance-scoped gates. See decision 92.
+  "RateLimitBucket",
+];
+
 /// Columns that are `DateTime` in the schema, per table.
 ///
 /// Only the restore needs these. Reading, JSON carries an ISO string happily;

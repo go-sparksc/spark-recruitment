@@ -16,6 +16,7 @@
     "seed:passes": "tsx prisma/passes.ts",
     "seed:inspect": "tsx prisma/inspect.ts",
     "check:round-trip": "tsx --conditions=react-server prisma/checks/round-trip.ts",
+    "check:rate-limit": "tsx --conditions=react-server prisma/checks/rate-limit.ts",
     "hash-secret": "tsx scripts/hash-secret.ts"
   },
   "dependencies": {
