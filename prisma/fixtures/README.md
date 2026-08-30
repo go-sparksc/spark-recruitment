@@ -1,5 +1,34 @@
 # CSV fixtures
 
+Every CSV fixture in the repository lives in this directory. There is no second
+location — `fixtures/sample-headers.csv` sat at the repo root until Phase 8,
+when PRD decision 17 consolidated it here. The point is not tidiness: two
+directories for one purpose is how a real export ends up saved in whichever one
+nobody wrote an ignore rule for.
+
+**Every file here is exempted from the repo-wide `*.csv` ban by exact name, one
+line each.** Not by a `!prisma/fixtures/*.csv` glob, which would re-include
+anything dropped in this directory — including a real export. Adding a
+legitimate fixture is meant to cost one deliberate line in `.gitignore`.
+
+## `sample-headers.csv`
+
+**The header row of the real S26 application export, and nothing else.** 37
+column names, zero data rows. This is the one file here whose *content* comes
+from the real export, which is exactly why it holds no applicant data: a header
+row names the club's own questions and names no person.
+
+`prisma/seed/headers.ts` reads it rather than transcribing it. Transcription
+would quietly normalize the things that matter — the curly apostrophes, the
+newlines inside quoted headers, the trailing spaces — and the seed would then
+describe a cleaner export than the one it will meet. `EXPECTED_COLUMN_COUNT`
+there is 37 and is checked on every read; if the export's shape genuinely
+changes, that constant and the field catalog in `prisma/seed/fields.ts` move
+together, because they are indexed against each other.
+
+`s26-shape.csv` below follows this file's column vocabulary but invents every
+value beneath it.
+
 ## `s26-shape.csv`
 
 **This file is entirely synthetic. It contains no real applicant data.**
@@ -8,14 +37,13 @@ Every name, email address, and essay response in it is invented. Emails use
 `example.com`, the domain RFC 2606 reserves for documentation, so nothing here
 can collide with a real USC address. Every response cell begins with the literal
 word `SYNTHETIC` so a cell that leaks into a screenshot or a log is
-self-identifying. This file is safe to commit, and `.gitignore` carries an
-explicit `!prisma/fixtures/*.csv` exception so that the repo-wide `*.csv` ban in
-PRD §8 does not swallow it.
+self-identifying. This file is safe to commit, and `.gitignore` names it exactly
+so that the repo-wide `*.csv` ban in PRD §8 does not swallow it.
 
 ### What it mirrors
 
 The shape — not the content — of Spark SC's real S26 application export. It
-follows the column vocabulary of `fixtures/sample-headers.csv`, which is the
+follows the column vocabulary of `sample-headers.csv` beside it, which is the
 real export's header row with zero data rows beneath it.
 
 It exists so Phase 1 CSV parsing and field mapping can be built and tested

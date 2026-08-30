@@ -14,6 +14,10 @@
 > - **`Field.groupKey` and `Field.isMultiSelect` are gone.** Grouping is now a `FieldGroup` table with `Field.groupId` + `Field.groupRole`, and category, inclusion and the §6 visibility toggles are properties of the *group* — so a group cannot end up half hidden and half visible, and §10.7's `1/n` can never run over a partially excluded set. The migration backfills from `groupKey` before dropping it.
 > - **Judgment call: the free-text write-in is now IN the group.** The field catalog below records keeping it out as deliberate, on the grounds that including it would make `isMultiSelect` inconsistent within the group. v1.2 answers that with `groupRole`: the write-in is a `FREE_TEXT` member, which is exactly the distinction the aggregations branch on. Membership is what lets FR-19 find it; the role is what keeps it out of the count.
 > - **Measured correction.** The table below says 5 headers in `sample-headers.csv` contain embedded newlines. Re-measured against the file, it is **4**. The other figures — 159-char longest, 5 curly apostrophes, 5 trailing-whitespace headers, 37 columns — all hold.
+>
+> **Path change in Phase 8** (PRD decision 17):
+>
+> - **`fixtures/sample-headers.csv` is now `prisma/fixtures/sample-headers.csv`.** Every reference to the old root-level path below is historical. One directory holds every CSV fixture, because two directories for one purpose is how a real export ends up in whichever one has no ignore rule guarding it. The file itself, and every measurement taken from it, is unchanged.
 
 ## What this phase built
 

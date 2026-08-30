@@ -10,7 +10,6 @@
 # `-text` means no conversion in either direction: the bytes committed are the
 # bytes checked out, everywhere.
 prisma/fixtures/*.csv -text
-fixtures/sample-headers.csv -text
 
 # Source is always text, whatever git's content heuristic makes of it.
 #

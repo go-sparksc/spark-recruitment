@@ -6,9 +6,14 @@ import path from "node:path";
 // apostrophes, the newlines inside quoted headers, the trailing spaces — and
 // Phase 1 would then be built against headers cleaner than the ones it will meet.
 //
-// fixtures/sample-headers.csv is the header row of the application export with
-// zero applicant rows. It is deliberately exempted from the *.csv gitignore rule.
-const FIXTURE_PATH = path.join(process.cwd(), "fixtures", "sample-headers.csv");
+// prisma/fixtures/sample-headers.csv is the header row of the application export
+// with zero applicant rows. It is deliberately exempted from the *.csv gitignore
+// rule, by exact name — see the comment block there.
+//
+// It sat at the repo root until Phase 8; PRD decision 17 moved it here so that
+// one directory holds every CSV fixture. Two directories for one purpose is how
+// a real export ends up saved in the one without an ignore rule guarding it.
+const FIXTURE_PATH = path.join(process.cwd(), "prisma", "fixtures", "sample-headers.csv");
 
 export const EXPECTED_COLUMN_COUNT = 37;
 

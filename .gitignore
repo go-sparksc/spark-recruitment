@@ -168,11 +168,13 @@ next-env.d.ts
 # deliberate line each, for the reason above.
 !prisma/fixtures/s26-1r-scores.csv
 !prisma/fixtures/s26-1r-notes.csv
+# The header row of the application export: column names only, zero applicant
+# rows. Phase 1 CSV import is built against its shape. Lived at the repo root
+# until Phase 8, when PRD decision 17 moved it here — one directory for CSV
+# fixtures, so there is no second location whose ignore rules someone has to
+# remember to write.
+!prisma/fixtures/sample-headers.csv
 *.xlsx
 *.xls
 /data
 /uploads
-
-# Exception: the header row of the application export. Column names only,
-# zero applicant rows. Phase 1 CSV import is built against its shape.
-!fixtures/sample-headers.csv
