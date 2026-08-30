@@ -52,6 +52,11 @@ The single most important design decision: **applicants are identified by a syst
 ```
 Instance
   id, name, passwordHash, createdAt, archivedAt
+  archiveSummary: jsonb        // null until archive-and-purge runs. The frozen
+                               //   aggregate statistics §8 retains: FR-19's
+                               //   funnel and the stage counts, rendered BEFORE
+                               //   the purge empties the data they are computed
+                               //   from. See decision 95.
   currentStage: WRITTEN | FIRST_ROUND | SECOND_ROUND | COMPLETE
   importCommittedAt            // null until FR-3 commit. Non-null is what
                                //   refuses a second CSV. See FR-3.
@@ -298,10 +303,31 @@ AuditLog                       // admin overrides, per §8
                                //   deletion record survives as an orphan
                                //   carrying the instance's identity in its own
                                //   columns. See §8.
-  actor, action
+  actor                        // the ROLE: "admin" | "system". Not a person.
+                               //   Distinct from Decision.actor, which is the
+                               //   DecisionActor enum and means something else
+                               //   entirely — see decisions 69 and 93.
+  actorName?                   // NULLABLE. The name typed at sign-in (decision
+                               //   16). Null on every row written before Phase 8
+                               //   and on every "system" row, and deliberately
+                               //   not backfilled: those actions have no known
+                               //   person, and inventing one would be a
+                               //   falsehood in the attribution table itself.
+  action
   entityType, entityId
   previousValue: jsonb
   createdAt
+
+RateLimitBucket                // §8's password gates, per decision 92. The ONE
+                               //   table that belongs to no instance: it is keyed
+                               //   by client address and belongs to the
+                               //   deployment. Excluded from FR-20's export by
+                               //   name, per decision 96.
+  key                          // PK. "<scope>:<client ip>"
+  failures, windowStartedAt
+  lockedUntil?                 // null while the key is not locked
+  lockoutCount                 // lifetime, so a repeat offender is visible
+  updatedAt
 ```
 
 Five notes on this model:
@@ -577,7 +603,7 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 - **Passwords:** hashed with argon2id or bcrypt. Never logged, never emailed, never displayed.
 - **Transport:** HTTPS only, enforced.
 - **Repository:** real applicant data never enters the repo. `.gitignore` covers `*.csv`, `*.xlsx`, `/data`, `/uploads`. Development uses synthetic seed data.
-- **Retention:** an admin-triggered "archive and purge" that keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold. Recommend two cycles.
+- **Retention:** an admin-triggered "archive and purge" that keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold. Recommend two cycles. **Every operative word in that sentence is defined by decision 95** — what "aggregate statistics" are and when they are computed, exactly which columns and tables are destroyed, and how "older than N cycles" is ranked. The threshold itself is the `RETENTION_CYCLES` environment variable, per decision 94.
 - **Audit:** log admin overrides (manual assignment, manual rejection, decision reversal) with actor, timestamp, and previous value.
 - **Instance deletion is audited, and its audit row outlives the instance.** Deleting an instance runs in one transaction: purge that instance's existing `AuditLog` rows, since they describe entities about to stop existing and their `previousValue` payloads can carry applicant data that retention says should not survive the cycle; write the deletion record with the instance's name, applicant count, and stage, and no applicant data; then delete the instance, which `ON DELETE SET NULL` leaves the record orphaned by design. What remains is exactly one row per deleted instance. Archive-and-purge must age these out on the same threshold as everything else, or they accumulate forever.
 
@@ -628,7 +654,9 @@ These need answers before or during the relevant build phase. They are the place
 
 15. **What gates password reset and instance deletion. RESOLVED: the app-level password.** See FR-5.
 
-16. **Admin identity behind the app gate. RESOLVED: Name prompt (first and last) at sign-in. — implementation lands in Phase 8.** §8 specifies one app-level password shared by 2–6 admins, so `AuditLog.actor` has no real identity behind it: every override, and now every password reset and instance deletion, is attributable to "an admin" and nothing finer. Acceptable among E-Board members who trust each other; not acceptable as the permanent answer for a log whose entire purpose is attribution. Options: per-admin accounts, or a name prompt at sign-in recorded on the session and copied into `actor` — weaker, but honest and cheap. 
+16. **Admin identity behind the app gate. RESOLVED: Name prompt (first and last) at sign-in. Built in Phase 8; the schema half is decision 93.** §8 specifies one app-level password shared by 2–6 admins, so `AuditLog.actor` has no real identity behind it: every override, and now every password reset and instance deletion, is attributable to "an admin" and nothing finer. Acceptable among E-Board members who trust each other; not acceptable as the permanent answer for a log whose entire purpose is attribution. Options: per-admin accounts, or a name prompt at sign-in recorded on the session and copied into `actor` — weaker, but honest and cheap.
+
+    **One correction to "copied into `actor`", made when this was built.** It is copied into a *new* column, `actorName`, and `actor` keeps carrying the role. Decision 93 has the reasoning; the short form is that this schema has two columns named `actor`, only one of them is this one, and the other must never carry a name.
 
 17. **Two fixture directories. RESOLVED: consolidated into `prisma/fixtures/` — done in Phase 8.** `fixtures/sample-headers.csv` sat at the repo root while `prisma/fixtures/` held the synthetic export and its README. Two directories for one purpose invites saving a file in the wrong one, and the wrong one may hold real applicant data. The `.gitignore` named both exempt files exactly rather than globbing a directory, so neither location was ever a hole — but the ignore rules were a guard against the duplication rather than an answer to it, and a guard has to be remembered each time someone adds a file.
 
@@ -642,7 +670,9 @@ These need answers before or during the relevant build phase. They are the place
 
     The cost is that the columns are wider than their meaning: a DEMOGRAPHIC row can hold a value that nothing reads. Accepted rather than splitting the columns per category, which would complicate the resolver to prevent a state the UI cannot produce. If a future cycle genuinely needs one response hidden from written reviewers, that is a §6 change first.
 
-19. **Rate limiting on the password endpoints. PARTIAL — a stopgap shipped in Phase 1; Phase 8 owns the real answer.** `lib/rate-limit.ts` allows 10 failures per key in 15 minutes and then locks that key for 15 minutes, where a key is the scope plus the client IP. It is consulted before the argon2 verify, so a locked-out caller costs nothing to refuse and learns nothing.
+19. **Rate limiting on the password endpoints. RESOLVED in Phase 8 — see decision 92.** A stopgap shipped in Phase 1 and this entry enumerated what it did not cover; decision 92 answers the first and last of those bullets with a Postgres-backed store and lockout logging. The middle three were correct as written and survive unchanged. The description below is of the Phase 1 stopgap and is kept because it is what the "what it does not cover" list is written against.
+
+    `lib/rate-limit.ts` allows 10 failures per key in 15 minutes and then locks that key for 15 minutes, where a key is the scope plus the client IP. It is consulted before the argon2 verify, so a locked-out caller costs nothing to refuse and learns nothing.
 
     **What it does not cover, so Phase 8 does not mistake it for the answer:**
 
@@ -1051,6 +1081,56 @@ and decision 79, checked in the same place.
     FR-19 renders the *outcome* of a second round, and `npm run seed:advance` stops exactly where an admin would create pass 1 — so the seed produces no second round at all, and FR-19's three groups, its funnel and FR-20's round trip would every one of them be developed against empty sets. BUILD_PLAN's own Phase 6 record already states that producing the all-COI case through the UI takes twelve reviewer sign-ins, so "drive it by hand each time" is not an available answer either, and whatever is driven by hand does not survive the deleted database the Phase 7 gate requires.
 
     `npm run seed:passes` writes **exactly what the FR-17 actions write** — the posture `advance.ts` already takes toward `finalizeFirstRound`, and for the same reason: a seed whose idea of a finished round differs from the action's would develop every surface against a state the application cannot produce. It yields all four `PassResolution` values plus `NULL` rows, both `Decision` actors at `stage = SECOND_ROUND`, and a non-empty Sparklet class. `advance.ts`'s comment is updated to point at it rather than left contradicting the repository.
+
+92. **The shared rate-limit store. RESOLVED: one Postgres table, read and written under a row lock.** Decision 19 shipped a deliberate stopgap and listed what it did not cover. This is the answer to the first and last of those bullets; the middle three — the IP as the key, the `unknown` fallback, the refusal to extend a lock — were correct as written and are unchanged.
+
+    A `RateLimitBucket` table keyed by the existing `scope:ip` string. **The state machine does not move into SQL.** `lib/rate-limit.ts` stays pure and keeps every transition it has; it is refactored from a closure over a `Map` into functions over a bucket *record*, so the nine cases that already test those transitions keep testing them. Expressing the machine a second time in a `CASE` expression would create two copies that can disagree about when a key is spent, which is the class of bug the pure-module convention exists to prevent. `lib/rate-limit-store.ts` is the Prisma half, on the same split as `lib/export.ts` / `lib/instance-io.ts`.
+
+    **The row lock is the point, not an implementation detail.** Two simultaneous failures that both read `failures = 3` and both write `4` hand an attacker a free guess per concurrent request — a shared store that lost that race would be a slower version of the same hole. The bucket row is locked in one statement (`INSERT … ON CONFLICT DO UPDATE … RETURNING`) before the verdict is computed. At the volume of a login form the lock costs nothing, and `prisma/checks/rate-limit.ts` asserts the property against the database, since no unit test can reach it.
+
+    **Lockouts are recorded**, which decision 19's last bullet asked for and which the in-process limiter could not do at all. A lockout on the instance password or a round access code writes an `AuditLog` row carrying that instance's id, so it appears in the audit view and in the FR-20 export. A lockout on the app-level gate has no instance and writes `instanceId = null`: durable in the database, but invisible in-app and outside every export, since decision 86's export is instance-scoped by construction. **That gap is stated rather than papered over.** Closing it needs an app-level security view, which no requirement asks for; a successor investigating a suspected attack on the app password queries the table directly, and `ARCHITECTURE.md` says so.
+
+93. **Admin identity on the audit row. RESOLVED: `AuditLog.actorName`, a new nullable column beside `actor`.** Decision 16 resolved the product question — a name prompt at sign-in, carried on the session — and left the schema open. The schema question is sharper than it looks, because **two different columns in this schema are called `actor` and they are not the same kind of thing.**
+
+    `Decision.actor` is `DecisionActor`, the `SYSTEM | ADMIN` enum, and decision 69 gives `SYSTEM` a specific meaning: a unanimous tally resolved this applicant, and no person decided it. **It must never learn a name**, because for half its rows there is no person to name. `AuditLog.actor` is an untyped `String` holding the literal `"admin"` at every call site. Only the second one is in scope here.
+
+    So `AuditLog.actor` keeps carrying the role — `"admin"`, and now `"system"` for decision 92's lockout rows — and a new `actorName String?` carries the name. Keeping them apart means a query can still separate "a person did this" from "the system did this" without matching on strings, which writing the name into `actor` would have destroyed. Rows written before Phase 8 keep `actor = "admin"` and `actorName = null`, and **are not backfilled**: those actions genuinely have no known person behind them, and inventing one would be a falsehood in the one table whose entire purpose is attribution. The audit view renders them as "an admin", which is exactly what §8 could promise before this decision.
+
+    The name is not a credential. It is not checked against a roster, and anyone holding the app password can type anything. It is a signature on a shared account, not a login, and both `ADMIN_GUIDE.md` and the sign-in form say so — a name prompt that looked like authentication would be worse than none, because it would imply a guarantee the shared password cannot make.
+
+94. **Where the retention threshold is configured. RESOLVED: the `RETENTION_CYCLES` environment variable, default 2.** §8 says "configurable" and recommends two cycles without saying where the number lives. It is an environment variable, read once and displayed on the archive screen so an admin acts on a figure they can see rather than one they assume.
+
+    **Deliberately not an in-app setting.** Everything else reachable behind the app-level gate is additive or reversible; §8's own gate is one password shared by 2–6 people. A threshold editable from that side of the gate could be set to 0, and the retention control becomes a delete-everything button operated by whoever has the Slack message with the password in it. Configuration that determines how much data gets destroyed belongs with deployment, not with routine admin access.
+
+    The cost is real and worth naming: changing it means a redeploy, and a successor has to know the variable exists. `.env.example` carries it with its default and `ARCHITECTURE.md` names it, which is the whole of the mitigation.
+
+95. **What archive-and-purge keeps, what it destroys, and what "older than N cycles" means. RESOLVED.** §8 gives the requirement in one sentence — "keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold" — and every operative word in it needed a definition.
+
+    **Ordering.** Instances sorted by `createdAt` descending; the newest `RETENTION_CYCLES` are retained and everything past that rank is a candidate. The **cutoff date** is the `createdAt` of the oldest retained instance. Below `RETENTION_CYCLES` instances there are no candidates and no cutoff.
+
+    **An already-archived instance is never a candidate, and a second purge is refused outright.** Both, because either alone is a trap. Rank is computed over `createdAt`, so a purged instance re-enters the candidate list as soon as enough newer cycles exist — and a second purge would then recompute the summary against the `Applicant.data` the first purge emptied, overwriting a correct frozen record with zeros. It would do so *silently*: every row it reads is legitimately present and legitimately empty, so nothing would fail. `retentionCandidates` therefore refuses candidacy for any instance carrying `archivedAt`, **and** the purge re-reads `archivedAt` inside its own transaction and refuses rather than trusting the list that sent it there. The candidate list is a UI affordance; the one irreversible action here does not get to depend on one for its safety.
+
+    **Destroyed.** `Applicant.email` → null; `Applicant.data` → `{}`; `Applicant.displayName` → `Applicant <sourceRowIndex>`, the anonymous label written reviewers already see, which keeps a non-null column meaningful instead of filling it with a placeholder. `ImportRow` and `InterviewImportRow` rows deleted outright — their `cells` hold the verbatim CSV, which is every essay, address and demographic answer in its rawest form, and is the copy most easily forgotten. `ReviewNote` and `InterviewNotes` deleted. This instance's `AuditLog.previousValue` → null, since §8 already records that those payloads can carry applicant data.
+
+    **`RoundAccessCode` rows are deleted** — the rows, not the column, because `codeHash` is non-null and making it nullable would be a schema change describing a state only the purge produces. The reasoning is worth stating because the opposite reasoning applies one line below: the *only* code path that reads `codeHash` is `signInReviewer`, and an archived cycle has nothing for a reviewer to do, so keeping them would leave a live credential to a purged cycle behind no route that reads it. **`Instance.passwordHash` is kept precisely because it does still have a reader**: the archive summary sits behind `requireInstance`, so opening an archived cycle still means typing its password.
+
+    **Kept.** Every score, vote, decision, assignment, pass and resolution: they are numbers and outcomes, and they are the substrate the retained aggregates rest on. `Field` and `FieldGroup` keep their header text — that is the club's own form, not an applicant's answer. `Reviewer` names are kept; §8 names essays, emails and demographics, and reviewers are club members rather than applicants.
+
+    **The aggregates are materialized before the purge, never computed after it.** FR-19's demographic funnel is computed from `Applicant.data`, which this purge empties — so a purge that did not freeze the funnel first would destroy the very "aggregate statistics" §8 says to retain, and would do it while appearing to comply. `buildArchiveSummary` renders the funnel and the stage counts into `Instance.archiveSummary` inside the same transaction, before anything is deleted. It reuses `buildFunnel` and `lib/demographics.ts` rather than recomputing: §10.7 requires the checked predicate and the 1/n weighting live in exactly one place.
+
+    **An archived instance is read-only, on both gates.** Its live screens would render blank names and empty essays beside real scores, which reads as data loss rather than as retention. `requireInstance` redirects to the archive summary; only that page, settings, and the FR-20 export stay reachable. **`requireReviewer` gets the same check independently** — the reviewer gate never passes through `requireInstance`, so the admin-side redirect does not cover it, and a reviewer holding a cookie issued before the purge would otherwise reach a dashboard of blanked applicants. Deleting the access codes closes new sign-ins; this closes the sessions already outstanding.
+
+    **Orphaned audit rows.** §8 requires the instance-deletion records — `instanceId = null` by design — be aged out on the same threshold. They belong to no cycle, so cycle rank cannot apply to them: rows older than the cutoff date above are deleted. Decision 92's app-level lockout rows age out by the same rule, which is the only thing that keeps them from accumulating forever.
+
+96. **Not every table belongs to an instance, and the export manifest has to say which. RESOLVED: an explicit `NON_INSTANCE_TABLES` list.** `lib/export.test.ts` asserts *set equality* between the models in the generated Prisma client and `EXPORT_TABLE_NAMES`, so that a table added to the schema cannot be silently dropped from FR-20's export. Decision 92 adds the first table that is genuinely not instance-owned, which means that assertion now fails for a correct reason.
+
+    The fix is a second named list, not a widened comparison. `RateLimitBucket` is its first entry: it is keyed by client address, belongs to the deployment rather than to any cycle, and a restore that recreated one deployment's lockouts inside another's database would be incoherent. The guarantee the test was written for survives intact — a new table still fails `npm run verify` until someone decides, **in writing and in the repository**, which side of the line it falls on. A widened comparison would have made that decision implicit and unrecorded, which is what the original assertion existed to prevent.
+
+97. **The demo material. RESOLVED: a small generated CSV plus one completed reference instance.** BUILD_PLAN's Phase 8 asks for "a demo instance with synthetic data for training" and its gate asks a board member to run "a complete mock cycle, start to finish". At 150 applicants and 30 reviewers those two are in conflict: a full cycle at production scale is not clickable in one sitting, and a trainee who shortcuts the scoring is no longer testing the documentation.
+
+    So `npm run seed:demo` produces two things. `prisma/fixtures/demo-cycle.csv` — 25 rows, generated from the existing `prisma/seed/corpus.ts` and `prisma/seed/applicants.ts` under a fixed seed, against the real 37-column header row — is what the trainee imports as their own cycle, which is what makes the gate cover FR-1 through FR-5 rather than starting after them. A second instance, carried all the way to `COMPLETE`, is the reference they compare against when a screen does not look the way the guide says.
+
+    **No second synthetic dataset**: same corpus, same generators, same safety properties as the existing fixtures (`example.com` addresses, every free-text cell prefixed `SYNTHETIC`). A second body of fake applicants would be a second thing to keep honest, and the first one already has a README enumerating every hazard it deliberately contains.
 
 ## 11. Out of scope for v1, worth noting for v2
 
