@@ -48,6 +48,23 @@ export interface ApplicantProfile {
   ethnicities: string[];
 }
 
+/// The domain generated applicants get. `usc.edu` by default, because the
+/// development seed exists to imitate the real export and those rows never leave
+/// the machine.
+///
+/// **Overridden to `example.com` for anything that gets screenshotted or
+/// committed** — `npm run seed:demo` sets it. A synthetic name at a real domain
+/// is safe in a local database and unsafe in a PNG in the repository, which is
+/// the same rule `prisma/fixtures/README.md` applies to the CSV fixtures: RFC
+/// 2606 domains so nothing here can collide with a real USC address. Found while
+/// capturing ADMIN_GUIDE.md's final-class screenshot, which shows addresses.
+///
+/// The eight pinned FR-13 identities in `prisma/seed/first-round.ts` hardcode
+/// their own `example.com` addresses and are unaffected either way.
+function emailDomain(): string {
+  return process.env.SEED_EMAIL_DOMAIN ?? "usc.edu";
+}
+
 function stripDiacritics(value: string): string {
   // Strip combining marks so "Tomás Sørensen" yields a usable email local part.
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -167,7 +184,7 @@ export function buildApplicantProfiles(rng: Rng, count: number): ApplicantProfil
       firstName,
       lastName,
       displayName: `${firstName} ${lastName}`,
-      email: `${local}@usc.edu`,
+      email: `${local}@${emailDomain()}`,
       values: scalar,
       ethnicities: [...ethnicities],
     });

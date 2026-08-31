@@ -193,6 +193,12 @@ function runSeedScript(script: string): void {
         ...process.env,
         SEED_INSTANCE_ID: DEMO_INSTANCE_ID,
         SEED_INSTANCE_NAME: DEMO_INSTANCE_NAME,
+        // The reference cycle is training material and gets screenshotted into
+        // ADMIN_GUIDE.md, where the final-class screen shows addresses. RFC 2606
+        // domains only, for the reason prisma/fixtures/README.md gives about the
+        // CSVs: a synthetic name at a real domain is safe in a local database
+        // and unsafe in an image in the repository.
+        SEED_EMAIL_DOMAIN: "example.com",
       },
     },
   );

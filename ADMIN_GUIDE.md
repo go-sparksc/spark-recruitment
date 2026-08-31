@@ -342,6 +342,179 @@ the screen becomes read-only.
 
 ---
 
-*(Steps 9 onward — the interview rubric, importing interview results, the first
-round vote, the second round's passes, the final class and the export — continue
-below as each is verified against the running tool.)*
+> ## About the screenshots from here on
+>
+> Steps 1–8 above were photographed while importing the 25-applicant training
+> file, so what you see is what you get.
+>
+> **Steps 9–13 are photographed from the finished reference cycle instead**, at
+> full size: 158 applicants, 30 reviewers, 7 new Sparklets. Getting a practice
+> cycle this far by hand would mean twelve people signing in to vote and two
+> interview spreadsheets to build, which is not a reasonable thing to ask of
+> someone learning the tool — so the reference cycle exists already finished.
+>
+> **Your numbers will be much smaller than the ones in these pictures.** A
+> first-round list of 8 rather than 48 is not a sign you have done something
+> wrong. The screens are the same; only the scale differs.
+
+---
+
+## 9. Set up the interview rubric
+
+**Interview rubric.**
+
+![The first round interview rubric](docs/img/09-interview-rubric.jpg)
+
+Interviews are scored on their own categories, separate from the written rubric —
+a different instrument, scored at a different time by different people. Nothing
+assumes a particular number of them.
+
+**Do this before the interviews happen**, because the scores spreadsheet needs
+**one column per category**, and the people running interviews need to know what
+they are scoring against.
+
+Once scores are imported the rubric locks, and the screen says so:
+
+> *Interview scores have been imported — 384 category scores across the cohort.
+> The rubric is locked. Changing it now would leave those scores measured against
+> categories that no longer exist.*
+
+If you genuinely got the categories wrong, **Discard imported scores** unlocks it
+and you import again.
+
+---
+
+## 10. Import the interview results
+
+**Interview import.**
+
+![The two interview sheets](docs/img/10-interview-import.jpg)
+
+Two separate sheets, uploaded independently — neither waits for the other, and
+either can be re-uploaded to correct it.
+
+- **First round scores** — one row per interviewer per applicant: who they are,
+  who interviewed them, one column per interview category, and the average.
+- **First round notes** — one row per applicant: who they are, optionally who
+  wrote the notes, and the notes themselves.
+
+### Matching people up
+
+This is the step most likely to need your attention, and the one the tool is
+most careful about. Each row is matched to an applicant by **email first**, then
+by exact name, then by close name. Anything it cannot resolve confidently goes
+into a queue for you to decide, rather than being guessed.
+
+> **It will not guess between two plausible people.** If a row could be either of
+> two applicants, it asks. If a name is close to exactly one applicant, it still
+> asks before committing — a nickname is often less similar to someone's real
+> name than two different people's names are to each other, so "close enough" is
+> not a decision the tool is willing to make on its own.
+
+Fix the unresolved rows before moving on. A row left unmatched is an interview
+that happened and does not count.
+
+---
+
+## 11. The first-round vote and its results
+
+Reviewers on the first round read the interview scores and notes and vote yes or
+no on each applicant. **First round results** ranks the outcome.
+
+![First round results](docs/img/11-first-round-results.jpg)
+
+Ranked by **yes percentage, skips excluded** — someone who recused themselves is
+not counted in either the top or the bottom of that fraction, so a recusal does
+not quietly drag an applicant down. The **Votes** column shows the actual
+fraction, which is what tells you whether a percentage is meaningful: 100% of 16
+votes and 100% of 2 votes are not the same fact.
+
+Select who advances and finalise, exactly as in step 8. Afterwards the page
+stays as a read-only record:
+
+> *The first round has been finalized. These results stay here for reference.*
+
+---
+
+## 12. The second round: passes
+
+**Second round.**
+
+![Two closed passes](docs/img/12-passes.jpg)
+
+The second round is deliberation rather than scoring. Everyone still active is
+discussed and voted on together, in one or more **passes**.
+
+**Membership is fixed when the pass is created** — whoever is still active at
+that moment. Each applicant in a pass resolves one of three ways:
+
+| Outcome | Meaning |
+|---|---|
+| **Unanimous yes** | becomes a Sparklet |
+| **Unanimous no** | rejected |
+| **Anything mixed** | carried forward into the next pass |
+
+That is why there is more than one pass: the summary above reads *"6 sparklet · 5
+rejected · 16 carried"* on pass 1, and pass 2 opens with those carried applicants
+plus anyone still unresolved.
+
+### Conflicts of interest
+
+A reviewer flags a conflict on an applicant and stops voting on them for the rest
+of the round — the flag is sticky across every pass, not just the current one.
+Their absence counts as a skip, not as a no.
+
+**If every reviewer has recused from someone, that is not unanimity.** The tool
+marks them as needing an admin rather than reading an empty tally as a decision.
+
+### Closing
+
+Closing the second round marks everyone still undecided as needing an admin, and
+**cannot be reopened**. You resolve those yourself on the next screen.
+
+---
+
+## 13. The final class, and the export
+
+**Final class.**
+
+![The finished class](docs/img/13-final-class.jpg)
+
+Three groups: **New Sparklets**, **Rejected**, and **Unresolved** — the people
+the passes never decided, either because reviewers never reached unanimity or
+because everyone had recused.
+
+Unresolved applicants are admitted or rejected **here, on this screen**, and
+their votes stay visible while you decide. That matters: eleven skips and a 7–4
+split both arrive as "unresolved", and they mean completely different things.
+
+Below the three groups is the **demographic breakdown of the class against each
+preceding stage** — who applied, who reached the first round, who reached the
+second, and who got in. This is the number the club actually wants at the end of
+a cycle, and it replaces the spreadsheet that used to be maintained by hand.
+
+### Export, and please actually do it
+
+**Export** gives you the whole cycle as one JSON file, plus per-stage CSVs
+(all applicants with scores, decisions by stage, the final class with emails).
+
+> **Do this at the end of every cycle and put the file somewhere the club keeps
+> things.** It is the club's insurance against this tool: everything is in that
+> file, in a format anything can read, so nobody is ever locked in. It is also
+> what you would restore from if something went badly wrong.
+
+The JSON contains the instance password hash and the round access codes, so treat
+it like the sensitive file it is.
+
+---
+
+## When a cycle is over
+
+Nothing else is required. The cycle stays where it is, readable, for as long as
+the club wants it.
+
+**Retention** on the instance list is where old cycles are eventually cleaned up:
+the club keeps the most recent few in full, and older ones can have their essays,
+emails and demographic answers deleted while the statistics are kept. That is a
+deliberate, confirmed action — nothing is ever deleted automatically. Export
+first.
