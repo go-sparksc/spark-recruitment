@@ -186,3 +186,45 @@ Hand `ADMIN_GUIDE.md` and a running deployment to a board member who has not use
 **The purge is irreversible and has no undo.** It is the second such action in the product, after `deleteInstance`. The mitigations are the typed-name confirmation, the FR-20 export as the escape hatch (`ARCHIVE_AND_PURGE`'s guide entry will say to export first), and `prisma/checks/archive-purge.ts` asserting on a throwaway instance rather than a real one.
 
 **The rate-limit refactor touches all three authentication gates.** The nine existing test cases are the specification and carry forward unchanged; the new check covers the one property they cannot reach, which is the concurrency the shared store exists to provide.
+
+---
+
+## What writing the guide found
+
+Slice 6's walkthrough is the Phase 8 gate rehearsed by the author. Everything
+below was found by clicking a screen, not by a test, which is the whole argument
+for the gate existing.
+
+**The demo fixture fragmented the Ethnicity group.** At 25 rows the seed's
+weighted ethnicity picker left `Central Asian` and `Native Hawaiian/Pacific
+Islander` checked by nobody, and an entirely empty column has no value signature
+for FR-2's group detection to recognise. The ten one-hot columns were therefore
+offered as **three** separate groups split around the empty ones. The detector is
+correct — `prisma/fixtures/README.md` documents that trap deliberately for
+`s26-shape.csv` — but a trainee following the guide would have created three
+"Ethnicity" groups, and §10.7's 1/n weighting has to run over one group of ten or
+every demographic number in FR-11 and FR-19 is wrong. Fixed in `prisma/demo.ts`
+with a deterministic coverage pass; all ten columns now carry at least one check.
+
+**The preview caught a real mistake mid-walkthrough.** The whole mapping was set
+up without a single column categorised as a Response, and the preview said so:
+*"No column is categorised as a Response. Written reviewers see only Response
+fields, so every profile in the written round will be empty."* Every column
+defaults to Other and the tool never guesses from header text (deliberately —
+guessing is how a demographic column becomes visible to reviewers), so a trainee
+will hit this too. It is now step 3's worked example, quoted verbatim.
+
+**The ethnicity write-in joins its group as `option (counted)`.** It has to be
+set to `write-in (not counted)` by hand, and the tool cannot detect the column at
+all because its values differ per person. Left as an option, one applicant's
+typed answer becomes its own category in every breakdown for the rest of the
+cycle. A trainee would miss this without being told; it is now called out in step
+2 with the consequence spelled out.
+
+### Open, not fixed
+
+- **Typo on the mapping screen.** The "Before you can commit" banner reads
+  *"1 detected group still need naming or dismissing"* — should be **needs**.
+  Grammatical only, wrong only in the singular case. Deliberately left alone
+  rather than changing app copy in the middle of a documentation pass; worth one
+  commit of its own.

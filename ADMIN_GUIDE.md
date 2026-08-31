@@ -1,0 +1,347 @@
+# Running a recruitment cycle
+
+For whoever is running applications this semester. You do not need to have used
+this tool before, and you do not need to know anything about how it works.
+
+Everything below is one full cycle, in order, from the application export to the
+final list of new Sparklets.
+
+**Practise first.** There is a training file, `prisma/fixtures/demo-cycle.csv`,
+with 25 invented applicants in it. Import it as its own cycle and click all the
+way through. Nothing in it is real, so nothing you do to it matters. This guide's
+screenshots come from exactly that file, so what you see should match.
+
+There is also a finished cycle called **Demo Cycle (finished — for reference)**.
+When a screen does not look the way you expect, open that one to see what it
+looks like when it is done.
+
+---
+
+## Before you start
+
+You need two things from whoever ran it last:
+
+- **The app password.** Gets you into the tool at all.
+- Nothing else. You will create this cycle's own password yourself, in step 1.
+
+Sign in at `/login`. It asks for your **first and last name** as well as the
+password.
+
+> **Your name is not a password and is not checked.** Anyone with the app
+> password can type anything. It is there so that when someone changes a score
+> or reverses a decision, the record says who — the whole club shares one
+> password, so without a name every change reads as "an admin". Type your real
+> name.
+
+---
+
+## 1. Create the cycle and upload the file
+
+**Instances → New instance.**
+
+![Creating a cycle from the application export](docs/img/01-new-instance.jpg)
+
+Three things:
+
+- **Instance name** — how this cycle appears in the list. "F26 Recruitment" or
+  similar.
+- **Instance password** — you are choosing this now, and it is separate from the
+  app password. Share it with the other admins on this cycle. **It cannot be
+  recovered.** If everyone forgets it, an admin with the app password can reset
+  it from Settings, but nobody can read it back.
+- **The application export**, as a `.csv`.
+
+> **A cycle accepts exactly one file, and importing is final.** If the file turns
+> out to be wrong, the fix is to delete the whole cycle and start again — which
+> is quick, as long as you notice before people start scoring. That is what the
+> next two steps are for.
+
+---
+
+## 2. Say what each column means
+
+Nothing has been created yet. This screen is you telling the tool how to read the
+file, and you can change anything on it until you commit.
+
+![The column mapping screen](docs/img/02-mapping.jpg)
+
+The banner at the top lists what still needs doing before you can continue. Work
+down it.
+
+### Detected groups
+
+Some questions arrive as several columns rather than one. Ethnicity is the usual
+case: ten separate columns, any number of which an applicant may tick.
+
+The tool notices columns that look like one question and offers them as a
+**group**. This is a suggestion, not a decision — nothing is stored until you
+name it.
+
+**Name it `Ethnicity` and press Create group.** Ten columns become one question,
+which is what makes the demographic breakdowns later add up to the number of
+people rather than the number of boxes ticked.
+
+> If you see **more than one** group offered where you expected one — say, three
+> separate clusters of ethnicity columns — that means some of those columns are
+> empty for every applicant in the file. An empty column has nothing to
+> recognise. It is usually harmless in a real export, where every option gets
+> ticked by somebody.
+
+### The write-in column
+
+Ethnicity usually has a free-text "specify your own" column beside the ten. **The
+tool will not find this one for you** — its values are different for every
+person, so there is nothing to recognise.
+
+Add it by hand: find that column in the table below, set its **group** to
+`Ethnicity`, then set its role to **write-in (not counted)**.
+
+> That last part matters. Left as "option (counted)", one person's typed answer
+> becomes its own category in every breakdown for the rest of the cycle.
+
+### The group's settings
+
+Set **Category** to `Demographics`. The line beside it will change to *"Hidden
+from written and first-round reviewers"* — that is the tool enforcing the club's
+own rule that reviewers do not see ethnicity while scoring.
+
+Category, inclusion and visibility are set on the *group* and apply to all
+eleven columns, so a group cannot end up half hidden and half visible.
+
+### The two required designations
+
+Further down, in the columns table:
+
+- **Email Address** → designation **Email column**. This is how later imports
+  find the right person, so it is not optional.
+- **First Name** and **Last Name** → designation **Name column** (both of them).
+
+### Categories
+
+Every column starts as **Other**. The tool never guesses from the header text —
+guessing is how a demographic column ends up visible to reviewers.
+
+**Set every essay question to `Responses`.** These are what written reviewers
+read; if none are marked, reviewers open a profile and see nothing at all. The
+preview in the next step will warn you if you forget.
+
+Leave the administrative columns (timestamps, response type, network ID) as
+Other. They are kept but shown to nobody.
+
+---
+
+## 3. Check the preview, then commit
+
+**Preview and commit →**
+
+![The import preview](docs/img/03-preview.jpg)
+
+This is the last point at which a bad file is cheap to fix. Two kinds of thing
+appear here.
+
+**Worth checking** — things that are probably wrong but might be deliberate.
+These do not block you. The most common one is:
+
+> *No column is categorised as a Response. Written reviewers see only Response
+> fields, so every profile in the written round will be empty.*
+
+That means you skipped the last part of step 2. Go back and fix it, then return
+here — the warning disappears.
+
+**Problems in the file itself** — two applicants sharing an email address, a
+blank name, an address with spaces around it. Each is listed with the rows
+involved, and you resolve them here. A clean file says so:
+
+> *No duplicates, blank names, blank addresses, or padded addresses.*
+
+When both sections are clear, press **Commit**. Applicants are created and the
+column mapping is fixed from here on.
+
+> Some things stay editable after committing: whether a column is included, and
+> which rounds can see it. What a column *means* — its category, its group, its
+> name — does not.
+
+Committing takes you through one more screen that spells out exactly what becomes
+permanent. Read it rather than clicking past it.
+
+![The commit confirmation](docs/img/04-commit-confirm.jpg)
+
+---
+
+## 4. Build the scoring rubric
+
+**Rubric**, from the cycle's page.
+
+![Building the written round rubric](docs/img/05-rubric.jpg)
+
+This is what a written reviewer scores each applicant against. Nothing assumes a
+particular number of categories or a particular scale — both change between
+cycles, and both are yours to set.
+
+For each category: a **name**, a **lowest** and **highest** score, and optionally
+a line saying **what reviewers should look for**. Write that last one. It appears
+beside the reviewer's score box, and it is the difference between thirty people
+scoring the same thing and thirty people scoring thirty things.
+
+> Once anyone has scored an applicant, the rubric locks. You cannot add a
+> category halfway through a round and leave the earlier scores meaning something
+> different from the later ones.
+
+---
+
+## 5. Add the reviewers
+
+**Reviewers.** Three tabs across the top, one per round — a person can be on any
+combination, and the rounds have separate rosters on purpose.
+
+![The reviewer roster](docs/img/06-reviewers.jpg)
+
+**Paste the names**, one per line, straight from the Slack thread or the sign-up
+sheet. Press *Check this paste* first: it tells you how many are ready, how many
+need confirming, and how many blank lines it ignored, before anything is created.
+
+It splits each line at the **last space**, so "Mary Anne Chen" becomes Mary Anne
+/ Chen. Anything it cannot split, and anything matching someone already on the
+roster, is held back for you to confirm rather than guessed at — re-pasting the
+same Slack message is the likeliest accident, and it will not silently create
+everyone twice.
+
+### Sparklets
+
+Tick **Sparklet** for existing Spark SC members. This matters more than it looks:
+**at most one Sparklet reviews any given applicant**, so this count decides
+whether assignment is possible at all. The roster summary shows it.
+
+### The access code
+
+Each round has its own code, and reviewers need it to sign in. Set one, then send
+**the link and the code together** — the link alone is not enough, and the code
+alone is useless.
+
+---
+
+## 6. Assign applicants to reviewers
+
+**Assignments.**
+
+![Assignment, after generating](docs/img/07-assignments.jpg)
+
+The panel at the top is the arithmetic, before you commit to anything:
+
+| | |
+|---|---|
+| **Slots in the full grid** | applicants × reviewers each |
+| **Held open as the pool** | about 5% of slots, kept free |
+| **Applicants at full strength** / **one short** | how the pool is spread |
+| **Load per reviewer** | a spread wider than one means the roster constrained it |
+
+Press **Generate assignments**. In the practice cycle that reads:
+
+> *Placed 72 assignments. 3 applicants are one reviewer short, by design.*
+
+### Why some applicants are one reviewer short
+
+The pool is a **conflict-of-interest buffer**, not an oversight. A reviewer who
+knows an applicant returns that slot, and any other reviewer can claim an open
+one. Spreading the gap across several applicants — each starting with one
+reviewer fewer — means a slow-moving pool costs an applicant *one* opinion rather
+than all three, which is what would happen if whole applicants were held back
+unassigned.
+
+### If it refuses to generate
+
+It will tell you why, and it is almost always the Sparklet rule: too many
+Sparklets on the roster for every applicant to get at most one. Add non-Sparklet
+reviewers, or take some off this round.
+
+### Changing an assignment by hand
+
+You can assign, unassign or swap any individual pairing, and each change is
+recorded with your name against it. **Regenerating keeps manual changes** — it
+works around them rather than discarding them — but it will tell you how many it
+is carrying before you confirm.
+
+---
+
+## The cycle's home page
+
+Every screen from here is reached from the cycle's own page, and it doubles as a
+progress report — each row says where that piece stands.
+
+![The cycle hub, part-way through](docs/img/00-hub.jpg)
+
+Rows greyed out are waiting on something earlier. They are in roughly the order a
+cycle uses them.
+
+---
+
+## 7. The written round
+
+Reviewers do this part. You send them the link and the code, and watch.
+
+### What a reviewer sees
+
+**Not the applicant's name.** Written reviewers see "Applicant 11" and the essay
+answers, and nothing else — not the name, not the email, not ethnicity, not the
+year they graduate. That is deliberate and it is enforced by the tool, not by
+people remembering.
+
+They score against your rubric, with your guidance text beside each box, and
+scores **save as they tap** — there is no submit button to forget.
+
+### The pool
+
+A reviewer who recognises an applicant presses **Return to pool** and gives a
+reason. That slot becomes claimable by anyone else, from **Claim from pool** at
+the top of their list. This is why some applicants started one reviewer short:
+that gap is the buffer those returns land in.
+
+---
+
+## 8. Written results, and closing the round
+
+**Written results.**
+
+![Written results, with the composition panel](docs/img/08-results.jpg)
+
+The table ranks everyone by average score, with **variance** beside it — a high
+variance means reviewers disagreed, which is worth a second look before you cut
+someone. **Reviews** shows how many of the three are in; anyone under 3/3 is
+marked.
+
+Tick the applicants who advance. As you do, the **composition panel** at the top
+updates live: your selection against the whole pool, broken down by ethnicity.
+
+> **It is there to be looked at while you choose, not audited afterwards.** The
+> weighted column follows the club's counting rule — someone who selected three
+> options contributes a third to each, so the column sums to the number of
+> people rather than the number of boxes ticked. The headcount beside it counts
+> every person who selected that option.
+
+### Finalising
+
+**Finalize written round** shows you exactly what is about to happen, and it
+checks your work:
+
+> *8 applicants advance to the first round. 17 applicants are rejected. Every
+> applicant gets a written-round decision recorded, either way. This screen
+> becomes read-only afterwards.*
+
+If you are about to reject anyone nobody actually reviewed, it names them:
+
+> *17 of those 17 have no completed reviews… **Rejecting them records a decision
+> nobody made.** Claim-from-pool is how they still get read.*
+
+**Take that seriously.** In a real cycle it means reviewing is not finished —
+chase the outstanding reviews, or have someone claim those applicants from the
+pool, before you finalise. The tool will let you proceed, because sometimes you
+genuinely are out of time, but it will not let you do it without knowing.
+
+Finalising writes a decision for **every** applicant, advancing or rejecting, and
+the screen becomes read-only.
+
+---
+
+*(Steps 9 onward — the interview rubric, importing interview results, the first
+round vote, the second round's passes, the final class and the export — continue
+below as each is verified against the running tool.)*

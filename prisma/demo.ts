@@ -36,8 +36,8 @@ import path from "node:path";
 import { FieldCategory, FieldGroupRole } from "../generated/prisma/enums";
 import { toCsv, type CsvValue } from "../lib/export-csv";
 import { createRng } from "../lib/rng";
-import { buildApplicantData, buildApplicantProfiles } from "./seed/applicants";
-import { PROMOTED_COLUMNS, buildFieldSpecs } from "./seed/fields";
+import { buildApplicantData, buildApplicantProfiles, type ApplicantProfile } from "./seed/applicants";
+import { buildFieldSpecs, type FieldSpec } from "./seed/fields";
 
 /// Fixed, so the file regenerates byte-identically. A demo CSV that changed on
 /// every run would make ADMIN_GUIDE.md's screenshots wrong the first time anyone
@@ -65,6 +65,8 @@ function buildDemoCsv(): string {
   const specs = buildFieldSpecs();
   const rng = createRng(DEMO_RNG_SEED);
   const profiles = buildApplicantProfiles(rng, DEMO_APPLICANT_COUNT);
+
+  ensureEveryOptionIsChecked(specs, profiles);
 
   const headers = [
     "#",
@@ -94,6 +96,52 @@ function buildDemoCsv(): string {
   });
 
   return toCsv(headers, rows);
+}
+
+/// Make sure every one-hot ethnicity column is checked by at least one
+/// applicant.
+///
+/// **Without this the demo file teaches the wrong thing.** The seed picks
+/// ethnicities by weight, so across only 25 rows the rarest options — Central
+/// Asian and Native Hawaiian/Pacific Islander, on the seed's distribution — come
+/// out checked by nobody. A column that is entirely empty has no value
+/// signature, so FR-2's group detection cannot recognise it, and the run of ten
+/// one-hot columns is offered to the admin as THREE separate groups split around
+/// the empty ones.
+///
+/// The detector is right to do that; `prisma/fixtures/README.md` documents the
+/// empty-column trap for `s26-shape.csv` deliberately. It is the fixture that is
+/// wrong for its purpose: a trainee following the guide would create three
+/// "Ethnicity" groups, and §10.7's 1/n weighting has to run over one group of
+/// ten or every demographic number is wrong.
+///
+/// Found by clicking through the mapping screen while writing ADMIN_GUIDE.md,
+/// which is the Phase 8 gate doing its job a slice early.
+///
+/// Deterministic: options are filled in catalog order onto applicants chosen by
+/// index, so the file stays byte-stable across runs.
+function ensureEveryOptionIsChecked(
+  specs: readonly FieldSpec[],
+  profiles: ApplicantProfile[],
+): void {
+  const labels = specs
+    .filter((spec) => spec.groupRole === FieldGroupRole.OPTION && spec.optionLabel)
+    .map((spec) => spec.optionLabel as string);
+
+  const checked = new Set(profiles.flatMap((profile) => profile.ethnicities));
+  const missing = labels.filter((label) => !checked.has(label));
+
+  missing.forEach((label, i) => {
+    // Spread across distinct applicants rather than piling onto one, so the
+    // added checks read as ordinary multi-select answers rather than as one
+    // implausible person who ticked every rare box.
+    const profile = profiles[i % profiles.length];
+    if (!profile.ethnicities.includes(label)) profile.ethnicities.push(label);
+  });
+
+  if (missing.length > 0) {
+    console.log(`  filled ${missing.length} unchecked ethnicity column(s): ${missing.join(", ")}`);
+  }
 }
 
 /// The seed writes `@usc.edu` addresses, because it is imitating the real
