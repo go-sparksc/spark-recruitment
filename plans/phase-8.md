@@ -228,3 +228,19 @@ cycle. A trainee would miss this without being told; it is now called out in ste
   Grammatical only, wrong only in the singular case. Deliberately left alone
   rather than changing app copy in the middle of a documentation pass; worth one
   commit of its own.
+
+- **`REVIEWER_GUIDE.md`'s first- and second-round sections are unverified against
+  a running screen.** The written-round half was driven live and screenshotted;
+  the two later rounds were written from the code. Confirming them needs an
+  instance at `SECOND_ROUND` with an **open** pass, and none is in that state:
+  both seeded cycles are `COMPLETE` with their passes closed, and a closed second
+  round cannot be reopened. The practice cycle is at `FIRST_ROUND` with all eight
+  reviewers staffed to the written round only, and the FR-12 interview fixtures
+  cannot bridge the gap because they reference the seed's pinned applicants, who
+  do not exist in a cycle imported from `demo-cycle.csv`.
+
+  Two ways to close it, for slice 7 or later: advance the practice cycle through
+  the first round properly, or run `npm run seed` then `npm run seed:advance`
+  WITHOUT `seed:passes` against a throwaway instance id, which lands exactly
+  where an admin creates pass 1. Either way the reviewer sign-in needs a round
+  access code typed by a person.
