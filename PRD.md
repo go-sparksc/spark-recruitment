@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.22, Phases 0-6 complete, decisions recorded through 91, Phase 7 (final dashboard and export) in progress
+**Status:** v1.23, Phases 0-7 complete, decisions recorded through 97, Phase 8 (hardening and handoff) in progress — every slice but its succession gate is shipped
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---

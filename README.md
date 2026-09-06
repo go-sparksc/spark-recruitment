@@ -13,7 +13,12 @@ cycle.
 CSV import and field mapping, reviewer assignment, a phone-first scoring dashboard,
 first-round interview import and voting, second-round deliberation by sequential passes,
 the final class with its demographic funnel, and a full JSON export whose round trip is
-verified by deleting the database and restoring from the file alone.
+verified by deleting the database and restoring from the file alone. The hardening pass
+is in as well: sign-in rate limiting shared across processes, a name behind every audit
+row, and archive-and-purge, which freezes a finished cycle's aggregate statistics and
+then destroys its essays, emails and demographics. What remains is the succession gate —
+a board member who has never used the tool running a complete mock cycle from
+`ADMIN_GUIDE.md` alone — which has not been run yet.
 
 **Documentation:** **[ADMIN_GUIDE.md](ADMIN_GUIDE.md)** walks one complete cycle, screen
 by screen, for whoever is running applications this semester. **[REVIEWER_GUIDE.md](REVIEWER_GUIDE.md)**
