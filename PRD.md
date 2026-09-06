@@ -1,23 +1,23 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.23, Phases 0-7 complete, decisions recorded through 97, Phase 8 (hardening and handoff) in progress — every slice but its succession gate is shipped
+**Status:** v1.24, Phases 0-7 complete, decisions recorded through 97, Phase 8 (hardening and handoff) in progress — every slice but its succession gate is shipped; a reconciliation pass over this document (`plans/prd-reconciliation.md`) precedes that gate
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
 
 ## 1. Problem
 
-Spark SC currently runs recruitment out of a single Excel workbook. The S26 file contains 36 sheets, 153 applicants, and roughly 30 reviewers. Every round adds a new layer of manually maintained sheets (`WR Data`, `1RD Voting`, `2RD Vote Backend`, `Sparklet Maker`) that duplicate applicant identity, scores, and demographics.
+Spark SC currently runs recruitment out of a single Excel workbook. The S26 file contains 36 sheets, 160+ applicants, and roughly 30 reviewers. Every round adds a new layer of manually maintained sheets (`WR Data`, `1RD Voting`, `2RD Vote Backend`, `Sparklet Maker`) that duplicate applicant identity, scores, and demographics.
 
 Concrete failure modes visible in the current file:
 
 - **Applicant identity is re-keyed by name across sheets.** `Decisions` uses `ID` + `Full Name`, `1RD Voting` uses `Name` only, `1R Notes` uses free-text `Applicant Name` typed by interviewers. Any typo or accidental cell manipulation can silently orphan a record or break the workbook.
 - **Voting is a manually maintained reviewer-by-applicant grid.** `Voting Results` has 30 reviewer columns. `2RD Vote` has 11. Adding or removing a reviewer means restructuring a sheet mid-round.
-- **Rubric scores and demographics live in the same rows.** There is no mechanism to show a first-round interviewer the scores without also exposing race, first-gen status, and written responses.
+- **Rubric scores and demographics live in the same rows.** Showing a first-round interviewer the scores without also exposing race, first-gen status, and written responses means manually fine-tuning which columns are visible, which is difficult and error-prone.
 - **The workbook is not transferable.** Its logic lives in cell formulas and in the head of whoever built it. Training a new operator on the workbook takes significant time and close oversight.
 - **Editing the workbook is difficult.** Updating or making changes to the workbook is tricky and cumbersome, with significant limitations based on how the workbook was originally built. Changes to the rubric, number or types of questions, and other variables between application cycles requires significant maintenance of the workbook beforehand.
-- **Reviewers make and record their scores outside of the workbook.** To prevent leaking sensitive information or someone accidentally breaking the workbook, all reviews and scores are recorded on separate linked and unlinked spreadsheets, leading to complicated cross-workbook dependencies or cumbersome manual uploads.
+- **Reviewers make and record their scores outside of the workbook.** To prevent someone accidentally breaking the workbook, all reviews and scores are recorded on separate linked and unlinked spreadsheets, leading to complicated cross-workbook dependencies or cumbersome manual uploads.
 
 ## 2. Goals
 
@@ -172,6 +172,13 @@ Assignment
   id, instanceId, round, applicantId, reviewerId
   origin: AUTO | MANUAL | CLAIMED_FROM_POOL
   status: ACTIVE | RETURNED_TO_POOL
+  returnReason: CONFLICT_OF_INTEREST | OTHER
+                               // nullable. FR-9's required reason, set on
+                               //   return to pool and cleared when the row is
+                               //   reactivated by a re-claim or an FR-8 assign.
+                               //   See decisions 27, 28 and 39.
+  returnNote                   // nullable free text, optional for both reasons
+  returnedAt                   // nullable
   UNIQUE (round, applicantId, reviewerId)
 
 Score                          // written round
@@ -191,7 +198,7 @@ InterviewResult                // first round, imported. Two rows per applicant.
   interviewerName
   score                        // the average as it appears in the source sheet,
                                //   imported verbatim. Never recomputed from the
-                               //   category rows. See open decision 6.
+                               //   category rows. See decision 6.
   UNIQUE (applicantId, interviewerName)
                                // makes a re-upload an upsert rather than a
                                //   duplicate. See decision 47.
@@ -202,7 +209,7 @@ InterviewCategoryScore         // one per category per InterviewResult
 
 InterviewNotes                 // one row per applicant; only one interviewer of
   id, applicantId, body        //   the pair writes them, and the "Your Name"
-  interviewerName              //   column records which
+  interviewerName              //   column records which. Nullable, per decision 60.
   UNIQUE (applicantId)
 
 InterviewImport                // FR-12 staging header. One row per sheet, deleted
@@ -273,11 +280,17 @@ Pass                           // second round
 PassApplicant                  // membership, fixed at pass creation per FR-17
   id, passId, applicantId
   resolution: SPARKLET | REJECTED | CARRIED | NEEDS_ADMIN   // null until resolved
+  resolvedAt                   // nullable; when resolution was last written,
+                               //   null while it is null
   UNIQUE (passId, applicantId)
 
 PassVote
   id, passId, applicantId, reviewerId
-  value: YES | NO | SKIP
+  value: YES | NO | SKIP       // SKIP is permitted by the shared VoteValue type
+                               //   and written by nothing in the product; a
+                               //   conflict is computed as SKIP without a row,
+                               //   and lib/passes.ts honours a stored one if it
+                               //   ever exists. See decision 67.
   submittedAt
   UNIQUE (passId, applicantId, reviewerId)
 
@@ -535,7 +548,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 
 - A pass is created by an admin. Its membership is fixed at creation: every applicant with `status = ACTIVE`.
 - Exactly one pass is OPEN at a time. A submitted vote lands in the currently open pass.
-- A reviewer with an active COI on an applicant has their vote in that pass automatically set to SKIP and cannot vote on that applicant.
+- A reviewer with an active COI on an applicant is counted as SKIP in that pass — computed from the conflict, never a stored vote, per decision 67 — and cannot vote on that applicant.
 - A vote requires an explicit submit action. Selecting yes/no without submitting records nothing.
 - An applicant is **resolved** within a pass when every non-SKIP reviewer has submitted:
   - All YES → `PassApplicant.resolution = SPARKLET`, `Applicant.status = SPARKLET`, excluded from future passes
@@ -559,15 +572,46 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 
 | Case | Required behavior |
 |---|---|
-| All reviewers have COI on an applicant | Cannot resolve. `resolution = NEEDS_ADMIN` on that pass. Do not treat as unanimous. The applicant stays ACTIVE and **carries into the next pass**, where a reviewer without a conflict may yet be added — `NEEDS_ADMIN` describes the pass, not the applicant. |
+| All reviewers have COI on an applicant | Cannot resolve. `resolution = NEEDS_ADMIN` on that pass. Do not treat as unanimous. The applicant stays ACTIVE and **carries into the next pass** — `NEEDS_ADMIN` describes the pass, not the applicant. Recovery is an admin lifting a conflict on FR-18's grid while a pass is open (decision 76), or the admin decision FR-19 requires once the round closes (decision 89). The roster cannot be changed after pass 1 (decision 84), so "add a reviewer without a conflict" is not a route. |
 | Pass created with zero ACTIVE applicants | Block creation, tell the admin the pool is resolved. |
 | Pass created with zero reviewers on the second-round roster | Block creation, per decision 79. Every member would resolve `NEEDS_ADMIN` at creation — a pass that decides nothing and flags everyone. |
-| A reviewer is added or withdrawn mid-round | Cannot happen. Decisions 66 and 78 fix the second-round roster once `Instance.currentStage` reaches `SECOND_ROUND`, in both directions. This replaces the earlier "they vote only in passes created after they are added", which described a situation the roster page no longer permits. |
+| A reviewer is added or withdrawn mid-round | Cannot happen. Decision 84 fixes the second-round roster, adds and removals alike, from the moment the first pass is created — decisions 66 and 78 as amended. This replaces the earlier "they vote only in passes created after they are added", which described a situation the roster page no longer permits. |
 | Admin reopens a closed pass | Not supported in v1. Corrections happen via manual override on the applicant. |
 | Passes end with an applicant still unresolved | The "Close second round" action writes `resolution = NEEDS_ADMIN` on their final pass row. They are neither SPARKLET nor REJECTED, and FR-19 lists them under Unresolved rather than defaulting them either way. |
 | Second round closed with no pass ever created | Block the close. See "Closing the second round" above. |
 
-**Open decision:** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes. Decision 74 extends that to a *closed* pass as well and amends §6's matrix accordingly: FR-18's admin-only grid is the only surface in the product that renders a pass vote.
+**FR-17 clause index.** Code comments, tests and `plans/phase-6.md` cite FR-17 by these identifiers. They were assigned in the Phase 6 clause ledger and are reproduced here so a reader holding only this document can resolve them. The letters split FR-17's bullets into the clauses that were ticked separately; 17p–17u are the "Closing the second round" paragraph, 17v–17y are rows of the table above, and 17z is the resolved decision-3 paragraph below.
+
+| # | Clause |
+|---|---|
+| 17a | "A pass is created by an admin" |
+| 17b | "membership is fixed at creation: every applicant with `status = ACTIVE`" |
+| 17c | "Exactly one pass is OPEN at a time" |
+| 17d | "A submitted vote lands in the currently open pass" |
+| 17e | "A reviewer with an active COI … counted as SKIP" (computed per decision 67) |
+| 17f | "and cannot vote on that applicant" |
+| 17g | "A vote requires an explicit submit action" |
+| 17h | "resolved … when every non-SKIP reviewer has submitted" |
+| 17i | "All YES → `resolution = SPARKLET`, `status = SPARKLET`, excluded from future passes" |
+| 17j | "All NO → `REJECTED` … excluded" |
+| 17k | "Mixed → `CARRIED`, stays ACTIVE, carries into the next pass" |
+| 17l | "An admin can manually reject any applicant within a pass" |
+| 17m | "excluding them from future passes" |
+| 17n | "Closing a pass without full votes leaves unvoted applicants ACTIVE and carried forward" |
+| 17o | "`PassApplicant.resolution` … does not control membership in the next one" |
+| 17p | "Close second round … moves `currentStage` to `COMPLETE`" |
+| 17q | "writes `NEEDS_ADMIN` onto the final pass's rows for every applicant still unresolved" |
+| 17r | "Idempotent" |
+| 17s | "Blocked when no pass exists" |
+| 17t | "Audited, per §8" |
+| 17u | "`Applicant.status` stays ACTIVE for these applicants" |
+| 17v | Table: all-COI → `NEEDS_ADMIN`, stays ACTIVE, carries into the next pass |
+| 17w | Table: zero ACTIVE applicants → block creation |
+| 17x | Table: reviewer added mid-round → cannot happen (decision 84) |
+| 17y | Table: admin reopens a closed pass → not supported |
+| 17z | "counts are never revealed to reviewers" (decision 74) |
+
+**Live vote visibility (decision 3, resolved):** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes. Decision 74 extends that to a *closed* pass as well and amends §6's matrix accordingly: FR-18's admin-only grid is the only surface in the product that renders a pass vote.
 
 **FR-16's conflict flag is one-way for the reviewer and removable by an admin**, per decision 76. Flagging deletes any vote that reviewer had already cast in the open pass (decision 68) and that vote does not come back; an admin removing the flag returns the reviewer to the denominator as outstanding. The control lives on FR-18's grid, on the `skip` cell that shows the conflict, and is audited.
 
@@ -621,7 +665,7 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 These need answers before or during the relevant build phase. They are the places where an unstated assumption would produce the wrong system.
 
 1. **Unassigned pool definition. RESOLVED: 5% of assignment slots.** ~22 slots of 450 left open, spread across ~22 distinct applicants who each start with 2 of 3 reviewers rather than concentrating the gap on a few applicants with zero. The pool exists as a conflict-of-interest buffer: a reviewer who recuses returns their slot to the pool, and any reviewer can claim an open slot. Chosen over holding whole applicants unassigned because a pooled applicant under that model needs three separate claims to be reviewed at all, and if the pool moves slowly they receive zero reviews. Under this model a slow-moving pool costs an applicant one opinion, not all three. Consequence: returns add slots to the pool over the course of the round, so FR-10 must warn on total applicants with fewer than 3 completed reviews, not just the initial 22.
-2. **Sparklet-heavy roster handling. RESOLVED: Uneven Sparklet load.** When the feasibility check fails, does the club prefer uneven Sparklet load or relaxing the one-Sparklet rule?
+2. **Sparklet-heavy roster handling. RESOLVED: uneven Sparklet load.** Offered as an action on the feasibility failure, per FR-7's relaxed rule; the one-Sparklet-per-applicant rule is never relaxed.
 3. **Live vote visibility in passes.** RESOLVED: See FR-17.
 4. **Blind written review. RESOLVED: Written reviewers should not see applicant names.** Should written reviewers see applicant names at all? Hiding them is a small change now and a much larger one later.
 5. **Multiple concurrent admins. RESOLVED: Based on v1 recommendation** Two admins editing assignments simultaneously. v1 recommendation: last-write-wins with a visible "changed by X at Y" indicator rather than locking.
@@ -629,7 +673,7 @@ These need answers before or during the relevant build phase. They are the place
 
    *Display:* show the average prominently, with the category scores available but collapsed by default, for both interviewers. Ten numbers on a phone screen works against FR-14's friction goal if all are shown at once.
 
-   *Model:* §5 now carries `InterviewCategory` and `InterviewCategoryScore`. The interview rubric is **instance-scoped and admin-configured, not four fixed columns and not shared with `RubricCategory`** — the written and interview rubrics are different instruments, and goal 5 requires both be reconfigurable between cycles. `InterviewResult.score` is the average **as imported**, never recomputed from the category rows; see FR-12 for how a disagreement between the two is surfaced. This is Phase 5 schema work and is not in the current migration.
+   *Model:* §5 now carries `InterviewCategory` and `InterviewCategoryScore`. The interview rubric is **instance-scoped and admin-configured, not four fixed columns and not shared with `RubricCategory`** — the written and interview rubrics are different instruments, and goal 5 requires both be reconfigurable between cycles. `InterviewResult.score` is the average **as imported**, never recomputed from the category rows; see FR-12 for how a disagreement between the two is surfaced. Shipped in Phase 5; decisions 47–65 record what the build found.
 7. **Multi-select demographic counting. RESOLVED: fractional counting.** An applicant checking both "East Asian" and "White" needs a defined counting rule for the demographic breakdowns in FR-11 and FR-19. The current spreadsheet concatenates the values into a single string ("South AsianIndian"), which is not countable.
 
    An applicant checking *n* categories contributes `1/n` to each: two boxes gives 0.5 each, three gives 0.33 each. Display one decimal place alongside a raw headcount — "East Asian: 12.5 weighted / 18 checked" — since a panel showing fractional people with no explanation will read as a bug to a successor.
@@ -694,7 +738,7 @@ These need answers before or during the relevant build phase. They are the place
 
 25. **How the roster's four name-entry paths stay consistent. RESOLVED: one shared gate.** A name reaches the database by four routes — a pasted line, the two free-text inputs the paste queue offers for a line it could not split, the manual-add form, and a rename in the grid — and only the first is a line at all. `lib/roster.ts` exports one `checkReviewerName` that all four call. It returns the values to store, which is what makes it impossible to validate one string and persist another; it normalizes without folding case, since folding belongs to the comparison key and a gate that lowercased would put the roster and FR-20's export of it in lower case; and it reports duplicate names rather than refusing them, because FR-6 allows two reviewers to share one.
 
-26. **A save in flight when the reviewer navigates away. RESOLVED: settle within 1500 ms or hold, and never a silent loss.** FR-9 requires autosave and that a dropped connection not lose work, but says nothing about the reviewer who changes a score and immediately closes the tab or hits back. If the in-flight save settles fast enough the navigation is not blocked; past the threshold the app holds or warns until it resolves or fails.
+26. **A save in flight when the reviewer navigates away. RESOLVED: settle within 1500 ms or hold, and never a silent loss.** FR-9 requires autosave and that a dropped connection not lose work, but says nothing about the reviewer who changes a score and immediately closes the tab or hits back. If the in-flight save settles fast enough the navigation is not blocked; past the threshold the app holds or warns until it resolves or fails. **Amended by decision 37** (the mirror is also cleared on sign-out and by a 7-day TTL) **and decision 38** (a return to pool clears that draft and does not hold for a save in flight).
 
     **The threshold is 1500 ms.** One upsert through a server action is 80–250 ms in practice; add a slow-4G round trip and a healthy save still settles under 600 ms, so 1500 ms is roughly 5× the realistic worst case and effectively never fires on a connection that is working. It sits below the ~2 s at which a person concludes the app is stuck and force-closes it — which is the behaviour that causes the loss — and above the ~1 s that still reads as an uninterrupted flow, so a dialog appearing at 1.5 s reads as "something is wrong" rather than as a normal step.
 
@@ -702,7 +746,7 @@ These need answers before or during the relevant build phase. They are the place
 
     **So the guarantee is not the dialog.** Every change is mirrored to `localStorage` under the assignment id, cleared only on a confirmed save, and restored when the reviewer next opens that applicant. The dialog reduces how often that restore is needed; the mirror is what makes "never a silent loss" true even when the operating system kills the tab. Relatedly, a save is an upsert on `(assignmentId, rubricCategoryId)`, so a retry after an ambiguous failure cannot write twice — "no silent duplicate write" comes from a constraint that has existed since Phase 0, not from a nonce.
 
-27. **Free text when the return reason is "Other". RESOLVED: optional, the same as conflict of interest.** FR-9 requires a reason and offers two; it does not say whether picking "Other" then demands an explanation. It does not. A required text box is a wall in front of the one action a reviewer takes when they recognize an applicant, and the reason category is what an admin acts on — an unexplained "Other" is still more information than an abandoned return. `Assignment.returnNote` stays nullable for both values.
+27. **Free text when the return reason is "Other". RESOLVED: optional, the same as conflict of interest.** FR-9 requires a reason and offers two; it does not say whether picking "Other" then demands an explanation. It does not. A required text box is a wall in front of the one action a reviewer takes when they recognize an applicant, and the reason category is what an admin acts on — an unexplained "Other" is still more information than an abandoned return. `Assignment.returnNote` stays nullable for both values. §5 lists `returnReason`, `returnNote` and `returnedAt` as of the reconciliation pass; the schema has carried them since Phase 3.
 
 28. **Claiming a slot on an applicant you previously returned. RESOLVED: allowed, not blocked.** The reviewer judged their own conflict and the system does not second-guess it; a reviewer who returned an applicant in error, or whose conflict turned out not to be one, would otherwise have no way back and the slot would sit open.
 
@@ -806,13 +850,13 @@ These need answers before or during the relevant build phase. They are the place
 
     Each applicant now shows its returned assignments beneath its active reviewers, dimmed and non-actionable, naming the reviewer, the reason, and the free text where one was written. Non-actionable deliberately: a returned row is the record of a recusal, and an admin who could delete it would be able to let generation re-pair that reviewer with that applicant, which decision 23 forbids. The way to put a reviewer back on an applicant they returned is FR-8's assign.
 
-    **FR-8's assign has to be taught about that row, and this is the second half of the same gap.** `assignReviewer` checks only the applicant's *active* reviewers and then inserts, so assigning a reviewer who had returned that applicant violated `UNIQUE (round, applicantId, reviewerId)` and surfaced as a raw database error. It was unreachable until now for the same reason the missing surface was invisible — nothing could create a returned row before FR-9's return-to-pool existed. It reactivates the row as `MANUAL` instead, clearing the return fields, exactly as decision 28 has a reviewer's own re-claim reactivate it as `CLAIMED_FROM_POOL`. Both are a deliberate person overriding a recusal, and neither is generation.
+    **FR-8's assign has to be taught about that row, and this is the second half of the same gap.** `assignReviewer` checks only the applicant's *active* reviewers and then inserts, so assigning a reviewer who had returned that applicant violated `UNIQUE (round, applicantId, reviewerId)` and surfaced as a raw database error. It was unreachable until now for the same reason the missing surface was invisible — nothing could create a returned row before FR-9's return-to-pool existed. It reactivates the row as `MANUAL` instead, clearing the return fields, exactly as decision 28 has a reviewer's own re-claim reactivate it as `CLAIMED_FROM_POOL`. Both are a deliberate person overriding a recusal, and neither is generation. The three return columns this and decision 27 name are in §5's `Assignment` block as of the reconciliation pass.
 
 40. **The written scale runs 0 to `maxPoints`, and the rubric it is meant to express runs 1 to 4. RESOLVED: `RubricCategory` gains a `minPoints` column — and the change is deferred to Phase 4.** `maxPoints` is the only bound in §5, and the floor is hardcoded in `lib/review.ts` as "reject anything below zero", so a 5-point category offers six values. The intended instrument is four: fewer options score faster and agree more often across thirty untrained reviewers, and no submitted answer should be scorable as nothing. Raised by the owner during the Slice 7 board-member run; it is a rubric-design decision rather than a defect, and the screen does exactly what FR-4 currently specifies.
 
-    **Why a column rather than a stated convention**, which was the cheaper option and is the wrong one. A convention — "scales run 1 to `maxPoints`, 0 is never offered" — is a change to validation code, so it applies to every instance that has ever existed. Instances here are per-semester and are kept: a past cycle whose reviewers legitimately recorded a 0 would suddenly hold scores the current scale says cannot exist, which FR-10 would then average and FR-20's export-and-reimport round trip would fail to validate. A column makes the scale *data*, so it travels with the instance that used it and history stays coherent. The cost is honest and accepted: per-category configuration that no admin will ever vary between categories, and a second field on the FR-4 builder, which decision F-01 already finds fiddly.
+    **Why a column rather than a stated convention**, which was the cheaper option and is the wrong one. A convention — "scales run 1 to `maxPoints`, 0 is never offered" — is a change to validation code, so it applies to every instance that has ever existed. Instances here are per-semester and are kept: a past cycle whose reviewers legitimately recorded a 0 would suddenly hold scores the current scale says cannot exist, which FR-10 would then average and FR-20's export-and-reimport round trip would fail to validate. A column makes the scale *data*, so it travels with the instance that used it and history stays coherent. The cost is honest and accepted: per-category configuration that no admin will ever vary between categories, and a second field on the FR-4 builder, which finding F-01 in `plans/phase-3-test-pass.md` already finds fiddly.
 
-    **`minPoints Int @default(0)`**, so the migration changes the meaning of no existing row and new rubrics opt in. Invariant `0 ≤ minPoints < maxPoints`, enforced in `validateRubric` beside the existing bounds. `validateScore` takes the floor as a parameter instead of assuming zero; the segmented row and the number-input fallback both render from it. `null` continues to mean *clear this score* and is untouched — **"unscored" is the absence of a `Score` row, not a zero**, which is what makes dropping 0 from the offered values cost nothing semantically. It is also why the obvious shortcut of storing 0–3 and displaying 1–4 is refused: the stored number must be the number the reviewer saw, or FR-10 computes variance over values nobody chose.
+    **`minPoints Int @default(0)`**, so the migration changes the meaning of no existing row and new rubrics opt in. Two defaults, two layers, both true: the database default of 0 is what keeps existing rows unchanged, and the builder's default for a new category is 1–4, which is what FR-4 means by "starts at". Invariant `0 ≤ minPoints < maxPoints`, enforced in `validateRubric` beside the existing bounds. `validateScore` takes the floor as a parameter instead of assuming zero; the segmented row and the number-input fallback both render from it. `null` continues to mean *clear this score* and is untouched — **"unscored" is the absence of a `Score` row, not a zero**, which is what makes dropping 0 from the offered values cost nothing semantically. It is also why the obvious shortcut of storing 0–3 and displaying 1–4 is refused: the stored number must be the number the reviewer saw, or FR-10 computes variance over values nobody chose.
 
     **Why it is deferred, which is the part a later reader will want.** Nothing about it is urgent — no reviewer is blocked and no data is wrong — and the migration would land between the board-member run and its step 8 re-run, which is the gate Phase 3 is actually trying to close. A schema change in that window risks the thing being verified for a change with no deadline. Phase 4 is the natural home: FR-10 is the first requirement that computes on the scale rather than only storing it. **Existing scores need no migration regardless** — FR-4 locks the rubric once any `Score` exists, so changing a scale already requires the reset that discards them.
 
@@ -928,7 +972,7 @@ These need answers before or during the relevant build phase. They are the place
 
     The escape hatch is decision 51's, unchanged: mark the row as not importing. The difference from an automatic skip is only that a person does it, having seen what they are dropping.
 
-    Neither rule applies to the notes sheet. It has no average, and `InterviewNotes.interviewerName` is nullable because only one interviewer of the pair writes the notes.
+    Neither rule applies to the notes sheet. It has no average, and `InterviewNotes.interviewerName` is nullable because only one interviewer of the pair writes the notes. §5 marks it nullable as of the reconciliation pass; the schema always did.
 
 61. **`InterviewCategory` ids are preserved across a rubric edit, amending clause 12a-5's "replace-not-diff." RESOLVED:** an edit updates existing rows in place and only adds or removes rows for categories actually added or removed, rather than deleting and recreating the whole set. Same ruling §5 already made for `FieldGroup.key`, and the reason is the same: a staged FR-12 mapping references `InterviewCategory` ids, and regenerating them on every save silently invalidates any in-progress mapping, which is exactly the "Not imported" regression this decision fixes. The rubric page also warns when a scores sheet is staged, naming that changing categories will need the mapping re-done — a real cost of editing after upload, stated rather than discovered.
 
@@ -1016,7 +1060,7 @@ and decision 79, checked in the same place.
 
     The admin's FR-18 grid is unaffected and remains the only surface in the product that renders a pass vote.
 
-83a. **Correction to decision 83's "leaves their list" claim. CONFIRMED BY GATE.** That claim is true for terminal outcomes — `SPARKLET` and `REJECTED` — where the applicant leaves the reviewer's list. It is **false for `CARRIED`**: that applicant stays present, with a settled control and no vote control.
+83a. **Correction to decision 83's "leaves their list" claim. CONFIRMED BY GATE.** That claim is true for terminal outcomes — `SPARKLET` and `REJECTED` — where the applicant leaves the reviewer's list. It is **false for `CARRIED`**: that applicant stays present on the reviewer's list, and their profile shows a settled control in place of the vote control. The settled control is on the profile, per decision 82; the list renders no vote state, so 82's cost statement stands.
 
     This does not weaken 83's reasoning. "Settled but still present" reveals only that a mixed result occurred — not which reviewers voted which way, and not what the vote was. That is the boundary 83 was actually protecting, and it holds.
 
@@ -1141,7 +1185,7 @@ and decision 79, checked in the same place.
 
     **No second synthetic dataset**: same corpus, same generators, same safety properties as the existing fixtures (`example.com` addresses, every free-text cell prefixed `SYNTHETIC`). A second body of fake applicants would be a second thing to keep honest, and the first one already has a README enumerating every hazard it deliberately contains.
 
-    **The two halves are deliberately different sizes, and only the CSV is small.** The demo CSV is 25 rows because a trainee clicks through every one of them. The reference cycle is seeded at production scale — 150 applicants, 30 reviewers — for two reasons.
+    **The two halves are deliberately different sizes, and only the CSV is small.** The demo CSV is 25 rows because a trainee clicks through every one of them. The reference cycle is seeded at production scale — 150 generated applicants plus the eight pinned reconciliation identities, 158 in all, and 30 reviewers — for two reasons.
 
     The first is mechanical: `prisma/advance.ts` and `prisma/passes.ts` are written against real cohort constants (`FIRST_ROUND_ADVANCE_COUNT`, `SECOND_ROUND_ADVANCE_COUNT`, the pass plans in `prisma/seed/passes.ts`), and running them over 25 applicants asks for more advancing applicants than exist. Making those proportional means rewriting the seed's internals, which is exactly what this decision's "reuse the existing seed rather than building a second synthetic dataset" rules out.
 

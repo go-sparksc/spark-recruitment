@@ -13,7 +13,7 @@ Companion to `PRD.md`. This is the execution plan for building it with Claude Co
 | ORM | Prisma | Schema file doubles as documentation. Migrations are legible to whoever inherits this. |
 | Styling | Tailwind + shadcn/ui | The reviewer dashboard needs to be usable on a phone with no training. Do not hand-roll a design system. |
 | Auth | Custom, minimal | No provider needed. Instance password + reviewer round code, per PRD §8. |
-| Hosting | Vercel | Push to deploy, free tier is sufficient at 153 applicants and 30 reviewers. |
+| Hosting | Vercel | Push to deploy, free tier is sufficient at 160+ applicants and 30 reviewers. |
 | Testing | Vitest | Two algorithms carry real logic and need real tests. |
 
 **Set up hosting and database under a club-owned Google account, not your personal one.** This is the single highest-leverage succession decision and it takes ten minutes on day one. Retrofitting it after you graduate is painful.
