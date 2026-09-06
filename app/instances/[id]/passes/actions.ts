@@ -267,7 +267,7 @@ export async function closePass(
     message:
       `Pass ${pass.ordinal} closed.` +
       (unresolved > 0
-        ? ` ${unresolved} applicant${unresolved === 1 ? "" : "s"} carried forward unresolved.`
+        ? ` ${unresolved} applicant${unresolved === 1 ? "" : "s"} carried forward without a resolution.`
         : ""),
   };
 }

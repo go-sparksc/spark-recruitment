@@ -165,7 +165,7 @@ function describe(summary: ReturnType<typeof summarizePass>): string {
     summary.unresolved > 0
       ? summary.status === PassStatus.OPEN
         ? `${summary.unresolved} still to resolve`
-        : `${summary.unresolved} carried forward unresolved`
+        : `${summary.unresolved} carried forward without a resolution`
       : null,
   ].filter((part) => part !== null);
 

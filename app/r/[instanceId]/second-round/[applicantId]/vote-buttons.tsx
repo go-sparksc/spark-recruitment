@@ -60,8 +60,9 @@ export function VoteButtons({
   }
 
   if (availability.kind === "SETTLED") {
-    // Deliberately does not say WHICH way it went. Decision 74: naming the
-    // outcome would tell this reviewer how the others voted.
+    // Deliberately does not say WHICH way it went — and cannot, since the
+    // availability value carries no outcome to say. Decisions 74, 83 and 83a:
+    // naming it would tell this reviewer how the others voted.
     return (
       <p className="text-muted-foreground rounded-md border p-4 text-sm">
         This pass has finished with this applicant, so votes can no longer change.

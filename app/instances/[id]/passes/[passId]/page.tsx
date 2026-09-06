@@ -162,7 +162,7 @@ export default async function PassDetailPage({
         {summary.memberCount} applicant{summary.memberCount === 1 ? "" : "s"} ·{" "}
         {reviewers.length} reviewer{reviewers.length === 1 ? "" : "s"} · {summary.sparklet}{" "}
         sparklet · {summary.rejected} rejected · {summary.carried} carried · {summary.needsAdmin}{" "}
-        needing an admin · {summary.unresolved} unresolved
+        needing an admin · {summary.unresolved} without a resolution
       </p>
 
       {summary.memberCount === 0 ? (

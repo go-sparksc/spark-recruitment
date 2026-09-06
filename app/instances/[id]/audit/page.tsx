@@ -89,7 +89,7 @@ export default async function AuditPage({
       {total === 0 ? (
         <p className="text-muted-foreground mt-10 text-sm">
           Nothing has been recorded for this cycle yet. Manual assignment changes, rubric edits,
-          decision reversals and password resets all appear here.
+          manual rejections, conflict removals and password resets all appear here.
         </p>
       ) : (
         <>

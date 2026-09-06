@@ -118,10 +118,10 @@ export interface ApplicantResolution {
 }
 
 export interface PassInput {
-  /// The electorate. Fixed for the whole round by decisions 66 and 78, which is
-  /// why it is derived from `Reviewer.rounds` at read time rather than stored
-  /// per pass — there is no moment at which two passes of one round can have
-  /// different rosters.
+  /// The electorate. Fixed from the creation of the first pass by decisions 66
+  /// and 78 as amended by 84, which is why it is derived from `Reviewer.rounds`
+  /// at read time rather than stored per pass — there is no moment at which two
+  /// passes of one round can have different rosters.
   reviewerIds: readonly string[];
   /// `PassApplicant` membership, fixed at creation.
   applicantIds: readonly string[];
@@ -209,8 +209,9 @@ function resolveWithIndex(
     const key = pairKey(applicantId, reviewerId);
     // **Iterating the roster, not the votes.** A vote row from someone outside
     // `reviewerIds` is not counted — it cannot swing unanimity, and the only way
-    // one exists is an orphan from a roster change that decisions 66 and 78 now
-    // forbid. The roster is the denominator.
+    // one exists is an orphan from a roster change that decisions 66 and 78, as
+    // amended by 84, forbid once the first pass exists. The roster is the
+    // denominator.
     switch (effectiveVote(index.votes.get(key), index.conflicts.has(key))) {
       case "YES":
         tally.yes += 1;
@@ -565,7 +566,16 @@ export type VoteAvailability =
   | { kind: "CONFLICT" }
   /// The pass has already concluded on this applicant, so decision 75's window
   /// has shut on its own.
-  | { kind: "SETTLED"; resolution: PassResolution }
+  ///
+  /// **Carries no resolution, deliberately.** Decision 83 forbids telling a
+  /// reviewer which way it went, and 83a is what "settled" reveals — that a
+  /// result occurred, nothing more. This value is a prop to a client component,
+  /// so anything on it is serialised into the page payload whether or not the
+  /// component renders it; the way to not reveal a field is to not send it.
+  /// The reviewer surfaces only ever reach this state with `CARRIED`, since the
+  /// terminal outcomes change `Applicant.status` and the profile 404s first, but
+  /// the type should not depend on that staying true.
+  | { kind: "SETTLED" }
   | { kind: "OPEN"; current: VoteValue | null };
 
 export interface VoteAvailabilityInput {
@@ -601,7 +611,7 @@ export function voteAvailability(input: VoteAvailabilityInput): VoteAvailability
   // reviewer back their eligibility, and the vote they then cast is the whole
   // point of that decision.
   if (!isMutableResolution(input.storedResolution) && input.storedResolution !== null) {
-    return { kind: "SETTLED", resolution: input.storedResolution };
+    return { kind: "SETTLED" };
   }
 
   return { kind: "OPEN", current: input.currentVote };
@@ -628,8 +638,13 @@ export const RESOLUTION_LABEL: Record<PassResolution, string> = {
 /// `null` is not a resolution and is deliberately not in the map above: it means
 /// the pass has not finished with this applicant, which is a different kind of
 /// answer from the four that have.
+///
+/// **Not "Unresolved".** That is FR-19's word for a different predicate —
+/// `NEEDS_ADMIN` on the final pass with no admin decision since — and an admin
+/// reading it on the pass list and on FR-19 would be reading two predicates under
+/// one word. §5's own phrase for this cell is "null until resolved".
 export function resolutionLabel(resolution: PassResolution | null): string {
-  return resolution === null ? "Unresolved" : RESOLUTION_LABEL[resolution];
+  return resolution === null ? "No resolution" : RESOLUTION_LABEL[resolution];
 }
 
 // ---------------------------------------------------------------------------

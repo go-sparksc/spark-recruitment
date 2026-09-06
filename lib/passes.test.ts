@@ -138,8 +138,9 @@ describe("BUILD_PLAN Phase 6 — the cases written before the code", () => {
   });
 
   it("reviewer added between passes: pass 1 is computed against pass 1's roster", () => {
-    // Decisions 66 and 78 make this unreachable through the roster page, but the
-    // function must still be correct about it: the electorate is an argument, so
+    // Decisions 66 and 78, as amended by 84, make this unreachable through the
+    // roster page once the first pass exists, but the function must still be
+    // correct about it: the electorate is an argument, so
     // a pass computed with eleven reviewers stays an eleven-reviewer pass no
     // matter who is on the roster when it is recomputed.
     const eleven = pass({ yes: 11 });
@@ -238,8 +239,9 @@ describe("skips that are not conflicts", () => {
 describe("votes that must not count", () => {
   it("a vote from someone off the roster is ignored", () => {
     // The roster is the denominator. An orphan row from a reviewer no longer in
-    // the round must not be able to complete a unanimity — decisions 66 and 78
-    // stop one being created, and this stops one that exists from mattering.
+    // the round must not be able to complete a unanimity — decisions 66 and 78,
+    // as amended by 84, stop one being created once the first pass exists, and
+    // this stops one that exists from mattering.
     const input = pass({ yes: 10 });
     const withOrphan: PassInput = {
       ...input,
@@ -620,16 +622,19 @@ describe("voteAvailability", () => {
 
   /// Decision 75's window shutting on its own: CARRIED means every eligible
   /// reviewer submitted and they disagreed, which is a completed outcome.
-  it("is SETTLED once the pass has concluded on the applicant", () => {
-    expect(voteAvailability({ ...open, storedResolution: PassResolution.CARRIED })).toEqual({
-      kind: "SETTLED",
-      resolution: PassResolution.CARRIED,
-    });
+  ///
+  /// **And it says nothing about which way.** Decisions 83 and 83a: the settled
+  /// state is a prop to a client component, so a resolution on it would travel
+  /// in the page payload whether or not it rendered. `toStrictEqual` is what
+  /// catches a key coming back.
+  it("is SETTLED once the pass has concluded on the applicant, and carries no outcome", () => {
+    expect(
+      voteAvailability({ ...open, storedResolution: PassResolution.CARRIED }),
+    ).toStrictEqual({ kind: "SETTLED" });
 
-    expect(voteAvailability({ ...open, storedResolution: PassResolution.SPARKLET })).toEqual({
-      kind: "SETTLED",
-      resolution: PassResolution.SPARKLET,
-    });
+    expect(
+      voteAvailability({ ...open, storedResolution: PassResolution.SPARKLET }),
+    ).toStrictEqual({ kind: "SETTLED" });
   });
 
   /// Decision 76's whole point: an admin removed this reviewer's conflict, the
@@ -665,12 +670,14 @@ describe("resolutionLabel", () => {
     expect(resolutionLabel(PassResolution.NEEDS_ADMIN)).toBe("Needs an admin");
   });
 
-  /// Null is not a fifth resolution: the pass has not finished with them.
-  it("distinguishes unresolved from every stored value", () => {
-    expect(resolutionLabel(null)).toBe("Unresolved");
+  /// Null is not a fifth resolution: the pass has not finished with them. And
+  /// the word is not "Unresolved", which FR-19 uses for a different predicate.
+  it("distinguishes a null row from every stored value, without FR-19's word", () => {
+    expect(resolutionLabel(null)).toBe("No resolution");
 
     const stored = Object.values(PassResolution).map((value) => resolutionLabel(value));
-    expect(stored).not.toContain("Unresolved");
+    expect(stored).not.toContain("No resolution");
+    expect([...stored, resolutionLabel(null)]).not.toContain("Unresolved");
   });
 
   /// The guard the type already gives, asserted so a new enum member cannot ship

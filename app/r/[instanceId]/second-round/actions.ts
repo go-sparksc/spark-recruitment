@@ -292,7 +292,7 @@ export async function submitPassVote(
     ]);
 
     // 17h: resolved when every non-SKIP reviewer has submitted. The roster is
-    // the denominator, per decisions 66 and 78.
+    // the denominator, per decisions 66 and 78 as amended by 84.
     const { resolution } = resolveApplicant(applicant.id, {
       reviewerIds: roster.map((entry) => entry.id),
       applicantIds: [applicant.id],
