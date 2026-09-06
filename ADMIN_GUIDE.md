@@ -467,6 +467,18 @@ Their absence counts as a skip, not as a no.
 **If every reviewer has recused from someone, that is not unanimity.** The tool
 marks them as needing an admin rather than reading an empty tally as a decision.
 
+### Rejecting someone by hand, and undoing it
+
+Below the grid, **Reject an applicant** removes someone from this and every later
+pass without a vote — use it when the room has decided and waiting for eleven
+submissions is theatre. It asks you to confirm, and names the person with their
+applicant number, because names repeat.
+
+If you rejected the wrong person, **Reverse a rejection** on the same page puts
+them back, **as long as the pass is still open** — once it closes, nothing in it
+can be changed. Only a rejection you made by hand can be reversed; one decided
+by a unanimous no cannot. Both actions are recorded in Activity with your name.
+
 ### Closing
 
 Closing the second round marks everyone still undecided as needing an admin, and
