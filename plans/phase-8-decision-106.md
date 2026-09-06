@@ -183,3 +183,9 @@ without `seed:passes`, which lands at `SECOND_ROUND` with no pass. Then:
 6. Delete the throwaway instance afterwards (FR-5), so the development database is left as it was found.
 
 Restart `next dev` is **not** required — no `prisma generate` runs in this slice — but step 2's reviewer check goes through the route that actually renders the reinstated applicant, not a neighbour of it.
+
+---
+
+## Outcome
+
+Built as six commits (8e33c94 through 07e4f9d) on 2026-09-06, `npm run verify` green after each, ending at 865 tests. The owner ran all six hand-verification steps the same day against a throwaway instance seeded to `SECOND_ROUND` with no pass, and every one held: the reversible row listed exactly once with its handle; the reversal restoring the grid row, the summary count, the reject list, the reviewer's profile and vote control, and writing reject-then-reversal into Activity with the deleted decision in the payload; a unanimous-NO row absent from "Reverse a rejection"; a closed pass rendering neither section and refusing the stale tab; and the two-tab race resolving to one success, one "already reversed" message and one Activity row. The throwaway instance was deleted afterwards. Decision 107 is verified, and Phase 8 has nothing left before slice 7.
