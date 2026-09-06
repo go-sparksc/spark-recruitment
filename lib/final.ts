@@ -15,10 +15,12 @@
 import { ApplicantStatus, PassResolution, Round } from "@/generated/prisma/enums";
 import {
   buildPassGrid,
-  type ConflictLike,
+  conflictsInForce,
+  type DatedConflictLike,
   type EffectiveVote,
   type PassTally,
   type PassVoteLike,
+  type PassWindow,
 } from "@/lib/passes";
 
 /// One applicant as FR-19 needs them, whichever group they land in.
@@ -181,7 +183,7 @@ export interface ApplicantPassRow {
   votes: ApplicantPassVote[];
 }
 
-export interface PassHistorySource {
+export interface PassHistorySource extends PassWindow {
   passId: string;
   ordinal: number;
   resolution: PassResolution | null;
@@ -196,13 +198,15 @@ export interface PassHistorySource {
 /// pass across every applicant; this renders one applicant across every pass,
 /// which is the cut an admin resolving a NEEDS_ADMIN row actually needs.
 ///
-/// Conflicts are round-scoped and sticky (decision 67), so one set applies to
-/// every pass rather than being carried per pass.
+/// Conflicts are round-scoped and sticky (decision 67), so one set is passed in
+/// — and each pass is read with the part of it that existed when that pass
+/// closed, through the same `conflictsInForce` FR-18 and FR-19 use (decision
+/// 100). A conflict flagged in pass 3 does not rewrite what pass 1 shows.
 export function buildPassHistory(
   applicantId: string,
   passes: readonly PassHistorySource[],
   reviewers: readonly { id: string; firstName: string; lastName: string }[],
-  conflicts: readonly ConflictLike[],
+  conflicts: readonly DatedConflictLike[],
 ): ApplicantPassRow[] {
   const reviewerIds = reviewers.map((reviewer) => reviewer.id);
 
@@ -211,7 +215,12 @@ export function buildPassHistory(
     // recomputing keeps this surface and FR-18's from ever disagreeing about
     // what a cell says.
     const grid = buildPassGrid(
-      { reviewerIds, applicantIds: [applicantId], votes: pass.votes, conflicts },
+      {
+        reviewerIds,
+        applicantIds: [applicantId],
+        votes: pass.votes,
+        conflicts: conflictsInForce(conflicts, pass),
+      },
       new Map([[applicantId, pass.resolution]]),
     );
     const row = grid.rows[0];

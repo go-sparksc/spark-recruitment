@@ -28,6 +28,7 @@ import {
   closeRoundBlock,
   SECOND_ROUND_POOL,
   buildPassGrid,
+  conflictsInForce,
   decisionOutcomeFor,
   effectiveVote,
   isMutableResolution,
@@ -745,6 +746,78 @@ describe("UNRESOLVED_AT_CLOSE agrees with needsAdminAtClose", () => {
   it("never selects a terminal resolution", () => {
     expect(selected.has(PassResolution.SPARKLET)).toBe(false);
     expect(selected.has(PassResolution.REJECTED)).toBe(false);
+  });
+});
+
+describe("conflictsInForce — decision 100", () => {
+  const closedAt = new Date("2026-03-01T12:00:00Z");
+  const conflicts = [
+    { applicantId: "app", reviewerId: "rev-1", createdAt: new Date("2026-02-20T00:00:00Z") },
+    { applicantId: "app", reviewerId: "rev-2", createdAt: closedAt },
+    { applicantId: "app", reviewerId: "rev-3", createdAt: new Date("2026-03-05T00:00:00Z") },
+  ];
+
+  it("hands an open pass every conflict — the pass is still being decided", () => {
+    expect(conflictsInForce(conflicts, { status: PassStatus.OPEN, closedAt: null })).toEqual(
+      conflicts,
+    );
+  });
+
+  it("hands a closed pass only the conflicts that existed when it closed", () => {
+    const inForce = conflictsInForce(conflicts, { status: PassStatus.CLOSED, closedAt });
+    expect(inForce.map((c) => c.reviewerId)).toEqual(["rev-1", "rev-2"]);
+  });
+
+  it("counts a conflict flagged at the closing instant as in force", () => {
+    // `<=`, not `<`: the close and the flag can share a timestamp at the
+    // database's resolution, and a conflict the close saw is one it honoured.
+    const inForce = conflictsInForce([conflicts[1]], { status: PassStatus.CLOSED, closedAt });
+    expect(inForce).toHaveLength(1);
+  });
+
+  it("treats a closed pass with no closedAt as open, rather than dropping everything", () => {
+    // Defensive: the schema permits it and the honest reading of "closed at
+    // nobody knows when" is that no conflict can be excluded on timing.
+    expect(conflictsInForce(conflicts, { status: PassStatus.CLOSED, closedAt: null })).toEqual(
+      conflicts,
+    );
+  });
+
+  it("returns a copy, never the caller's array", () => {
+    const open = conflictsInForce(conflicts, { status: PassStatus.OPEN, closedAt: null });
+    expect(open).not.toBe(conflicts);
+  });
+
+  it("keeps a stored YES on a closed pass when the conflict came later", () => {
+    // The defect as it showed on FR-18: a conflict flagged in a later pass
+    // rendered SKIP over a YES stored in pass 1, and pass 1's tally moved. Read
+    // through `conflictsInForce`, pass 1 shows what it showed when it closed.
+    const votes = REVIEWERS.map((reviewerId) => ({
+      applicantId: "app",
+      reviewerId,
+      value: VoteValue.YES,
+    }));
+    const later = [{ applicantId: "app", reviewerId: "rev-1", createdAt: new Date("2026-03-05") }];
+    const closedPass = { status: PassStatus.CLOSED, closedAt };
+
+    const asClosed = buildPassGrid({
+      reviewerIds: REVIEWERS,
+      applicantIds: ["app"],
+      votes,
+      conflicts: conflictsInForce(later, closedPass),
+    }).rows[0];
+    expect(asClosed.cells[0]).toBe("YES");
+    expect(asClosed.tally).toEqual({ yes: 11, no: 0, skip: 0, outstanding: 0, eligible: 11 });
+
+    // The same conflict on the open pass is in force, exactly as before.
+    const asOpen = buildPassGrid({
+      reviewerIds: REVIEWERS,
+      applicantIds: ["app"],
+      votes,
+      conflicts: conflictsInForce(later, { status: PassStatus.OPEN, closedAt: null }),
+    }).rows[0];
+    expect(asOpen.cells[0]).toBe("SKIP");
+    expect(asOpen.tally.eligible).toBe(10);
   });
 });
 

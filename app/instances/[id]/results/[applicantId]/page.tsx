@@ -133,6 +133,10 @@ export default async function ApplicantResultPage({
       select: {
         id: true,
         ordinal: true,
+        // Decision 100: each pass is read with the conflicts that existed when
+        // it closed, which `buildPassHistory` decides from these two columns.
+        status: true,
+        closedAt: true,
         members: { where: { applicantId }, select: { resolution: true } },
         votes: {
           where: { applicantId },
@@ -147,7 +151,7 @@ export default async function ApplicantResultPage({
     }),
     prisma.conflictOfInterest.findMany({
       where: { round: Round.SECOND_ROUND, applicantId },
-      select: { applicantId: true, reviewerId: true },
+      select: { applicantId: true, reviewerId: true, createdAt: true },
     }),
   ]);
 
@@ -184,6 +188,8 @@ export default async function ApplicantResultPage({
     passes.map((pass) => ({
       passId: pass.id,
       ordinal: pass.ordinal,
+      status: pass.status,
+      closedAt: pass.closedAt,
       resolution: pass.members[0]?.resolution ?? null,
       votes: pass.votes,
     })),

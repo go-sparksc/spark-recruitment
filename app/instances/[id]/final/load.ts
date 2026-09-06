@@ -13,7 +13,7 @@ import { demographicColumns } from "@/lib/demographics";
 import type { ApplicantData } from "@/lib/field-groups";
 import type { FinalApplicantSource } from "@/lib/final";
 import { buildFunnel, type Funnel } from "@/lib/funnel";
-import { buildPassGrid } from "@/lib/passes";
+import { buildPassGrid, conflictsInForce } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export interface FinalPageData {
@@ -90,7 +90,9 @@ export async function loadFinalPage(instanceId: string): Promise<FinalPageData> 
   const finalPass = await prisma.pass.findFirst({
     where: { instanceId },
     orderBy: { ordinal: "desc" },
-    select: { id: true, ordinal: true },
+    // status and closedAt: decision 100 reads a closed pass with the conflicts
+    // that existed when it closed.
+    select: { id: true, ordinal: true, status: true, closedAt: true },
   });
 
   const applicants = await prisma.applicant.findMany({
@@ -148,7 +150,7 @@ export async function loadFinalPage(instanceId: string): Promise<FinalPageData> 
     }),
     prisma.conflictOfInterest.findMany({
       where: { round: Round.SECOND_ROUND, applicant: { instanceId } },
-      select: { applicantId: true, reviewerId: true },
+      select: { applicantId: true, reviewerId: true, createdAt: true },
     }),
     prisma.passApplicant.findMany({
       where: { passId: finalPass.id },
@@ -156,6 +158,11 @@ export async function loadFinalPage(instanceId: string): Promise<FinalPageData> 
     }),
     loadFunnel(instanceId),
   ]);
+
+  // Decision 100. On a COMPLETE instance the final pass is closed, and its
+  // tallies — which decide FR-19's "why unresolved" phrase — must not move when
+  // a conflict is flagged afterwards. Same helper FR-18 reads through.
+  const conflictsAtClose = conflictsInForce(conflicts, finalPass);
 
   const memberIds = members.map((member) => member.applicantId);
   const storedByApplicant = new Map<string, PassResolution | null>(
@@ -167,7 +174,7 @@ export async function loadFinalPage(instanceId: string): Promise<FinalPageData> 
       reviewerIds: roster.map((reviewer) => reviewer.id),
       applicantIds: memberIds,
       votes,
-      conflicts,
+      conflicts: conflictsAtClose,
     },
     storedByApplicant,
   );

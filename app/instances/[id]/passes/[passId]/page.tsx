@@ -9,6 +9,7 @@ import { ApplicantStatus, PassStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import {
   buildPassGrid,
+  conflictsInForce,
   isMutableResolution,
   isTerminal,
   resolutionLabel,
@@ -70,12 +71,15 @@ export default async function PassDetailPage({
   const applicantIds = pass.members.map((member) => member.applicant.id);
 
   // Conflicts are round-scoped and carry no pass dimension (decision 67), so
-  // this reads the round's set and lets `buildPassGrid` decide which pairs in
-  // this pass it touches.
-  const conflicts = await prisma.conflictOfInterest.findMany({
+  // this reads the round's set — and, per decision 100, a closed pass is read
+  // with the conflicts that existed when it closed, so a conflict flagged in a
+  // later pass does not rewrite this grid. `conflictsInForce` is the one place
+  // that rule lives; FR-19 and the applicant's pass history call the same one.
+  const roundConflicts = await prisma.conflictOfInterest.findMany({
     where: { round: Round.SECOND_ROUND, applicantId: { in: applicantIds } },
-    select: { applicantId: true, reviewerId: true },
+    select: { applicantId: true, reviewerId: true, createdAt: true },
   });
+  const conflicts = conflictsInForce(roundConflicts, pass);
 
   const stored = new Map(
     pass.members.map((member) => [member.applicant.id, member.resolution] as const),

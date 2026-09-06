@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ApplicantStatus, PassResolution, Round } from "@/generated/prisma/enums";
+import { ApplicantStatus, PassResolution, PassStatus, Round } from "@/generated/prisma/enums";
 import {
   buildPassHistory,
   groupFinalApplicants,
@@ -189,6 +189,12 @@ describe("buildPassHistory — one applicant across every pass", () => {
     { id: "r2", firstName: "Alex", lastName: "Kim" },
     { id: "r3", firstName: "Sam", lastName: "Osei" },
   ];
+  /// Decision 100: a pass is read with the conflicts that existed when it
+  /// closed, so every source here carries the two columns that decide that.
+  const closed = { status: PassStatus.CLOSED, closedAt: new Date("2026-03-01T12:00:00Z") };
+  const open = { status: PassStatus.OPEN, closedAt: null };
+  const before = new Date("2026-02-28T00:00:00Z");
+  const after = new Date("2026-03-02T00:00:00Z");
 
   it("names every reviewer's position in each pass", () => {
     const history = buildPassHistory(
@@ -197,6 +203,7 @@ describe("buildPassHistory — one applicant across every pass", () => {
         {
           passId: "p1",
           ordinal: 1,
+          ...closed,
           resolution: PassResolution.CARRIED,
           votes: [
             { applicantId: "app-1", reviewerId: "r1", value: "YES" },
@@ -223,9 +230,9 @@ describe("buildPassHistory — one applicant across every pass", () => {
     // distinction buildPassGrid draws for FR-18's cell.
     const history = buildPassHistory(
       "app-1",
-      [{ passId: "p1", ordinal: 1, resolution: null, votes: [] }],
+      [{ passId: "p1", ordinal: 1, ...open, resolution: null, votes: [] }],
       reviewers,
-      [{ applicantId: "app-1", reviewerId: "r2" }],
+      [{ applicantId: "app-1", reviewerId: "r2", createdAt: before }],
     );
 
     expect(history[0].votes[1]).toMatchObject({ vote: "SKIP", isConflict: true });
@@ -238,19 +245,51 @@ describe("buildPassHistory — one applicant across every pass", () => {
     // performed had not happened.
     const history = buildPassHistory(
       "app-1",
-      [{ passId: "p1", ordinal: 1, resolution: PassResolution.REJECTED, votes: [] }],
+      [{ passId: "p1", ordinal: 1, ...open, resolution: PassResolution.REJECTED, votes: [] }],
       reviewers,
       [],
     );
     expect(history[0].resolution).toBe(PassResolution.REJECTED);
   });
 
+  it("reads a closed pass with the conflicts that existed when it closed (decision 100)", () => {
+    // r2 voted YES in pass 1, which closed on 1 March. r2 flagged a conflict on
+    // 2 March, during pass 2. Before decision 100 the same conflict set was
+    // handed to every pass, so pass 1 showed r2 as SKIP over a stored YES and
+    // its tally moved. Pass 1 is history and must read as it did when it closed;
+    // pass 2 is live and the conflict is in force there.
+    const history = buildPassHistory(
+      "app-1",
+      [
+        {
+          passId: "p1",
+          ordinal: 1,
+          ...closed,
+          resolution: PassResolution.CARRIED,
+          votes: [
+            { applicantId: "app-1", reviewerId: "r1", value: "YES" },
+            { applicantId: "app-1", reviewerId: "r2", value: "YES" },
+            { applicantId: "app-1", reviewerId: "r3", value: "NO" },
+          ],
+        },
+        { passId: "p2", ordinal: 2, ...open, resolution: null, votes: [] },
+      ],
+      reviewers,
+      [{ applicantId: "app-1", reviewerId: "r2", createdAt: after }],
+    );
+
+    expect(history[0].votes[1]).toMatchObject({ vote: "YES", isConflict: false });
+    expect(history[0].tally).toMatchObject({ yes: 2, no: 1, skip: 0, eligible: 3 });
+    expect(history[1].votes[1]).toMatchObject({ vote: "SKIP", isConflict: true });
+    expect(history[1].tally).toMatchObject({ skip: 1, eligible: 2 });
+  });
+
   it("carries one applicant through several passes in order", () => {
     const history = buildPassHistory(
       "app-1",
       [
-        { passId: "p1", ordinal: 1, resolution: PassResolution.CARRIED, votes: [] },
-        { passId: "p2", ordinal: 2, resolution: PassResolution.NEEDS_ADMIN, votes: [] },
+        { passId: "p1", ordinal: 1, ...closed, resolution: PassResolution.CARRIED, votes: [] },
+        { passId: "p2", ordinal: 2, ...closed, resolution: PassResolution.NEEDS_ADMIN, votes: [] },
       ],
       reviewers,
       [],

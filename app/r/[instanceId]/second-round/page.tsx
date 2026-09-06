@@ -154,15 +154,20 @@ export default async function SecondRoundListPage({
                     A sibling of the Link rather than inside it: an anchor may
                     not contain a button, and the confirm panel needs the full
                     width of the row to open into. */}
-                <div className="border-t border-dashed px-4">
-                  <ConflictControl
-                    instanceId={instanceId}
-                    applicantId={row.applicantId}
-                    applicantName={row.displayName}
-                    flagged={row.hasConflict}
-                    variant="row"
-                  />
-                </div>
+                {/* Decision 100: once the round is closed there is nothing a
+                    conflict could still bear on, and the action refuses one, so
+                    the control is absent rather than offered and refused. */}
+                {finished ? null : (
+                  <div className="border-t border-dashed px-4">
+                    <ConflictControl
+                      instanceId={instanceId}
+                      applicantId={row.applicantId}
+                      applicantName={row.displayName}
+                      flagged={row.hasConflict}
+                      variant="row"
+                    />
+                  </div>
+                )}
               </li>
             ))}
           </ul>

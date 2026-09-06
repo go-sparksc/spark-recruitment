@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import {
   DecisionActor,
+  InstanceStage,
   PassStatus,
   Round,
   VoteValue,
@@ -57,6 +58,21 @@ export async function flagConflict(formData: FormData): Promise<ConflictState> {
 
   if (session.rd !== Round.SECOND_ROUND) {
     return { error: "You are signed in for a different round." };
+  }
+
+  // Decision 100: a conflict flagged after the round has closed would change
+  // what FR-19 shows about an applicant the close already left to an admin. The
+  // pool check below does not catch it, because an unresolved applicant in a
+  // COMPLETE instance is still ACTIVE by design (FR-17).
+  const instance = await prisma.instance.findUnique({
+    where: { id: instanceId },
+    select: { currentStage: true },
+  });
+  if (instance?.currentStage === InstanceStage.COMPLETE) {
+    return {
+      error:
+        "The second round is closed, so conflicts can no longer be flagged. Nothing was changed.",
+    };
   }
 
   // **The applicant is re-checked against the pool**, not taken from the

@@ -71,9 +71,12 @@ export interface ConflictLike {
 ///
 /// A `PassVote` row means a reviewer actually submitted something. A conflict is
 /// a fact about the pairing that outranks whatever they may have submitted
-/// earlier — decision 68 deletes that row on flag, so in practice the two never
-/// coexist, and this asserts the outcome rather than trusting the deletion. If
-/// one ever survived a partial failure, the conflict still wins.
+/// earlier — decision 68 deletes that row on flag in the OPEN pass, and this
+/// asserts the outcome rather than trusting the deletion. **The two do coexist
+/// on every closed pass**: a conflict flagged in pass 3 sits beside a YES stored
+/// in pass 1, because 68 deliberately leaves closed passes alone. That is why
+/// readers of a closed pass hand this function only the conflicts that existed
+/// when the pass closed — see `conflictsInForce` and decision 100.
 ///
 /// **A stored `SKIP` is honoured.** Nothing in the product writes one; the
 /// column's type permits one; and "skip" is exactly what it would mean. Defined
@@ -124,8 +127,47 @@ export interface PassInput {
   applicantIds: readonly string[];
   votes: readonly PassVoteLike[];
   /// The round's `ConflictOfInterest` rows. Sticky across passes (FR-16), so
-  /// these are scoped by round and never by pass.
+  /// these are scoped by round and never by pass — the full set for the open
+  /// pass, and for a closed pass the rows that existed when it closed, which is
+  /// what `conflictsInForce` selects (decision 100).
   conflicts: readonly ConflictLike[];
+}
+
+/// A conflict row with the timestamp decision 100 scopes by.
+export interface DatedConflictLike extends ConflictLike {
+  createdAt: Date;
+}
+
+/// The two columns of a `Pass` that decide which conflicts apply to it.
+export interface PassWindow {
+  status: PassStatus;
+  closedAt: Date | null;
+}
+
+/// Decision 100: the conflicts a pass is read with.
+///
+/// Conflicts carry no pass dimension (decision 67), and every reader used to
+/// hand the round's whole set to every pass — so a conflict flagged during pass 3
+/// rendered as SKIP over a YES stored in pass 1, moved pass 1's tally and its
+/// recomputed resolution, and moved FR-19's "why unresolved" phrase. Nothing
+/// stored was rewritten; what was shown was.
+///
+/// For the open pass, every conflict applies: the pass is still being decided
+/// and a conflict is in force from the moment it is flagged. For a closed pass,
+/// only the conflicts that existed at `closedAt` apply, so the pass reads as it
+/// did when it closed. **One function for every reader** — FR-18's grid, FR-19's
+/// tallies and the applicant's pass history — so the three cannot disagree about
+/// what a cell says.
+///
+/// A conflict an admin later removed (decision 76) leaves no row and so cannot
+/// be reconstructed here; decision 100 records that as accepted.
+export function conflictsInForce<T extends DatedConflictLike>(
+  conflicts: readonly T[],
+  pass: PassWindow,
+): T[] {
+  if (pass.status === PassStatus.OPEN || pass.closedAt === null) return [...conflicts];
+  const closedAt = pass.closedAt.getTime();
+  return conflicts.filter((conflict) => conflict.createdAt.getTime() <= closedAt);
 }
 
 /// A colon rather than a hyphen, and an ASCII one rather than a NUL: cuids are
