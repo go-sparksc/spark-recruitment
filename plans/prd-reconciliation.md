@@ -209,3 +209,15 @@ Each slice follows the clause-ticking rule against its decision text before comm
 - Decision 99: the A3 case returns `shortfall` naming `a0` with `got: 0`; the A4 case reports `shortApplicantCount 2` and `assignedSlots 28`; the action's message names the shortfall. Existing suite green.
 - Decision 100: a `buildPassGrid` test where a conflict newer than `closedAt` is excluded for a closed pass and included for the open one; a database exercise flagging a conflict after close and reading FR-18 and FR-19 before and after.
 - `npm run verify` after every slice; `prisma/checks/passes.ts` re-run after slice 6 since it touches the close path's neighbours.
+
+## Outcome (2026-09-06)
+
+Eight commits, in the order above. `npm run verify` green after every slice; 839 tests before the pass, 856 after.
+
+- **Steps 0–2.** Plan, §1 and Bucket C text, decisions 98–106 with forward pointers. PRD v1.25.
+- **Slice 3, decision 98.** `evenOutToFloor` scans every light reviewer and honours the forbidden set. Three regression tests built from the demonstrating inputs; all three failed against the previous implementation before the fix was written. The persistence question A18 left open is answered: the regeneration deletes only ACTIVE rows before `createMany`, so a re-created returned pair collided with the surviving row's unique index and the regeneration failed outright. Decision 98's text records it.
+- **Slice 4, decision 99.** `shortfall` on the plan; the action names under-staffed applicants by handle in its result, log line and audit row and does not call the run a success; the page shows FR-7's standing invariant through `understaffed` (pure, tested) until an admin closes the gap. Report counts follow the short set actually chosen.
+- **Slice 5, decision 100.** `conflictsInForce` in `lib/passes.ts`, read by FR-18, FR-19 and the pass history; `flagConflict` refuses on COMPLETE and the list hides the control. `prisma/checks/closed-pass-conflicts.ts` (new, `npm run check:closed-pass-conflicts`) reads FR-19 through `loadFinalPage` before and after a post-close conflict on the seeded instance: tally unchanged at 12 eligible, and the negative control's unscoped read moved to 11. Passed; probe row removed and verified.
+- **Slice 6.** SETTLED carries no outcome (strict test), `resolutionLabel(null)` is "No resolution" on every surface that rendered it, 66/78 citations follow 84, the audit page stops promising decision reversals.
+
+**Not done here, on purpose.** `prisma/checks/passes.ts` was not re-run: slice 6 touched only copy in the close path, not the index or the write. Decision 106's narrow reversal is its own slice, before the next live cycle. `README.md:9`, `ARCHITECTURE.md:14` and CLAUDE.md's "~150 applicants" still describe cycle scale at 150; §1 now says 160+, and those three are the owner's call. `PassSummary.unresolved` keeps its internal name.
