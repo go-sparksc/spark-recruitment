@@ -23,9 +23,11 @@ import {
   passCreationBlock,
   resolveApplicant,
   resolvePass,
+  reversalBlock,
   statusFor,
 } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
+import { applicantLabel } from "@/lib/review";
 
 export interface PassActionState {
   error?: string;
@@ -283,11 +285,13 @@ export async function closePass(
 ///
 /// **A terminal row is never overwritten.** An applicant already resolved
 /// SPARKLET by a unanimous vote is not rejectable — that is not an override, it
-/// is a contradiction, and §7.4 sends corrections after the fact through the
-/// applicant override rather than back through the pass. A `CARRIED` or
-/// `NEEDS_ADMIN` row *is* rejectable: neither decided anything about the
-/// applicant, and 17l says "any applicant", which is precisely the population
-/// those two describe.
+/// is a contradiction, and nothing in the product reverses a vote-driven
+/// resolution (decision 106). A `CARRIED` or `NEEDS_ADMIN` row *is* rejectable:
+/// neither decided anything about the applicant, and 17l says "any applicant",
+/// which is precisely the population those two describe.
+///
+/// **The one route back is `reverseManualReject` below**, while this pass is
+/// still open (decision 107). Once the pass closes, nothing in it changes.
 export async function manuallyReject(
   _prev: PassActionState,
   formData: FormData,
@@ -394,6 +398,157 @@ export async function manuallyReject(
   revalidatePath(`/instances/${instanceId}/passes/${pass.id}`);
 
   return { message: `Applicant rejected in pass ${pass.ordinal}.` };
+}
+
+/// Thrown inside the reversal's transaction when its conditional first write
+/// matches no row, and caught outside as a stale-tab message. The transaction
+/// is the arbiter between two admins reversing the same row, the way the
+/// partial index is the arbiter between two admins creating a pass.
+class AlreadyReversed extends Error {}
+
+/// Decision 107, clause 17aa: an admin reverses a manual reject while the pass
+/// it happened in is still open.
+///
+/// **The inverse of `manuallyReject`, write for write, plus one.** Row back to
+/// `NULL`; status back to `ACTIVE`; the `Decision` row deleted rather than
+/// updated, because there is no earlier decision to restore to; and an audit
+/// row carrying everything the three writes destroyed, including the deleted
+/// decision's fields. The reject's own audit row is untouched, so the log reads
+/// reject-then-reversal in order.
+///
+/// **Cleared, not recomputed.** Decision 107 states the cost: a reject over
+/// `CARRIED` or `NEEDS_ADMIN` reverses to a null row rather than to the value it
+/// overwrote. Both carry at pass close and both close to `NEEDS_ADMIN` under
+/// decision 73, so a recompute would buy nothing durable, and it would drag the
+/// terminal-outcome writes into an action whose whole point is undoing one.
+///
+/// **Votes are untouched.** The reject deleted none, so the reversal restores
+/// none; a reviewer's stored vote is what `voteAvailability` hands back to them
+/// once the row is mutable again. Membership is untouched too: the applicant
+/// never left the pass.
+export async function reverseManualReject(
+  _prev: PassActionState,
+  formData: FormData,
+): Promise<PassActionState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const passId = String(formData.get("passId") ?? "");
+  const applicantId = String(formData.get("applicantId") ?? "");
+  const session = await requireInstance(instanceId, path(instanceId));
+
+  const pass = await prisma.pass.findFirst({
+    where: { id: passId, instanceId },
+    select: { id: true, ordinal: true, status: true },
+  });
+  if (!pass) return { error: "No such pass in this instance." };
+
+  const membership = await prisma.passApplicant.findUnique({
+    where: { passId_applicantId: { passId: pass.id, applicantId } },
+    select: {
+      resolution: true,
+      applicant: {
+        select: {
+          id: true,
+          status: true,
+          sourceRowIndex: true,
+          // The row `manuallyReject` wrote, if that is what rejected them. The
+          // same select the page uses, so `reversalBlock` sees the same input
+          // from both sides.
+          decisions: {
+            where: { stage: Round.SECOND_ROUND },
+            select: { id: true, actor: true, outcome: true, decidedAt: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!membership) return { error: "That applicant is not in this pass." };
+
+  // `UNIQUE (applicantId, stage)` makes this at most one row.
+  const decision = membership.applicant.decisions[0] ?? null;
+
+  // **Every input to the guard is read here, not taken from the request.** The
+  // page rendered the control from the same predicate, but a second tab still
+  // holds a form bound to this action after the state it saw has moved on.
+  const block = reversalBlock({
+    passStatus: pass.status,
+    storedResolution: membership.resolution,
+    applicantStatus: membership.applicant.status,
+    decision,
+  });
+  if (block) return { error: block };
+
+  // Non-null once the block has passed: the predicate refuses a null decision.
+  if (!decision) return { error: "That rejection has no decision row to reverse." };
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Conditional on the row still reading REJECTED. Two admins on the same
+      // row both pass the guard above; the second one's update matches nothing
+      // once the first commits, and this is what makes the reversal happen once.
+      const cleared = await tx.passApplicant.updateMany({
+        where: { passId: pass.id, applicantId, resolution: PassResolution.REJECTED },
+        data: { resolution: null, resolvedAt: null },
+      });
+      if (cleared.count === 0) throw new AlreadyReversed();
+
+      // 17m in reverse: this is the write that puts them back into every future
+      // pass, because membership is recomputed from `status` at each creation.
+      await tx.applicant.update({
+        where: { id: applicantId },
+        data: { status: ApplicantStatus.ACTIVE },
+      });
+
+      // Deleted rather than updated. There is no earlier second-round decision
+      // to restore — the guard proved this one was the reject's own — and "no
+      // outcome" is not a value the column can hold.
+      await tx.decision.delete({ where: { id: decision.id } });
+
+      await tx.auditLog.create({
+        data: {
+          instanceId,
+          ...auditActor(session),
+          action: "REVERSE_MANUAL_REJECT",
+          // The applicant id and never the name — §8 and 17t. `previousValue`
+          // carries every value the three writes destroyed, the deleted
+          // decision included, so the row says what changed rather than only
+          // that something did.
+          entityType: "Applicant",
+          entityId: applicantId,
+          previousValue: {
+            passId: pass.id,
+            ordinal: pass.ordinal,
+            previousResolution: PassResolution.REJECTED,
+            previousStatus: ApplicantStatus.REJECTED,
+            deletedDecision: {
+              id: decision.id,
+              outcome: decision.outcome,
+              actor: decision.actor,
+              decidedAt: decision.decidedAt.toISOString(),
+            },
+          },
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof AlreadyReversed) {
+      return { error: "That rejection has already been reversed. Reload this page." };
+    }
+    throw error;
+  }
+
+  revalidateAll(instanceId);
+  revalidatePath(`/instances/${instanceId}/passes/${pass.id}`);
+  // The reviewer's profile for this applicant 404'd while they were REJECTED
+  // and renders again now — the same path `removeConflict` revalidates, for
+  // the same reason: something a reviewer can act on just changed.
+  revalidatePath(`/r/${instanceId}/second-round/${applicantId}`);
+
+  return {
+    message:
+      `Rejection reversed. ${applicantLabel(membership.applicant.sourceRowIndex)} is active ` +
+      `again in pass ${pass.ordinal}.`,
+  };
 }
 
 /// FR-17's "Close second round". Clauses 17p–17u and decision 73.
