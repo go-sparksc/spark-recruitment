@@ -22,6 +22,7 @@
 
 import {
   ApplicantStatus,
+  DecisionActor,
   DecisionOutcome,
   InstanceStage,
   PassResolution,
@@ -279,7 +280,10 @@ export function resolvePass(input: PassInput): ApplicantResolution[] {
 /// - `SPARKLET` / `REJECTED` are terminal. The applicant is no longer ACTIVE, so
 ///   no later pass contains them, and a manual reject (decision 71) is protected
 ///   by this same rule — a vote landing afterwards recomputes to something, and
-///   this is what stops that something from being written.
+///   this is what stops that something from being written. The one write over a
+///   `REJECTED` row that is *not* a recount is decision 107's reversal of that
+///   manual reject, and it goes through `reversalBlock` below rather than
+///   through a loosening here.
 /// - `CARRIED` means the pass had its say: every eligible reviewer submitted and
 ///   they disagreed. That is a completed outcome even though the applicant
 ///   carries forward, and it is why decision 75's "changeable until that
@@ -295,6 +299,82 @@ export function isMutableResolution(existing: PassResolution | null): boolean {
 /// Whether this resolution takes the applicant out of every future pass.
 export function isTerminal(resolution: PassResolution | null): boolean {
   return resolution === PassResolution.SPARKLET || resolution === PassResolution.REJECTED;
+}
+
+// ---------------------------------------------------------------------------
+// Reversing a manual reject (decision 107)
+// ---------------------------------------------------------------------------
+
+export interface ReversalContext {
+  passStatus: PassStatus;
+  /// What the applicant's row in this pass holds.
+  storedResolution: PassResolution | null;
+  applicantStatus: ApplicantStatus;
+  /// The applicant's `Decision` at `stage = SECOND_ROUND`, or null when there is
+  /// none. `actor` is what tells a manual reject from a unanimous vote after the
+  /// fact: decision 69 writes `ADMIN` for the first and `SYSTEM` for the second.
+  decision: { actor: DecisionActor; outcome: DecisionOutcome } | null;
+}
+
+/// Why this applicant's rejection cannot be reversed right now, or null when it
+/// can.
+///
+/// **One function, read by the page and by the action** — the `passCreationBlock`
+/// posture. The page offers the control only where this returns null, and the
+/// action refuses with the string it returns, so a stale tab is refused for the
+/// same reason the live page would have withheld the control.
+///
+/// **Not a fourth mutable case.** `isMutableResolution` answers whether a recount
+/// may overwrite a row, and the answer for `REJECTED` stays no: that is what
+/// protects a manual reject from a vote in flight (decision 71). A reversal is
+/// an admin undoing an admin write, which is a different question with a
+/// different guard — and that guard is the `Decision` row's actor, because a
+/// `REJECTED` row looks the same whether a person or a tally wrote it.
+///
+/// Order matches `manuallyReject`'s guards, so the two controls on the same page
+/// report the same first reason to the same stale tab: the pass, then the row,
+/// then who decided it, then the applicant. Messages name only surfaces that
+/// exist.
+export function reversalBlock(context: ReversalContext): string | null {
+  if (context.passStatus !== PassStatus.OPEN) {
+    return (
+      "This pass is closed and cannot be reopened, so nothing decided in it can be reversed. " +
+      "Reload this page to see where the applicant stands."
+    );
+  }
+
+  if (context.storedResolution !== PassResolution.REJECTED) {
+    return "This pass has not rejected that applicant. Reload this page to see where they stand.";
+  }
+
+  // Decision 106 scopes the reversal to a manual reject, and 107 says how that
+  // is recognised: the `Decision` row a manual reject writes carries `ADMIN`.
+  // A unanimous vote writes `SYSTEM`, and a `REJECTED` row with no decision at
+  // all is a state nothing in the product produces — refused rather than
+  // guessed at, since reversing it would delete a row that is not there.
+  if (context.decision === null || context.decision.actor !== DecisionActor.ADMIN) {
+    return (
+      "That rejection was decided by a unanimous vote, not by an admin, and cannot be reversed " +
+      "here."
+    );
+  }
+
+  // Defensive: an ADMIN decision at this stage that is not a REJECT is FR-19's
+  // admit or reject after the round closed, which cannot coexist with an open
+  // pass. Named anyway, so the guard is exhaustive over what the row can hold.
+  if (context.decision.outcome !== DecisionOutcome.REJECT) {
+    return "That applicant's second-round decision is not a rejection. Reload this page.";
+  }
+
+  // A REJECTED row whose applicant is no longer REJECTED is a reversal that
+  // already happened in another tab, mid-way through this one's read. The
+  // action's conditional write is what actually decides the race; this is the
+  // legible refusal for the tab that lost.
+  if (context.applicantStatus !== ApplicantStatus.REJECTED) {
+    return "That rejection has already been reversed. Reload this page.";
+  }
+
+  return null;
 }
 
 /// What the applicant's own status becomes. Null where it does not change —

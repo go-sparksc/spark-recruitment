@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ApplicantStatus,
+  DecisionActor,
   InstanceStage,
   DecisionOutcome,
   PassResolution,
@@ -38,10 +39,12 @@ import {
   resolutionLabel,
   resolveApplicant,
   resolvePass,
+  reversalBlock,
   statusFor,
   summarizePass,
   voteAvailability,
   type PassInput,
+  type ReversalContext,
 } from "@/lib/passes";
 
 /// Eleven reviewers, the number BUILD_PLAN's cases use.
@@ -659,6 +662,107 @@ describe("voteAvailability", () => {
       const availability = voteAvailability({ ...open, storedResolution: resolution });
       expect(availability.kind === "SETTLED").toBe(!isMutableResolution(resolution));
     }
+  });
+});
+
+describe("decision 107 — reversing a manual reject", () => {
+  /// Exactly the state `manuallyReject` leaves behind in an open pass: the row,
+  /// the status, and the ADMIN/REJECT decision row that names a person as the
+  /// one who decided.
+  const reversible: ReversalContext = {
+    passStatus: PassStatus.OPEN,
+    storedResolution: PassResolution.REJECTED,
+    applicantStatus: ApplicantStatus.REJECTED,
+    decision: { actor: DecisionActor.ADMIN, outcome: DecisionOutcome.REJECT },
+  };
+
+  it("allows reversing a manual reject in the open pass", () => {
+    expect(reversalBlock(reversible)).toBeNull();
+  });
+
+  /// Decision 106's scope, and 17y: nothing in a closed pass changes.
+  it("blocks once the pass is closed, and says so", () => {
+    const block = reversalBlock({ ...reversible, passStatus: PassStatus.CLOSED });
+
+    expect(block).toMatch(/closed/);
+    expect(block).toMatch(/cannot be reopened/);
+  });
+
+  /// Only a REJECTED row can be reversed. The other four are not rejections —
+  /// SPARKLET is the opposite one, CARRIED and NEEDS_ADMIN decided nothing, and
+  /// null is a pass still waiting.
+  it("blocks every row that is not REJECTED", () => {
+    for (const resolution of [
+      PassResolution.SPARKLET,
+      PassResolution.CARRIED,
+      PassResolution.NEEDS_ADMIN,
+      null,
+    ]) {
+      expect(reversalBlock({ ...reversible, storedResolution: resolution })).toMatch(
+        /has not rejected/,
+      );
+    }
+  });
+
+  /// The distinction 106 is built on: decision 69 writes SYSTEM for a unanimous
+  /// tally and ADMIN for a person. A vote-driven REJECTED row is not reversible,
+  /// and the message says why rather than merely refusing.
+  it("blocks a REJECTED row decided by a unanimous vote, naming the vote", () => {
+    const block = reversalBlock({
+      ...reversible,
+      decision: { actor: DecisionActor.SYSTEM, outcome: DecisionOutcome.REJECT },
+    });
+
+    expect(block).toMatch(/unanimous vote/);
+    expect(block).toMatch(/not by an admin/);
+  });
+
+  it("blocks a REJECTED row with no decision at all", () => {
+    expect(reversalBlock({ ...reversible, decision: null })).toMatch(/unanimous vote/);
+  });
+
+  /// Defensive, and exhaustive over what the row can hold.
+  it("blocks an ADMIN decision that is not a REJECT", () => {
+    expect(
+      reversalBlock({
+        ...reversible,
+        decision: { actor: DecisionActor.ADMIN, outcome: DecisionOutcome.SPARKLET },
+      }),
+    ).toMatch(/not a rejection/);
+  });
+
+  /// The row still reads REJECTED but the applicant does not: another tab got
+  /// there first, between this one's read and its submit.
+  it("blocks when the applicant is already back to ACTIVE, as already reversed", () => {
+    expect(reversalBlock({ ...reversible, applicantStatus: ApplicantStatus.ACTIVE })).toMatch(
+      /already been reversed/,
+    );
+  });
+
+  /// Order is the specification, matching `manuallyReject`: the pass is asked
+  /// about first, so a closed pass with a vote-driven row reports the closed
+  /// pass — the reason nothing on that page can change, rather than the reason
+  /// this row in particular could not.
+  it("reports the closed pass ahead of every other block", () => {
+    const block = reversalBlock({
+      passStatus: PassStatus.CLOSED,
+      storedResolution: PassResolution.CARRIED,
+      applicantStatus: ApplicantStatus.ACTIVE,
+      decision: { actor: DecisionActor.SYSTEM, outcome: DecisionOutcome.REJECT },
+    });
+
+    expect(block).toMatch(/closed/);
+    expect(block).not.toMatch(/unanimous/);
+  });
+
+  /// **The regression guard.** A reversal exists, and a REJECTED row is still
+  /// immovable to every recount. Loosening `isMutableResolution` to admit the
+  /// reversal would reopen decision 71's hole — a vote in flight overwriting a
+  /// manual reject — which is exactly why the reversal has its own predicate.
+  it("does not loosen the recount rule: a reversible row is still not mutable", () => {
+    expect(reversalBlock(reversible)).toBeNull();
+    expect(isMutableResolution(reversible.storedResolution)).toBe(false);
+    expect(isTerminal(reversible.storedResolution)).toBe(true);
   });
 });
 
