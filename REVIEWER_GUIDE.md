@@ -73,18 +73,62 @@ are applicants sitting in the pool and you have time, you can take one on.
 
 ---
 
-## In the later rounds
+## The first round
 
-If you are on the first or second round, the shape is the same — open the link,
-pick the round, use that round's code — but what you do differs:
+![Your first-round list](docs/img/r4-first-round-list.jpg)
 
-- **First round:** you read interview scores and notes and vote yes or no.
-- **Second round:** the group works through applicants together. Unanimous yes
-  admits, unanimous no rejects, and anything mixed carries into the next
-  discussion.
+Same link, pick **First round**, use that round's code. What you do is
+different: instead of essays you get **interview scores and notes**, and instead
+of numbers you give **one vote, yes or no**.
 
-In both, flag a conflict of interest the same way if you know someone. In the
-second round the flag sticks for the whole round, so you are not asked again.
+Names are visible from here on. The written round hid them; the first and second
+rounds do not.
+
+Every row on the list carries the vote — tap **Yes** or **No** right there. The
+counter at the top says how many you have voted on. Tap a name to see the
+interview in full: one score per interviewer, the per-category breakdown folded
+underneath, and the interviewer's notes. The same two buttons are at the bottom.
+
+![An applicant in the first round](docs/img/r5-first-round-applicant.jpg)
+
+**A vote saves the moment you tap it**, and you can change it any time until the
+round is finalised — tap the other button. There is no way to take a vote back
+to blank, so if you want to abstain, do not vote.
+
+**If you know the applicant, leave the vote blank.** There is no "return to
+pool" here. A blank counts as a skip and does not count against them.
+
+---
+
+## The second round
+
+![The second-round list](docs/img/r6-second-round-list.jpg)
+
+The second round is a room, not a queue: everyone still in is discussed
+together, in one or more **passes** that an admin opens. Until a pass is open the
+list is there to read — the line under the heading tells you which.
+
+Tap a name for the full profile: the interview scores and notes, every written
+review with the reviewer's name on it, and the whole application, including the
+answers the written round hid.
+
+![The full profile](docs/img/r7-second-round-profile.jpg)
+
+**Voting takes two taps.** At the bottom, tap **Yes** or **No**, then **Submit
+vote** — nothing is recorded until you submit. You can change it with the same
+two taps until the pass finishes with that applicant. You never see anyone
+else's vote, during the pass or after it closes.
+
+![Voting and flagging a conflict](docs/img/r8-second-round-vote.jpg)
+
+Unanimous yes makes them a Sparklet, unanimous no rejects them, and anything
+mixed carries them into the next pass.
+
+**If you know the applicant, flag a conflict of interest** — from the row on
+your list, or from the bottom of their profile. You are recorded as skipping
+them, which does not count against them. Two things to know before you tap it:
+it deletes any vote you have already cast on them, and it sticks for the whole
+round, every pass. Only an admin can undo it, so you are never asked twice.
 
 ---
 

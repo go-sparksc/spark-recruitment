@@ -229,18 +229,16 @@ cycle. A trainee would miss this without being told; it is now called out in ste
   rather than changing app copy in the middle of a documentation pass; worth one
   commit of its own.
 
-- **`REVIEWER_GUIDE.md`'s first- and second-round sections are unverified against
-  a running screen.** The written-round half was driven live and screenshotted;
-  the two later rounds were written from the code. Confirming them needs an
-  instance at `SECOND_ROUND` with an **open** pass, and none is in that state:
-  both seeded cycles are `COMPLETE` with their passes closed, and a closed second
-  round cannot be reopened. The practice cycle is at `FIRST_ROUND` with all eight
-  reviewers staffed to the written round only, and the FR-12 interview fixtures
-  cannot bridge the gap because they reference the seed's pinned applicants, who
-  do not exist in a cycle imported from `demo-cycle.csv`.
-
-  Two ways to close it, for slice 7 or later: advance the practice cycle through
-  the first round properly, or run `npm run seed` then `npm run seed:advance`
-  WITHOUT `seed:passes` against a throwaway instance id, which lands exactly
-  where an admin creates pass 1. Either way the reviewer sign-in needs a round
-  access code typed by a person.
+- ~~**`REVIEWER_GUIDE.md`'s first- and second-round sections are unverified against
+  a running screen.**~~ **Closed 2026-09-06**, using the throwaway-instance recipe
+  from `plans/phase-8-decision-106.md`: `npm run seed` and `seed:advance` under
+  `SEED_INSTANCE_ID=seed_rev107`, the finalize undone by a scratch script for the
+  first-round screens, re-advanced and a pass opened by another for the
+  second-round ones, then the instance deleted. Both rounds were driven live as a
+  reviewer and screenshotted (`docs/img/r4`–`r8`). The code-written text was wrong
+  in one place that mattered: it said to "flag a conflict of interest the same
+  way" in both later rounds, and the first round has no conflict control at all —
+  a reviewer who knows the applicant leaves the vote blank, which counts as a
+  skip. It also never said that names are visible from the first round on, or
+  that a pass vote needs a separate submit where a first-round vote does not.
+  All three are now in the guide, from the screen.
