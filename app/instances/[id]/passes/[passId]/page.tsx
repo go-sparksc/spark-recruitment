@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { PassGrid, type GridRow } from "./pass-grid";
 import { RejectControl } from "./reject-control";
+import { ReverseControl } from "./reverse-control";
 import { InstanceCrumbs } from "../../instance-crumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplicantStatus, PassStatus, Round } from "@/generated/prisma/enums";
@@ -13,6 +14,7 @@ import {
   isMutableResolution,
   isTerminal,
   resolutionLabel,
+  reversalBlock,
   summarizePass,
 } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
@@ -50,7 +52,19 @@ export default async function PassDetailPage({
           select: {
             resolution: true,
             applicant: {
-              select: { id: true, displayName: true, sourceRowIndex: true, status: true },
+              select: {
+                id: true,
+                displayName: true,
+                sourceRowIndex: true,
+                status: true,
+                // Decision 107: the row a manual reject writes, which is what
+                // tells it from a unanimous vote. The same select the action
+                // makes, so `reversalBlock` sees one input from both sides.
+                decisions: {
+                  where: { stage: Round.SECOND_ROUND },
+                  select: { actor: true, outcome: true },
+                },
+              },
             },
           },
         },
@@ -138,6 +152,19 @@ export default async function PassDetailPage({
       member.applicant.status === ApplicantStatus.ACTIVE,
   );
 
+  // 17aa's control, on the same terms: offered only where the action would
+  // succeed, through the same predicate the action re-checks. A reject over a
+  // null, CARRIED or NEEDS_ADMIN row lands here; a unanimous NO does not.
+  const reversible = pass.members.filter(
+    (member) =>
+      reversalBlock({
+        passStatus: pass.status,
+        storedResolution: member.resolution,
+        applicantStatus: member.applicant.status,
+        decision: member.applicant.decisions[0] ?? null,
+      }) === null,
+  );
+
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-16">
       <InstanceCrumbs instanceId={instance.id} instanceName={instance.name} />
@@ -217,6 +244,42 @@ export default async function PassDetailPage({
                   </div>
 
                   <RejectControl
+                    instanceId={instance.id}
+                    passId={pass.id}
+                    applicantId={member.applicant.id}
+                    applicantName={member.applicant.displayName}
+                    applicantHandle={applicantLabel(member.applicant.sourceRowIndex)}
+                  />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+      ) : null}
+
+      {reversible.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="text-sm font-medium">Reverse a rejection</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            A rejection made by an admin in this pass, while it is still open. Rejections decided
+            by a unanimous vote cannot be reversed.
+          </p>
+
+          <Card className="mt-3">
+            <CardContent className="divide-y p-0">
+              {reversible.map((member) => (
+                <div key={member.applicant.id} className="px-6 py-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                    <span className="font-medium">
+                      {member.applicant.displayName}
+                      <span className="text-muted-foreground ml-2 text-xs font-normal">
+                        {applicantLabel(member.applicant.sourceRowIndex)}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground text-sm">Rejected by an admin</span>
+                  </div>
+
+                  <ReverseControl
                     instanceId={instance.id}
                     passId={pass.id}
                     applicantId={member.applicant.id}

@@ -2,24 +2,19 @@
 
 import { useActionState, useState } from "react";
 
-import { manuallyReject } from "../actions";
+import { reverseManualReject } from "../actions";
 import type { PassActionState } from "../actions";
 import { Button } from "@/components/ui/button";
 
-/// FR-17's manual reject, clause 17l. Decision 71.
+/// Decision 107's reversal of a manual reject, clause 17aa.
 ///
-/// **Confirmed, and the confirm names the applicant.** This is the one control
-/// in the second round that decides an applicant outright without a vote, and
-/// the rows either side of it belong to different people — a mis-tap here
-/// rejects the wrong person. The only route back is the "Reverse a rejection"
-/// section on this same page, and only while this pass is still open (decision
-/// 107); once it closes, nothing in it changes. The other destructive control in
-/// this phase, closing a pass, is confirmed for the same reason.
-///
-/// **The confirm does not say "you can undo this".** Decision 106 calls it the
-/// guard on the mis-tap, and a reversal that exists is a reason to keep that
-/// friction, not to soften it.
-export function RejectControl({
+/// **Confirmed, and the confirm names the applicant**, for the same reason the
+/// reject beside it is: this is the second control on this page that moves a
+/// person's status without a vote, and the rows either side of it belong to
+/// different people. A mis-tap here reinstates the wrong person into a live
+/// deliberation, and the only route back from that is rejecting them again —
+/// which writes two more rows into the log the club will read later.
+export function ReverseControl({
   instanceId,
   passId,
   applicantId,
@@ -30,13 +25,12 @@ export function RejectControl({
   passId: string;
   applicantId: string;
   applicantName: string;
-  /// "Applicant 47". In the confirm because this is the irreversible control on
-  /// a page listing people whose names repeat — "Reject Diego Hoffmann?" is not
-  /// a question an admin can safely answer when there are two of them.
+  /// "Applicant 47". Same reason as the reject control: names repeat, and this
+  /// instance has two "Diego Hoffmann".
   applicantHandle: string;
 }) {
   const [state, formAction, pending] = useActionState<PassActionState, FormData>(
-    manuallyReject,
+    reverseManualReject,
     {},
   );
   const [confirming, setConfirming] = useState(false);
@@ -49,13 +43,19 @@ export function RejectControl({
 
       {confirming ? (
         <div className="space-y-2">
+          {/* The four things decision 107 requires this to say: they come back
+              to this pass and every later one, their row is cleared rather
+              than restored, the votes on them are untouched, and the rejection
+              is not erased from the record. */}
           <p className="text-sm">
-            Reject {applicantName} ({applicantHandle})? They are excluded from this and every
-            later pass, and any vote still in flight on them stops counting.
+            Reverse the rejection of {applicantName} ({applicantHandle})? They return to this
+            pass as active with no resolution and will be included in every later pass. Any votes
+            already cast on them still stand, and reviewers can vote on them again. The rejection
+            itself stays in the activity log.
           </p>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Rejecting…" : "Reject"}
+              {pending ? "Reversing…" : "Reverse rejection"}
             </Button>
             <Button
               type="button"
@@ -70,7 +70,7 @@ export function RejectControl({
         </div>
       ) : (
         <Button type="button" size="sm" variant="outline" onClick={() => setConfirming(true)}>
-          Reject
+          Reverse rejection
         </Button>
       )}
 
