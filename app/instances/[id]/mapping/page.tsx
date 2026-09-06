@@ -116,7 +116,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
       ? null
       : "Designate the name column, or both first and last name columns.",
     proposals.length > 0
-      ? `${proposals.length} detected group${proposals.length === 1 ? "" : "s"} still need naming or dismissing.`
+      ? `${proposals.length} detected group${proposals.length === 1 ? "" : "s"} still ${proposals.length === 1 ? "needs" : "need"} naming or dismissing.`
       : null,
   ].filter((x): x is string => x !== null);
 
