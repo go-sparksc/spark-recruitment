@@ -160,6 +160,10 @@ function expectMessageMatchesReport(report: FeasibilityReport) {
 }
 
 /// FR-7's exemption, evaluated. True means the plan left load on the table.
+///
+/// Searches generated pairs only — a preserved row is immovable under FR-8 — and
+/// never counts a swap that would re-create a RETURNED_TO_POOL pair, which
+/// decision 23 forbids. Both are decision 98's reading of FR-7's precise form.
 function improvingSwapExists(
   plan: AssignmentPlan,
   args: AssignmentInput,
@@ -170,6 +174,7 @@ function improvingSwapExists(
   const all = [...plan.assignments, ...preserved];
   const { perReviewer, sparkletsPerApplicant } = count(plan, args.reviewers, preserved);
   const isSparklet = new Map(args.reviewers.map((r) => [r.id, r.isSparklet]));
+  const blocked = new Set((args.blocked ?? []).map((p) => `${p.applicantId}|${p.reviewerId}`));
   const onApplicant = new Map<string, Set<string>>();
   for (const pair of all) {
     onApplicant.set(pair.applicantId, (onApplicant.get(pair.applicantId) ?? new Set()).add(pair.reviewerId));
@@ -179,6 +184,7 @@ function improvingSwapExists(
     if (pair.reviewerId === light.id) return false;
     if ((perReviewer.get(pair.reviewerId) ?? 0) < lightLoad + 2) return false;
     if (onApplicant.get(pair.applicantId)?.has(light.id)) return false;
+    if (blocked.has(`${pair.applicantId}|${light.id}`)) return false;
     if (
       light.isSparklet &&
       !isSparklet.get(pair.reviewerId) &&
@@ -623,6 +629,100 @@ describe("Regeneration after manual overrides exist", () => {
     ).toBe(false);
     expect(plan.assignments).toHaveLength(428);
     assertPlanInvariants(plan, args);
+  });
+});
+
+describe("decision 98 — the floor repair", () => {
+  // Three defects in `evenOutToFloor`, each found by a cold audit of the module
+  // and confirmed by running it (plans/prd-reconciliation.md, A1 and A18). Every
+  // case below failed against the pre-98 implementation; each is the exact input
+  // that demonstrated the defect, not a paraphrase of it.
+
+  it("repairs a light reviewer standing behind one that cannot be repaired", () => {
+    // 7 reviewers, 3 Sparklets first in the array, 27 applicants, relaxed rule.
+    // rev_3 and rev_4 have returned most of the pool. Before 98 the repair took
+    // the first light reviewer (rev_0, a Sparklet with no legal swap, every
+    // applicant already carrying one) and returned — leaving rev_3 at 9 against
+    // a floor of 11 with a legal swap available. The exemption had become a
+    // property of array position, which FR-7 says it must not be.
+    const reviewers = roster(7, 3);
+    const applicantIds = applicants(27);
+    const blocked: Pair[] = [];
+    for (let j = 0; j < 17; j += 1) {
+      blocked.push({ applicantId: applicantIds[(13 + j) % 27], reviewerId: "rev_3" });
+    }
+    for (let j = 0; j < 20; j += 1) {
+      blocked.push({ applicantId: applicantIds[(18 + j) % 27], reviewerId: "rev_4" });
+    }
+    const args = input({ applicantIds, reviewers, blocked, relaxSparkletLoad: true, seed: 1 });
+    const plan = generateAssignments(args);
+
+    // The precheck cannot see returned pairs, so this plan is short (decision 99
+    // is where that becomes reportable); the floor property must hold regardless.
+    for (const reviewer of reviewers) {
+      const load = plan.loadByReviewerId[reviewer.id];
+      if (load >= plan.report.loadFloor) continue;
+      expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
+    }
+  });
+
+  it("holds the floor property whatever order the roster arrives in", () => {
+    // Same input, roster forward and reversed. Before 98 the reversed order
+    // raised rev_15 from 10 to 14 — by creating four returned pairs to do it —
+    // while the forward order left it at 10. The fill itself breaks ties by
+    // array order, so the two plans need not be identical; what must hold in
+    // both is that no light reviewer has a legal swap and no returned pair exists.
+    const reviewers = roster(30, 15);
+    const applicantIds = applicants(150);
+    const blocked: Pair[] = applicantIds
+      .slice(0, 140)
+      .map((applicantId) => ({ applicantId, reviewerId: "rev_15" }));
+
+    for (const ordered of [reviewers, [...reviewers].reverse()]) {
+      const args = input({
+        applicantIds,
+        reviewers: ordered,
+        blocked,
+        relaxSparkletLoad: true,
+        seed: 7,
+      });
+      const plan = generateAssignments(args);
+
+      for (const pair of blocked) {
+        expect(plan.assignments).not.toContainEqual(pair);
+      }
+      for (const reviewer of ordered) {
+        const load = plan.loadByReviewerId[reviewer.id];
+        if (load >= plan.report.loadFloor) continue;
+        expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
+      }
+    }
+  });
+
+  it("never swaps a slot onto a pair the reviewer returned", () => {
+    // 3 reviewers, 10 applicants, r0 returned a0..a6. The fill honoured the
+    // exclusion; the swap search did not consult it, and before 98 put r0 back on
+    // four of the seven. At the database that pair collides with the surviving
+    // RETURNED_TO_POOL row's unique index, so the regeneration failed outright.
+    const reviewers = roster(3, 0);
+    const applicantIds = applicants(10);
+    const blocked: Pair[] = applicantIds
+      .slice(0, 7)
+      .map((applicantId) => ({ applicantId, reviewerId: "rev_0" }));
+    const args = input({ applicantIds, reviewers, blocked, seed: 1 });
+    const plan = generateAssignments(args);
+
+    for (const pair of blocked) {
+      expect(plan.assignments).not.toContainEqual(pair);
+    }
+    // rev_0 can hold at most a7, a8, a9 and is legitimately exempt from the
+    // floor; the others must still be as even as the ceiling allows.
+    expect(plan.loadByReviewerId["rev_0"]).toBeLessThanOrEqual(3);
+    for (const reviewer of reviewers) {
+      const load = plan.loadByReviewerId[reviewer.id];
+      if (load >= plan.report.loadFloor) continue;
+      expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
+    }
   });
 });
 

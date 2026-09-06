@@ -477,6 +477,7 @@ export function generateAssignments(input: AssignmentInput): AssignmentPlan {
     assignments,
     load,
     onApplicant,
+    placed,
     taken,
     floor: shape.loadFloor,
   });
@@ -492,12 +493,33 @@ export function generateAssignments(input: AssignmentInput): AssignmentPlan {
 
 /// FR-7's floor, enforced by the swap it is defined in terms of.
 ///
-/// "A reviewer may sit below the floor only when no single swap could raise
-/// them" — so the way to satisfy the rule is to run that swap to a fixed point.
-/// For a reviewer `r` below the floor, find an applicant `a` and reviewer `s`
-/// where `s` is on `a`, `s` carries at least two more than `r`, `r` is not
-/// already on `a`, and putting `r` there would not give `a` two Sparklets. Move
-/// it. Repeat until no such triple exists.
+/// FR-7, in its own words: "nobody is left light while someone else is carrying
+/// two more than they are, unless moving one of that person's applicants across
+/// would put two Sparklets on it." So the way to satisfy the rule is to run that
+/// move to a fixed point. For a reviewer `r` below the floor, find an applicant
+/// `a` and reviewer `s` where `s` is on `a` through a generated row, `s` carries
+/// at least two more than `r`, `r` is not already on `a`, the pair (`a`, `r`) is
+/// not forbidden, and putting `r` there would not give `a` two Sparklets. Move
+/// it. Repeat until no such triple exists for any light reviewer.
+///
+/// Three clauses of that carry decision 98 and are worth naming:
+///
+/// - **"for any light reviewer."** The first version took the first light
+///   reviewer in roster order and gave up when that one had no legal swap,
+///   leaving every other light reviewer where they were — so whether someone was
+///   evened out depended on their position in the array. FR-7 says the exemption
+///   "is a property of the assignment, not of the reviewer", and array position
+///   is neither. This scans every light reviewer and returns only when none of
+///   them can be improved.
+/// - **"not forbidden."** The fill refuses RETURNED_TO_POOL pairs (decision 23);
+///   the first version of this search did not, and re-created them. At the
+///   database that pair collides with the surviving returned row's unique index
+///   and the regeneration fails outright, which is how it would have surfaced.
+/// - **"through a generated row."** Only `assignments` is searched. Preserved
+///   MANUAL and CLAIMED_FROM_POOL rows are immovable under FR-8, so a reviewer
+///   whose only route up runs through one is exempt on the same terms as the
+///   Sparklet case. The floor itself is still measured over everything a
+///   reviewer carries, which is what `load` holds.
 ///
 /// The same search is the assertion and the repair, which is why it is written
 /// once: whatever a test would flag as a violation is exactly what this fixes,
@@ -505,32 +527,32 @@ export function generateAssignments(input: AssignmentInput): AssignmentPlan {
 ///
 /// A swap moves one slot from a heavier reviewer to a lighter one and changes no
 /// applicant's count, so it cannot break the pool shape, the target, or the
-/// ceiling. It strictly reduces the total distance from the floor, which is what
-/// terminates it; the iteration cap is belt and braces against a bug, not part
-/// of the argument.
+/// ceiling. Each swap moves the loads strictly closer to even (the sum of squared
+/// loads falls by at least 2), which is what terminates it; the iteration cap is
+/// belt and braces against a bug, not part of the argument.
 function evenOutToFloor(state: {
   reviewers: readonly ReviewerInput[];
   assignments: Pair[];
   load: Map<string, number>;
   onApplicant: Map<string, Set<string>>;
+  /// Every pair that exists or is forbidden — preserved, blocked and generated.
+  /// Read to refuse a swap, and kept current so a later swap sees this one.
+  placed: Set<string>;
   taken: Set<string>;
   floor: number;
 }): void {
-  const { reviewers, assignments, load, onApplicant, taken, floor } = state;
+  const { reviewers, assignments, load, onApplicant, placed, taken, floor } = state;
   const isSparklet = new Map(reviewers.map((r) => [r.id, r.isSparklet]));
   const maxPasses = assignments.length * 2 + 16;
 
-  for (let pass = 0; pass < maxPasses; pass += 1) {
-    const light = reviewers.find((r) => (load.get(r.id) ?? 0) < floor);
-    if (!light) return;
-
-    const lightLoad = load.get(light.id) ?? 0;
-
-    const swap = assignments.find((pair) => {
+  const swapFor = (light: ReviewerInput, lightLoad: number): Pair | undefined =>
+    assignments.find((pair) => {
       const holder = pair.reviewerId;
       if (holder === light.id) return false;
       if ((load.get(holder) ?? 0) < lightLoad + 2) return false;
       if (onApplicant.get(pair.applicantId)?.has(light.id)) return false;
+      // A returned pair is never re-created, by a swap any more than by the fill.
+      if (placed.has(pairKey(pair.applicantId, light.id))) return false;
       // Moving a Sparklet's slot to another Sparklet is fine — the applicant
       // still ends with one. Moving a non-Sparklet's slot to a Sparklet is only
       // fine if the applicant has none.
@@ -538,20 +560,39 @@ function evenOutToFloor(state: {
       return true;
     });
 
-    // No improving swap exists for this reviewer, and the one-Sparklet rule is
-    // why. FR-7 exempts them; there is nothing further to do.
-    if (!swap) return;
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let swapped = false;
 
-    const holder = swap.reviewerId;
-    swap.reviewerId = light.id;
-    load.set(holder, (load.get(holder) ?? 0) - 1);
-    load.set(light.id, lightLoad + 1);
+    for (const light of reviewers) {
+      const lightLoad = load.get(light.id) ?? 0;
+      if (lightLoad >= floor) continue;
 
-    const on = onApplicant.get(swap.applicantId);
-    on?.delete(holder);
-    on?.add(light.id);
+      const swap = swapFor(light, lightLoad);
+      // No improving swap exists for THIS reviewer — the one-Sparklet rule, a
+      // returned pair, or a preserved row is why, and FR-7 exempts them. The
+      // next light reviewer may still have one, so keep looking.
+      if (!swap) continue;
 
-    if (isSparklet.get(holder) && !light.isSparklet) taken.delete(swap.applicantId);
-    if (light.isSparklet) taken.add(swap.applicantId);
+      const holder = swap.reviewerId;
+      placed.delete(pairKey(swap.applicantId, holder));
+      placed.add(pairKey(swap.applicantId, light.id));
+      swap.reviewerId = light.id;
+      load.set(holder, (load.get(holder) ?? 0) - 1);
+      load.set(light.id, lightLoad + 1);
+
+      const on = onApplicant.get(swap.applicantId);
+      on?.delete(holder);
+      on?.add(light.id);
+
+      if (isSparklet.get(holder) && !light.isSparklet) taken.delete(swap.applicantId);
+      if (light.isSparklet) taken.add(swap.applicantId);
+
+      // Loads have moved; rescan from the top so every light reviewer is judged
+      // against the current state rather than the one before this swap.
+      swapped = true;
+      break;
+    }
+
+    if (!swapped) return;
   }
 }
