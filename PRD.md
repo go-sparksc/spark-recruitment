@@ -298,10 +298,12 @@ Decision
   id, applicantId, stage, outcome: ADVANCE | REJECT | SPARKLET
   actor: SYSTEM | ADMIN
   decidedAt
-  UNIQUE (applicantId, stage)  // one decision per applicant per stage. A
-                               //   reversal would update the row and be
-                               //   audited; v1 has no reversal surface. See
-                               //   decision 106.
+  UNIQUE (applicantId, stage)  // one decision per applicant per stage. The
+                               //   only reversal is decision 107's, which
+                               //   DELETES the row rather than updating it —
+                               //   there is no earlier decision to restore to
+                               //   — and audits the deleted values. See
+                               //   decisions 106 and 107.
 
 RoundAccessCode                // the per-round reviewer code from §8
   id, instanceId, round
@@ -414,7 +416,7 @@ The preview also carries two warnings that do not block, because each describes 
 - **A detected group that has been neither named nor dismissed.** Committing past it imports the columns as independent questions, and no demographic breakdown will ever find them.
 - **No included field resolving to RESPONSE.** Under §6 that is the only category a written reviewer sees, so every profile in the written round would be empty — a failure that otherwise surfaces in front of thirty reviewers rather than here.
 
-An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. The only correction after commit is deleting the instance and importing again, which destroys every round's work along with the applicants; v1 has no applicant edit surface and no decision reversal (decision 106). This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
+An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. The only correction after commit is deleting the instance and importing again, which destroys every round's work along with the applicants; v1 has no applicant edit surface, and the only decision reversal is decision 107's, which reaches a manual reject in a still-open pass and nothing earlier (decision 106). This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
 **What "final" covers is field *identity*, not presentation policy.** Frozen at commit: the one-CSV rule, and each column's category, group membership, display name and email/name designation. Not frozen: inclusion and the two per-round visibility toggles, which stay editable for the life of the instance. The line between them is what a property keys — `Applicant.data` is keyed by `Field.id`, so recategorising or regrouping a column changes what an already-written key means, while the three booleans key nothing and orphan nothing. See decision 34.
 
@@ -559,6 +561,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
   - All NO → `resolution = REJECTED`, `status = REJECTED`, excluded from future passes
   - Mixed → `resolution = CARRIED`, stays ACTIVE, carries into the next pass
 - An admin can manually reject any applicant within a pass, excluding them from future passes.
+- An admin can reverse a manual reject while that pass is still open, per decision 107. The applicant returns to ACTIVE with their row cleared to `NULL`; a rejection decided by a unanimous vote, or anything in a closed pass, cannot be reversed.
 - Closing a pass without full votes leaves unvoted applicants ACTIVE and carried forward. Their row on that pass stays `resolution = NULL` — the close itself writes nothing, per decision 72.
 - A vote can be changed until that applicant resolves, per decision 75. Resolution closes the window on its own, since it requires every eligible reviewer to have submitted.
 
@@ -580,7 +583,7 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 | Pass created with zero ACTIVE applicants | Block creation, tell the admin the pool is resolved. |
 | Pass created with zero reviewers on the second-round roster | Block creation, per decision 79. Every member would resolve `NEEDS_ADMIN` at creation — a pass that decides nothing and flags everyone. |
 | A reviewer is added or withdrawn mid-round | Cannot happen. Decision 84 fixes the second-round roster, adds and removals alike, from the moment the first pass is created — decisions 66 and 78 as amended. This replaces the earlier "they vote only in passes created after they are added", which described a situation the roster page no longer permits. |
-| Admin reopens a closed pass | Not supported in v1. Corrections happen via manual override on the applicant. |
+| Admin reopens a closed pass | Not supported in v1. A manual reject in the still-open pass can be reversed (decision 107); nothing in a closed pass can be changed. |
 | Passes end with an applicant still unresolved | The "Close second round" action writes `resolution = NEEDS_ADMIN` on their final pass row. They are neither SPARKLET nor REJECTED, and FR-19 lists them under Unresolved rather than defaulting them either way. |
 | Second round closed with no pass ever created | Block the close. See "Closing the second round" above. |
 
@@ -614,12 +617,13 @@ Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no
 | 17x | Table: reviewer added mid-round → cannot happen (decision 84) |
 | 17y | Table: admin reopens a closed pass → not supported |
 | 17z | "counts are never revealed to reviewers" (decision 74) |
+| 17aa | "An admin can reverse a manual reject while that pass is still open" (decision 107) |
 
 **Live vote visibility (decision 3, resolved):** should reviewers see live vote counts during an open pass? No, to prevent anchoring, counts are never revealed to reviewers. Reviewers should not have knowledge of other reviewers' votes. Decision 74 extends that to a *closed* pass as well and amends §6's matrix accordingly: FR-18's admin-only grid is the only surface in the product that renders a pass vote.
 
 **FR-16's conflict flag is one-way for the reviewer and removable by an admin**, per decision 76. Flagging deletes any vote that reviewer had already cast in the open pass (decision 68) and that vote does not come back; an admin removing the flag returns the reviewer to the denominator as outstanding. The control lives on FR-18's grid, on the `skip` cell that shows the conflict, and is audited.
 
-**FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained. This is only accessible by admin.
+**FR-18 Pass dashboard.** Per pass: a reviewer-by-applicant grid showing blank / yes / no / skip, with per-applicant totals and resolution state. This is the direct replacement for the `2RD Vote` sheet, generated instead of hand-maintained. This is only accessible by admin. It carries the second round's two admin controls on an applicant — the manual reject (17l) and its reversal while the pass is open (17aa, decision 107) — and the conflict-removal control of decision 76.
 
 ### 7.5 Final and export
 
@@ -652,7 +656,7 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 - **Transport:** HTTPS only, enforced.
 - **Repository:** real applicant data never enters the repo. `.gitignore` covers `*.csv`, `*.xlsx`, `/data`, `/uploads`. Development uses synthetic seed data.
 - **Retention:** an admin-triggered "archive and purge" that keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold. Recommend two cycles. **Every operative word in that sentence is defined by decision 95** — what "aggregate statistics" are and when they are computed, exactly which columns and tables are destroyed, and how "older than N cycles" is ranked. The threshold itself is the `RETENTION_CYCLES` environment variable, per decision 94.
-- **Audit:** log admin overrides (manual assignment, manual rejection, and decision reversal once a reversal surface exists — v1 has none, see decision 106) with actor, timestamp, and previous value.
+- **Audit:** log admin overrides (manual assignment, manual rejection, and the reversal of a manual rejection — the only decision reversal in v1, see decisions 106 and 107) with actor, timestamp, and previous value.
 - **Instance deletion is audited, and its audit row outlives the instance.** Deleting an instance runs in one transaction: purge that instance's existing `AuditLog` rows, since they describe entities about to stop existing and their `previousValue` payloads can carry applicant data that retention says should not survive the cycle; write the deletion record with the instance's name, applicant count, and stage, and no applicant data; then delete the instance, which `ON DELETE SET NULL` leaves the record orphaned by design. What remains is exactly one row per deleted instance. Archive-and-purge must age these out on the same threshold as everything else, or they accumulate forever.
 
 ## 9. Success metrics
@@ -1235,7 +1239,23 @@ and decision 79, checked in the same place.
 
     Text amended: FR-3 loses the dead sentence; §5's `Decision` comment and §8's audit bullet say reversal is not in v1 and point here; the audit page's copy follows in the code slice.
 
-    **What is built next, and why it is not an indefinite v2 item.** Second-round deliberation is exactly where a board reconsiders a call, and the manual reject is the one action an admin takes alone, in the room, that a vote cannot undo. The narrowest reversal that closes that exposure is scoped to a manual reject made in the still-open pass — row still `REJECTED`, `Decision.actor = ADMIN`, pass still open — offered from FR-18's grid: it sets `status` back to ACTIVE, clears the pass row to `NULL`, deletes the `Decision` row, and writes an audit row carrying the previous values. The applicant is still a member of that pass, so there is no membership consequence. It excludes vote-driven resolutions and the earlier rounds, whose reversal would re-enter an applicant into rounds that have already run. **It is a priority to build before the next live cycle runs**, planned as its own slice after this reconciliation pass, not left on the v2 list.
+    **What is built next, and why it is not an indefinite v2 item.** Second-round deliberation is exactly where a board reconsiders a call, and the manual reject is the one action an admin takes alone, in the room, that a vote cannot undo. The narrowest reversal that closes that exposure is scoped to a manual reject made in the still-open pass — row still `REJECTED`, `Decision.actor = ADMIN`, pass still open — offered from FR-18's grid: it sets `status` back to ACTIVE, clears the pass row to `NULL`, deletes the `Decision` row, and writes an audit row carrying the previous values. The applicant is still a member of that pass, so there is no membership consequence. It excludes vote-driven resolutions and the earlier rounds, whose reversal would re-enter an applicant into rounds that have already run. **It is a priority to build before the next live cycle runs**, planned as its own slice after this reconciliation pass, not left on the v2 list. Built as decision 107.
+
+107. **Decision 106's narrow reversal, built. RESOLVED, amending 106, §5's `Decision` comment, §8's audit bullet, FR-3, FR-17 and §7.4's edge-case table.** An admin reverses a manual reject from FR-18's page while the pass it happened in is still open. Planned in `plans/phase-8-decision-106.md`.
+
+    **Guard.** Reversible iff the pass is `OPEN`, the applicant's row in it is `REJECTED`, their `Decision` at `stage = SECOND_ROUND` has `actor = ADMIN` and `outcome = REJECT`, and `Applicant.status = REJECTED`. That `actor = ADMIN` is what makes a manual reject distinguishable after the fact: the pass's own unanimous result writes `SYSTEM` (decision 69), so a vote-driven `REJECTED` row is refused. A closed pass is refused. The earlier rounds have no pass row and cannot reach the predicate at all. One pure predicate in `lib/passes.ts`, read by the page to decide which rows get the control and by the action to refuse — the same posture as pass creation and vote availability, so the control and the refusal cannot disagree about the reason.
+
+    **Writes, one transaction.** The pass row → `NULL`, `resolvedAt` → `NULL`; `Applicant.status` → `ACTIVE`; the `Decision` row **deleted**, not updated — §5's comment used to say a reversal would update the row, but there is no earlier decision to restore to, and "no outcome" is not a value `DecisionOutcome` has; an audit row `REVERSE_MANUAL_REJECT` on the applicant, whose `previousValue` carries the pass, the two previous values and the deleted decision's fields. The reject's own `MANUAL_REJECT_IN_PASS` row is untouched, so the log reads reject-then-reversal in order.
+
+    **The row is cleared to `NULL`, not recomputed.** A manual reject is legal over `NULL`, `CARRIED` and `NEEDS_ADMIN` (17l's "any applicant"), and `NULL` is a true reversal only for the first. Cost stated and accepted: a reject over `CARRIED` reverses to a null row with no outstanding reviewer, which reviewers may vote on again since `NULL` is mutable; a reject over `NEEDS_ADMIN` reverses to a null row that FR-18 still renders as needing an admin, because 18d renders the recount where nothing is stored. Both carry at pass close and both become `NEEDS_ADMIN` at round close under decision 73, so nothing downstream distinguishes them from the value the reject overwrote, and a recompute would buy nothing durable.
+
+    **`isMutableResolution` is unchanged.** `REJECTED` is still immovable to every recount — the reviewer vote, conflict removal and vote availability all keep reading it, and decision 71's protection of a manual reject against a vote in flight stands. The reversal is the one write over a `REJECTED` row that is not a recount, and it goes through its own predicate rather than through a fourth mutable case.
+
+    **Votes are untouched; membership is untouched.** The reject deleted no vote, so the reversal restores none; whatever a reviewer had stored is what the vote control shows them again. The applicant is still a member of the open pass, so nothing is written to membership, and a later pass includes them because they are `ACTIVE` at its creation.
+
+    **Concurrency.** The first write is a conditional update on `(passId, applicantId, resolution = REJECTED)`; zero rows aborts the transaction and the admin is told the rejection was already reversed. Same posture as pass creation letting the index decide between two admins.
+
+    **The reject's confirm is unchanged.** Decision 106 calls it the guard on the mis-tap, and a reversal that exists is a reason to keep that friction, not to soften it with "you can undo this". The reversal is announced by its own section on the pass page and by the admin guide.
 
 ## 11. Out of scope for v1, worth noting for v2
 

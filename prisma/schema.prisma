@@ -863,14 +863,15 @@ model Decision {
   decidedAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  /// One decision per applicant per stage. A reversal updates this row, and the
-  /// previous value lands in AuditLog.
+  /// One decision per applicant per stage. The only reversal, PRD decision 107,
+  /// DELETES this row rather than updating it, and the deleted values land in
+  /// AuditLog — there is no earlier decision to restore to.
   @@unique([applicantId, stage])
   @@index([applicantId])
 }
 
-/// Admin overrides, per PRD section 8: manual assignment, manual rejection,
-/// decision reversal, password reset, instance deletion. Records actor,
+/// Admin overrides, per PRD section 8: manual assignment, manual rejection and
+/// its reversal (decision 107), password reset, instance deletion. Records actor,
 /// timestamp, and previous value.
 model AuditLog {
   id String @id @default(cuid())
