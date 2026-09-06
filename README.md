@@ -6,7 +6,7 @@ recruitment cycles, where applicant identity was keyed by name across eight sepa
 sheets and a single typo could silently orphan a record.
 
 Handles three rounds: written review, first-round interviews, and second-round
-deliberation via sequential voting passes. Roughly 150 applicants and 30 reviewers per
+deliberation via sequential voting passes. 160+ applicants and roughly 30 reviewers per
 cycle.
 
 **Status:** feature-complete and gate-verified end to end. All three rounds are built —

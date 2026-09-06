@@ -11,7 +11,7 @@ it is loaded automatically by Claude Code, this is for a human.
 ## The one-paragraph version
 
 A Next.js App Router application over a Postgres database, deployed on Vercel,
-running one recruitment cycle at a time for about 150 applicants and 30
+running one recruitment cycle at a time for 160+ applicants and about 30
 reviewers. There is no external auth provider, no queue, no cache, and no
 background jobs. Server components read; server actions write. The interesting
 code is not the plumbing — it is the eight or so pure modules in `lib/` that hold

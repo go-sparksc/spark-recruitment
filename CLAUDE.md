@@ -6,7 +6,7 @@ Context for Claude Code working in this repository. Read `PRD.md` before impleme
 
 An applicant management platform for Spark SC, USC's student entrepreneurship organization. It replaces a 36-sheet Excel workbook used to run a three-round recruitment cycle: written application review, first-round interviews, second-round group deliberation.
 
-Scale: ~150 applicants, ~30 reviewers, one cycle per semester. This is not a high-traffic system. Optimize for clarity and for the next maintainer, not for performance.
+Scale: 160+ applicants, ~30 reviewers, one cycle per semester. This is not a high-traffic system. Optimize for clarity and for the next maintainer, not for performance.
 
 ## Non-negotiable rules
 
