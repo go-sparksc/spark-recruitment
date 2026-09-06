@@ -180,7 +180,19 @@ export function GeneratePanel({
         </Button>
       )}
 
-      {result?.message ? <p className="text-sm text-emerald-600">{result.message}</p> : null}
+      {result?.message ? (
+        // Green is for a run that placed everyone. Decision 99: a plan with a
+        // shortfall is placed but is not called a success.
+        <p className={result.shortfall?.length ? "text-sm" : "text-sm text-emerald-600"}>
+          {result.message}
+        </p>
+      ) : null}
+
+      {result?.shortfall?.length ? (
+        <ShortfallList
+          entries={result.shortfall.map((e) => ({ label: e.label, got: e.got, needed: e.wanted }))}
+        />
+      ) : null}
 
       {/* Violations the preserved set already carries, shown on load rather than
           only after a generate. An admin landing on a page whose overrides put
@@ -192,6 +204,44 @@ export function GeneratePanel({
 
       {result?.violations?.length ? <ViolationList violations={result.violations} /> : null}
     </section>
+  );
+}
+
+/// Decision 99's list: applicants below what FR-7 allows, by handle.
+///
+/// Rendered twice, deliberately from one component. After a generate it carries
+/// the plan's own shortfall (what the fill wanted for each applicant); on every
+/// later load of the page it carries `understaffed`'s standing check against
+/// the live counts (FR-7's minimum), so the gap stays visible until an admin
+/// closes it through FR-8 rather than only in the response to one button press.
+export function ShortfallList({
+  entries,
+  standing = false,
+}: {
+  entries: { label: string; got: number; needed: number }[];
+  standing?: boolean;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="border-destructive/40 space-y-2 rounded-md border p-4">
+      <p className="text-sm font-medium">
+        {entries.length} applicant{entries.length === 1 ? " has" : "s have"} fewer reviewers than
+        the rule allows.
+      </p>
+      <ul className="space-y-1 text-sm">
+        {entries.map((entry) => (
+          <li key={entry.label}>
+            · {entry.label} — {entry.got} of {entry.needed}
+            {standing ? " at minimum" : ""}
+          </li>
+        ))}
+      </ul>
+      <p className="text-muted-foreground text-sm">
+        {standing
+          ? "Generation could not place anyone on them — usually every reviewer with room has returned them, or is a Sparklet where one is already placed. Assign a reviewer by hand below; the list clears when each is back at strength."
+          : "Nobody could be placed on them: every reviewer with room has returned them, or is a Sparklet where one is already placed. The rest of the plan is in place. Assign these by hand below."}
+      </p>
+    </div>
   );
 }
 

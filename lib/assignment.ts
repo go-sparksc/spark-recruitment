@@ -59,14 +59,27 @@ export interface Violation {
   detail: string;
 }
 
+/// An applicant the fill could not staff to what the plan wanted for them.
+/// Decision 99: reported, never corrected, and never silent.
+export interface Shortfall {
+  applicantId: string;
+  /// `target`, or `target - 1` for an applicant chosen for the pool.
+  wanted: number;
+  /// Preserved plus generated rows the applicant actually holds.
+  got: number;
+}
+
 export interface FeasibilityReport {
   target: number;
   totalSlots: number;
+  /// Slots held open. FR-7's formula, or fewer when preserved rows leave fewer
+  /// applicants shortable than the formula asks for — the count of what was
+  /// actually pooled, per decision 99, so it agrees with `pooledApplicantIds`.
   poolSize: number;
   assignedSlots: number;
   /// Applicants receiving the full target.
   fullApplicantCount: number;
-  /// Applicants one slot short. Always `poolSize` distinct applicants.
+  /// Applicants one slot short: exactly `poolSize` of them, distinct.
   shortApplicantCount: number;
   loadCeiling: number;
   loadFloor: number;
@@ -92,6 +105,11 @@ export interface AssignmentPlan {
   pooledApplicantIds: string[];
   loadByReviewerId: Record<string, number>;
   preexistingViolations: Violation[];
+  /// Applicants the fill left below what it wanted for them. Empty on a
+  /// complete plan. The precheck is capacity arithmetic and cannot see returned
+  /// pairs or the fill order, so `feasible` is not a guarantee of this being
+  /// empty — decision 99 is what makes the gap visible rather than silent.
+  shortfall: Shortfall[];
 }
 
 const pairKey = (applicantId: string, reviewerId: string) => `${applicantId}${reviewerId}`;
@@ -142,11 +160,18 @@ export function planShape(applicantCount: number, reviewerCount: number) {
 }
 
 interface Prepared {
+  /// `planShape`'s numbers, with the pool-derived ones — `poolSize`,
+  /// `assignedSlots`, `loadFloor` and the two applicant counts — restated over
+  /// the short set actually chosen. Decision 99: the formula asks for
+  /// `poolSize` short applicants, and preserved rows can leave fewer shortable.
   shape: ReturnType<typeof planShape>;
   /// Slots each applicant still needs after preserved rows are counted.
   need: Map<string, number>;
-  /// Applicants chosen to be one short. Exactly `poolSize` of them.
+  /// Applicants chosen to be one short. `poolSize` of them, or every shortable
+  /// applicant when that is fewer.
   short: Set<string>;
+  /// Preserved rows per applicant, for the shortfall accounting.
+  preservedCount: (applicantId: string) => number;
   /// Capacity each reviewer has left under the ceiling.
   capacity: Map<string, number>;
   /// Applicants already carrying a Sparklet from the preserved set.
@@ -175,7 +200,7 @@ function prepare(input: AssignmentInput): Prepared {
   const blocked = input.blocked ?? [];
   const rng = createRng(input.seed ?? 1);
 
-  const shape = planShape(applicantIds.length, reviewers.length);
+  const formula = planShape(applicantIds.length, reviewers.length);
   const byId = new Map(reviewers.map((r) => [r.id, r]));
 
   const preservedByApplicant = new Map<string, Pair[]>();
@@ -206,11 +231,11 @@ function prepare(input: AssignmentInput): Prepared {
 
   const violations: Violation[] = [];
   for (const [reviewerId, load] of preservedLoad) {
-    if (load > shape.loadCeiling) {
+    if (load > formula.loadCeiling) {
       violations.push({
         kind: "OVER_CEILING",
         reviewerId,
-        detail: `holds ${load} preserved assignments against a ceiling of ${shape.loadCeiling}`,
+        detail: `holds ${load} preserved assignments against a ceiling of ${formula.loadCeiling}`,
       });
     }
   }
@@ -228,8 +253,23 @@ function prepare(input: AssignmentInput): Prepared {
   // already holding `target` preserved rows has no slot left to withhold — and
   // shuffled so the same applicants are not shorted on every regeneration.
   const preservedCount = (id: string) => preservedByApplicant.get(id)?.length ?? 0;
-  const shortable = rng.shuffle(applicantIds.filter((id) => preservedCount(id) < shape.target));
-  const short = new Set(shortable.slice(0, shape.poolSize));
+  const shortable = rng.shuffle(applicantIds.filter((id) => preservedCount(id) < formula.target));
+  const short = new Set(shortable.slice(0, formula.poolSize));
+
+  // Decision 99: the report describes the pool that exists, not the one the
+  // formula asked for. The two differ only when preserved rows leave fewer than
+  // `poolSize` applicants with a slot to withhold; then the pool is smaller, one
+  // more slot is assigned per missing pooled applicant, and the floor follows
+  // `assignedSlots` as FR-7 defines it. `loadCeiling` stays on the full grid.
+  const assignedSlots = formula.totalSlots - short.size;
+  const shape = {
+    ...formula,
+    poolSize: short.size,
+    assignedSlots,
+    loadFloor: reviewers.length === 0 ? 0 : Math.floor(assignedSlots / reviewers.length),
+    fullApplicantCount: applicantIds.length - short.size,
+    shortApplicantCount: short.size,
+  };
 
   const need = new Map<string, number>();
   for (const id of applicantIds) {
@@ -244,7 +284,7 @@ function prepare(input: AssignmentInput): Prepared {
     capacity.set(reviewer.id, Math.max(0, shape.loadCeiling - (preservedLoad.get(reviewer.id) ?? 0)));
   }
 
-  return { shape, need, short, capacity, sparkletTaken, forbidden, violations };
+  return { shape, need, short, preservedCount, capacity, sparkletTaken, forbidden, violations };
 }
 
 // ---------------------------------------------------------------------------
@@ -392,10 +432,14 @@ export function generateAssignments(input: AssignmentInput): AssignmentPlan {
       pooledApplicantIds: [],
       loadByReviewerId: {},
       preexistingViolations: report.preexistingViolations,
+      // Nothing was placed, so nothing fell short of a plan; the refusal itself
+      // is the message, and it is in `report.message`.
+      shortfall: [],
     };
   }
 
-  const { shape, need, short, capacity, sparkletTaken, forbidden, violations } = prepare(input);
+  const { shape, need, short, preservedCount, capacity, sparkletTaken, forbidden, violations } =
+    prepare(input);
   const rng = createRng(input.seed ?? 1);
 
   // Load starts at what the preserved set already consumes, so the ceiling and
@@ -482,13 +526,61 @@ export function generateAssignments(input: AssignmentInput): AssignmentPlan {
     floor: shape.loadFloor,
   });
 
+  // Decision 99. The fill breaks out when no candidate remains — every reviewer
+  // with capacity is on the applicant already, forbidden for them, or a Sparklet
+  // where one is already placed — and the precheck cannot foresee that. What it
+  // left behind is named here, per applicant, so the action and the page can
+  // say so; it is never patched over, because every patch is either a removed
+  // override or a re-created recusal.
+  const generatedCount = new Map<string, number>();
+  for (const pair of assignments) {
+    generatedCount.set(pair.applicantId, (generatedCount.get(pair.applicantId) ?? 0) + 1);
+  }
+  const shortfall: Shortfall[] = [];
+  for (const applicantId of input.applicantIds) {
+    const wanted = shape.target - (short.has(applicantId) ? 1 : 0);
+    const got = preservedCount(applicantId) + (generatedCount.get(applicantId) ?? 0);
+    if (got < wanted) shortfall.push({ applicantId, wanted, got });
+  }
+
   return {
     assignments,
     report,
     pooledApplicantIds: [...short],
     loadByReviewerId: Object.fromEntries(load),
     preexistingViolations: violations,
+    shortfall,
   };
+}
+
+/// FR-7's standing invariant, evaluated over what the database holds now.
+///
+/// "No applicant is short more than one slot below the target, and no applicant
+/// is ever left with zero." `generateAssignments` reports the shortfall of the
+/// plan it just made; this answers the same question for the assignments page on
+/// any later load, from the active counts alone, because which applicants were
+/// pooled is not stored and the minimum is what matters: `target - 1`, and never
+/// zero while the target is positive. Pure, so the page keeps only the query.
+export interface Understaffed {
+  applicantId: string;
+  got: number;
+  /// The fewest reviewers FR-7 allows this applicant at this target.
+  minimum: number;
+}
+
+export function understaffed(
+  applicantIds: readonly string[],
+  activeCountByApplicantId: ReadonlyMap<string, number>,
+  target: number,
+): Understaffed[] {
+  if (target <= 0) return [];
+  const minimum = Math.max(1, target - 1);
+  const result: Understaffed[] = [];
+  for (const applicantId of applicantIds) {
+    const got = activeCountByApplicantId.get(applicantId) ?? 0;
+    if (got < minimum) result.push({ applicantId, got, minimum });
+  }
+  return result;
 }
 
 /// FR-7's floor, enforced by the swap it is defined in terms of.

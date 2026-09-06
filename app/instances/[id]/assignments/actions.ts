@@ -45,12 +45,14 @@ async function loadInput(
   instanceId: string,
   round: Round,
   relaxSparkletLoad: boolean,
-): Promise<AssignmentInput & { preserved: Pair[] }> {
+): Promise<AssignmentInput & { preserved: Pair[]; rowIndexById: Map<string, number> }> {
   const [applicants, reviewers, existing] = await Promise.all([
     db.applicant.findMany({
       where: { instanceId },
       orderBy: { sourceRowIndex: "asc" },
-      select: { id: true },
+      // The row index is what decision 99's shortfall is reported by: the
+      // anonymous label is the identifier an admin can act on from this page.
+      select: { id: true, sourceRowIndex: true },
     }),
     // FR-7: reviewer_count means the roster of the round being assigned.
     db.reviewer.findMany({
@@ -71,6 +73,7 @@ async function loadInput(
 
   return {
     applicantIds: applicants.map((a) => a.id),
+    rowIndexById: new Map(applicants.map((a) => [a.id, a.sourceRowIndex])),
     reviewers,
     preserved: active
       .filter((a) => a.origin !== AssignmentOrigin.AUTO)
@@ -123,6 +126,9 @@ export interface GenerateResult extends ActionState {
   /// Reviewer id to load, for the distribution table.
   loadByReviewerId?: Record<string, number>;
   violations?: { detail: string; reviewerId?: string; applicantId?: string }[];
+  /// Decision 99: applicants the fill left below what the plan wanted for them.
+  /// Labelled with the anonymous handle, which is what FR-8's list is found by.
+  shortfall?: { applicantId: string; label: string; wanted: number; got: number }[];
 }
 
 /// Generate, or regenerate.
@@ -141,10 +147,12 @@ export async function generate(
   // built from is the set the delete runs against. See `loadInput`.
   let plan: ReturnType<typeof generateAssignments> | null = null;
   let discarded = 0;
+  let rowIndexById = new Map<string, number>();
 
   await prisma.$transaction(
     async (tx) => {
       const loaded = await loadInput(tx, instanceId, round, options.relaxSparkletLoad === true);
+      rowIndexById = loaded.rowIndexById;
       const input: AssignmentInput = options.discardPreserved
         ? { ...loaded, preserved: [] }
         : loaded;
@@ -195,6 +203,8 @@ export async function generate(
             relaxSparkletLoad: options.relaxSparkletLoad === true,
             preservedKept: options.discardPreserved ? 0 : loaded.preserved.length,
             discardedOverrides: discarded,
+            // Decision 99. Ids only, per §8 — the page names them by handle.
+            shortfall: plan.shortfall.map((entry) => entry.applicantId),
           },
         },
       });
@@ -220,7 +230,8 @@ export async function generate(
   console.log(
     `[assignments] ${round}: ${settled.assignments.length} placed, ` +
       `${settled.report.poolSize} pooled, ceiling ${settled.report.loadCeiling}, ` +
-      `floor ${settled.report.loadFloor}`,
+      `floor ${settled.report.loadFloor}, ` +
+      `${settled.shortfall.length} applicant${settled.shortfall.length === 1 ? "" : "s"} under-staffed`,
   );
   console.log(
     `[assignments] load distribution: ` +
@@ -232,6 +243,20 @@ export async function generate(
 
   revalidatePath(path(instanceId));
 
+  // Decision 99: the plan is placed, and the run is not called a success while
+  // anyone is under-staffed. The list is what the admin acts on; the message
+  // only says that it exists.
+  const shortfall = settled.shortfall.map((entry) => ({
+    applicantId: entry.applicantId,
+    label: `Applicant ${rowIndexById.get(entry.applicantId) ?? "?"}`,
+    wanted: entry.wanted,
+    got: entry.got,
+  }));
+  const placed = `Placed ${settled.assignments.length} assignments.`;
+  const byDesign = `${settled.report.shortApplicantCount} applicants are one reviewer short, by design.`;
+  const discardedNote =
+    discarded > 0 ? ` Discarded ${discarded} override${discarded === 1 ? "" : "s"}.` : "";
+
   return {
     report: settled.report,
     loadByReviewerId: settled.loadByReviewerId,
@@ -240,10 +265,13 @@ export async function generate(
       reviewerId: v.reviewerId,
       applicantId: v.applicantId,
     })),
+    shortfall,
     message:
-      `Placed ${settled.assignments.length} assignments. ` +
-      `${settled.report.shortApplicantCount} applicants are one reviewer short, by design.` +
-      (discarded > 0 ? ` Discarded ${discarded} override${discarded === 1 ? "" : "s"}.` : ""),
+      shortfall.length === 0
+        ? `${placed} ${byDesign}${discardedNote}`
+        : `${placed} ${byDesign}${discardedNote} ${shortfall.length} applicant` +
+          `${shortfall.length === 1 ? " is" : "s are"} under-staffed and listed below — ` +
+          `nobody could be placed on them. Assign them by hand.`,
   };
 }
 

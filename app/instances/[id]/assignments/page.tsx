@@ -6,11 +6,13 @@ import {
   GeneratePanel,
   LoadTable,
   OverridePanel,
+  ShortfallList,
   type ApplicantRow,
   type ReviewerOption,
 } from "./assignment-controls";
 import { InstanceCrumbs } from "../instance-crumbs";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
+import { understaffed } from "@/lib/assignment";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -78,26 +80,40 @@ export default async function AssignmentsPage({
 
   const view = await precheck(id, ROUND);
 
-  // "Short a reviewer" is the pool view and the main reason to open this page,
-  // but it is a count over a relation, which Prisma cannot filter on directly.
-  // Two cheap queries instead of loading every applicant into memory: the ids,
-  // and the active assignment counts. Applicants with no assignments at all do
-  // not appear in the groupBy, so they are added back from the id list.
-  let shortApplicantIds: string[] | null = null;
-  if (shortOnly) {
-    const [ids, grouped] = await Promise.all([
-      prisma.applicant.findMany({ where: { instanceId: id }, select: { id: true } }),
-      prisma.assignment.groupBy({
-        by: ["applicantId"],
-        where: { instanceId: id, round: ROUND, status: AssignmentStatus.ACTIVE },
-        _count: { _all: true },
-      }),
-    ]);
-    const counts = new Map(grouped.map((row) => [row.applicantId, row._count._all]));
-    shortApplicantIds = ids
-      .map((a) => a.id)
-      .filter((applicantId) => (counts.get(applicantId) ?? 0) < view.report.target);
-  }
+  // Active assignment counts per applicant, read on every load. Two uses:
+  // the "short a reviewer" filter, which is a count over a relation that Prisma
+  // cannot filter on directly; and decision 99's standing check, which has to
+  // be on the page whenever it is true and not only in the response to a
+  // generate. Two cheap queries instead of loading every applicant into memory.
+  // Applicants with no assignments at all do not appear in the groupBy, so
+  // they are read back from the id list.
+  const [allApplicants, grouped] = await Promise.all([
+    prisma.applicant.findMany({
+      where: { instanceId: id },
+      orderBy: { sourceRowIndex: "asc" },
+      select: { id: true, sourceRowIndex: true },
+    }),
+    prisma.assignment.groupBy({
+      by: ["applicantId"],
+      where: { instanceId: id, round: ROUND, status: AssignmentStatus.ACTIVE },
+      _count: { _all: true },
+    }),
+  ]);
+  const activeCounts = new Map(grouped.map((row) => [row.applicantId, row._count._all]));
+  const allIds = allApplicants.map((a) => a.id);
+
+  const shortApplicantIds: string[] | null = shortOnly
+    ? allIds.filter((applicantId) => (activeCounts.get(applicantId) ?? 0) < view.report.target)
+    : null;
+
+  // FR-7's invariant over what the database holds now. The transformation is
+  // `understaffed` in lib/, tested there; the page keeps the query and the label.
+  const rowIndexById = new Map(allApplicants.map((a) => [a.id, a.sourceRowIndex]));
+  const standingShortfall = understaffed(allIds, activeCounts, view.report.target).map((entry) => ({
+    label: `Applicant ${rowIndexById.get(entry.applicantId) ?? "?"}`,
+    got: entry.got,
+    needed: entry.minimum,
+  }));
 
   // Search matches the anonymous label's number AND the name. §6 keeps names
   // visible to admins throughout, and an admin looking for one person knows the
@@ -233,6 +249,10 @@ export default async function AssignmentsPage({
       ) : (
         <>
           <GeneratePanel instanceId={id} round={ROUND} precheck={view} />
+          {/* Decision 99, on load: shown only once any assignment exists, since
+              before the first generate every applicant is at zero and the
+              honest message is the Generate button above. */}
+          {grouped.length > 0 ? <ShortfallList entries={standingShortfall} standing /> : null}
           <LoadTable reviewers={reviewerOptions} />
           <OverridePanel
             instanceId={id}

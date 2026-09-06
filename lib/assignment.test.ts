@@ -4,6 +4,7 @@ import {
   checkFeasibility,
   generateAssignments,
   planShape,
+  understaffed,
   type AssignmentInput,
   type AssignmentPlan,
   type FeasibilityReport,
@@ -80,21 +81,36 @@ function assertPlanInvariants(
   }
 
   // Every applicant is at the target or exactly one short, and never at zero
-  // unless the target itself is zero.
+  // unless the target itself is zero — or the plan says so. Decision 99: a fill
+  // the precheck could not foresee failing reports every applicant it left
+  // under, by exactly how much, and never silently.
+  const shortfall = new Map(plan.shortfall.map((entry) => [entry.applicantId, entry]));
   for (const applicantId of args.applicantIds) {
     const got = perApplicant.get(applicantId) ?? 0;
+    const reported = shortfall.get(applicantId);
+    if (reported) {
+      expect(reported.got).toBe(got);
+      expect(reported.wanted).toBeGreaterThan(got);
+      expect(reported.wanted === report.target || reported.wanted === report.target - 1).toBe(true);
+      continue;
+    }
     expect(got === report.target || got === report.target - 1).toBe(true);
     if (report.target > 0) expect(got).toBeGreaterThan(0);
   }
 
-  // Exactly poolSize applicants are short, and they are distinct by construction
-  // because they are counted per applicant.
-  const shortCount = args.applicantIds.filter(
-    (id) => (perApplicant.get(id) ?? 0) === report.target - 1,
+  // Exactly poolSize applicants are short by design, and they are distinct by
+  // construction because they are counted per applicant. An applicant in the
+  // shortfall list is short by failure, not by design, and is not one of them.
+  const shortByDesign = args.applicantIds.filter(
+    (id) => !shortfall.has(id) && (perApplicant.get(id) ?? 0) === report.target - 1,
   ).length;
-  expect(shortCount).toBe(report.poolSize);
+  expect(shortByDesign + plan.shortfall.filter((e) => e.wanted === report.target - 1).length).toBe(
+    report.poolSize,
+  );
+  expect(new Set(plan.pooledApplicantIds).size).toBe(report.poolSize);
 
-  expect(plan.assignments.length + preserved.length).toBe(report.assignedSlots);
+  const missing = plan.shortfall.reduce((sum, entry) => sum + entry.wanted - entry.got, 0);
+  expect(plan.assignments.length + preserved.length + missing).toBe(report.assignedSlots);
 
   // At most one Sparklet per applicant. The rule that never gives.
   for (const applicantId of args.applicantIds) {
@@ -657,13 +673,10 @@ describe("decision 98 — the floor repair", () => {
     const args = input({ applicantIds, reviewers, blocked, relaxSparkletLoad: true, seed: 1 });
     const plan = generateAssignments(args);
 
-    // The precheck cannot see returned pairs, so this plan is short (decision 99
-    // is where that becomes reportable); the floor property must hold regardless.
-    for (const reviewer of reviewers) {
-      const load = plan.loadByReviewerId[reviewer.id];
-      if (load >= plan.report.loadFloor) continue;
-      expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
-    }
+    // The precheck cannot see returned pairs, so this plan is short and says so
+    // (decision 99); the floor property must hold regardless.
+    expect(plan.shortfall.length).toBeGreaterThan(0);
+    assertPlanInvariants(plan, args);
   });
 
   it("holds the floor property whatever order the roster arrives in", () => {
@@ -691,11 +704,7 @@ describe("decision 98 — the floor repair", () => {
       for (const pair of blocked) {
         expect(plan.assignments).not.toContainEqual(pair);
       }
-      for (const reviewer of ordered) {
-        const load = plan.loadByReviewerId[reviewer.id];
-        if (load >= plan.report.loadFloor) continue;
-        expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
-      }
+      assertPlanInvariants(plan, args);
     }
   });
 
@@ -718,11 +727,117 @@ describe("decision 98 — the floor repair", () => {
     // rev_0 can hold at most a7, a8, a9 and is legitimately exempt from the
     // floor; the others must still be as even as the ceiling allows.
     expect(plan.loadByReviewerId["rev_0"]).toBeLessThanOrEqual(3);
-    for (const reviewer of reviewers) {
-      const load = plan.loadByReviewerId[reviewer.id];
-      if (load >= plan.report.loadFloor) continue;
-      expect(improvingSwapExists(plan, args, reviewer, load), reviewer.id).toBe(false);
+    assertPlanInvariants(plan, args);
+  });
+});
+
+describe("decision 99 — what the fill could not place, and what was actually pooled", () => {
+  it("names an applicant nobody can be assigned to, instead of placing a light plan silently", () => {
+    // 3 reviewers, 10 applicants, a0 returned by all three. The precheck is
+    // capacity arithmetic and passes; the fill has no candidate for a0 and, before
+    // 99, broke out and reported nothing — 24 placed against 27, a0 at zero, and
+    // the action's success message reading normally.
+    const reviewers = roster(3, 0);
+    const applicantIds = applicants(10);
+    const blocked: Pair[] = reviewers.map((r) => ({ applicantId: "app_0", reviewerId: r.id }));
+    const args = input({ applicantIds, reviewers, blocked, seed: 1 });
+    const plan = generateAssignments(args);
+
+    expect(plan.report.feasible).toBe(true);
+    expect(plan.shortfall).toHaveLength(1);
+    expect(plan.shortfall[0]).toMatchObject({ applicantId: "app_0", got: 0 });
+    expect([2, 3]).toContain(plan.shortfall[0].wanted);
+    expect(plan.assignments.length + plan.shortfall[0].wanted).toBe(plan.report.assignedSlots);
+    assertPlanInvariants(plan, args);
+  });
+
+  it("reports an empty shortfall on every complete plan", () => {
+    for (const args of [
+      input({ applicantIds: applicants(150), reviewers: roster(30, 8) }),
+      input({ applicantIds: applicants(10), reviewers: roster(3, 0) }),
+      input({ applicantIds: applicants(2), reviewers: roster(2, 0) }),
+      input({ applicantIds: applicants(150), reviewers: roster(30, 15), relaxSparkletLoad: true }),
+    ]) {
+      expect(generateAssignments(args).shortfall).toEqual([]);
     }
+  });
+
+  it("reports an empty shortfall when the precheck refuses, since nothing was placed", () => {
+    const plan = generateAssignments(input({ applicantIds: applicants(150), reviewers: roster(30, 15) }));
+    expect(plan.assignments).toEqual([]);
+    expect(plan.shortfall).toEqual([]);
+  });
+
+  it("counts the pool that exists when preserved rows leave fewer applicants shortable", () => {
+    // 3 reviewers, 10 applicants, 8 of them fully preserved. The formula asks for
+    // a pool of 3; only a8 and a9 have a slot to withhold. Before 99 the report
+    // said 3 short, 7 full and 27 assigned while the plan pooled 2 and placed 28,
+    // and the admin-facing message rendered the report's 3.
+    const reviewers = roster(3, 0);
+    const applicantIds = applicants(10);
+    const preserved: Pair[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      for (const reviewer of reviewers) preserved.push({ applicantId: `app_${i}`, reviewerId: reviewer.id });
+    }
+    const args = input({ applicantIds, reviewers, preserved, seed: 1 });
+    const plan = generateAssignments(args);
+
+    expect(planShape(10, 3).poolSize).toBe(3);
+    expect(plan.report.poolSize).toBe(2);
+    expect(plan.report.shortApplicantCount).toBe(2);
+    expect(plan.report.fullApplicantCount).toBe(8);
+    expect(plan.report.assignedSlots).toBe(28);
+    expect(plan.report.loadFloor).toBe(Math.floor(28 / 3));
+    // The ceiling stays on the full grid, per FR-7.
+    expect(plan.report.loadCeiling).toBe(planShape(10, 3).loadCeiling);
+    expect(new Set(plan.pooledApplicantIds)).toEqual(new Set(["app_8", "app_9"]));
+    expect(plan.shortfall).toEqual([]);
+    assertPlanInvariants(plan, args);
+    // And the precheck's report says the same thing, since it is the same code.
+    expect(checkFeasibility(args).poolSize).toBe(2);
+  });
+
+  it("leaves the report on the formula when nothing constrains the pool", () => {
+    const plan = generateAssignments(input({ applicantIds: applicants(150), reviewers: roster(30, 8) }));
+    expect(plan.report.poolSize).toBe(22);
+    expect(plan.report.shortApplicantCount).toBe(22);
+    expect(plan.report.fullApplicantCount).toBe(128);
+    expect(plan.report.assignedSlots).toBe(428);
+  });
+});
+
+describe("understaffed — FR-7's standing invariant over live counts", () => {
+  const ids = ["a", "b", "c", "d", "e"];
+  const counts = new Map([
+    ["a", 0],
+    ["b", 1],
+    ["c", 2],
+    ["d", 3],
+    // "e" absent: an applicant with no assignment row at all reads as zero.
+  ]);
+
+  it("at a target of 3, flags anyone below 2", () => {
+    expect(understaffed(ids, counts, 3)).toEqual([
+      { applicantId: "a", got: 0, minimum: 2 },
+      { applicantId: "b", got: 1, minimum: 2 },
+      { applicantId: "e", got: 0, minimum: 2 },
+    ]);
+  });
+
+  it("at a target of 2, flags only zero — each applicant may be short exactly one", () => {
+    expect(understaffed(ids, counts, 2).map((e) => e.applicantId)).toEqual(["a", "e"]);
+  });
+
+  it("at a target of 1, still flags zero: nobody is ever left with none", () => {
+    expect(understaffed(ids, counts, 1).map((e) => e.applicantId)).toEqual(["a", "e"]);
+  });
+
+  it("flags nobody at a target of 0, where there is nothing to be short of", () => {
+    expect(understaffed(ids, counts, 0)).toEqual([]);
+  });
+
+  it("preserves the caller's applicant order", () => {
+    expect(understaffed(["e", "a"], counts, 3).map((e) => e.applicantId)).toEqual(["e", "a"]);
   });
 });
 
