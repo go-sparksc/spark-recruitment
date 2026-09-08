@@ -144,7 +144,9 @@ export async function recordFailure(
           entityType: "RateLimitBucket",
           entityId: key,
           // Counts only. The key already carries the client address, and nothing
-          // here should add anything a retention pass would then have to strip.
+          // here should add anything that would need stripping later. That mattered
+          // more when a retention pass existed to strip it; it is still the right
+          // shape for a row nothing ever deletes. See decision 109.
           previousValue: { failures: outcome.bucket.failures, lockoutCount },
         },
       });
@@ -166,10 +168,15 @@ export async function resetKey(key: string): Promise<void> {
 /// Drop buckets that can no longer affect a verdict — both halves of
 /// `isExpired`: the lockout served or never set, AND the window rolled over.
 ///
-/// Runs opportunistically on each successful **admin** sign-in, and inside the
-/// archive purge, rather than on a schedule. At the scale §8 describes this
-/// table holds a handful of rows, and a cron job would be infrastructure to
-/// maintain for something that cleans itself whenever anyone logs in.
+/// Runs opportunistically on each successful **admin** sign-in, rather than on a
+/// schedule. At the scale §8 describes this table holds a handful of rows, and a
+/// cron job would be infrastructure to maintain for something that cleans itself
+/// whenever anyone logs in.
+///
+/// This is the whole of it since decision 109: the retention purge used to call
+/// it too, and the sign-in path is now the only caller. Note that it prunes the
+/// buckets and not the `RATE_LIMIT_LOCKOUT` audit rows above, which have no
+/// reaper at all any more — see decision 109's first consequence.
 ///
 /// Deliberately not on the reviewer gate: thirty reviewers sign in within a few
 /// minutes of the access code reaching Slack, and putting a table-wide
