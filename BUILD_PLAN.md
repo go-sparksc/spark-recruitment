@@ -261,6 +261,26 @@ Admin manually rejects G during pass 1
 
 **Gate:** A board member who has never used the tool runs a complete mock cycle on the demo instance, start to finish, using only `ADMIN_GUIDE.md`. Every place they get stuck is a documentation bug. This is the real succession test and it is worth doing properly.
 
+---
+
+### Phase 9 — what using it found
+**Build:** PRD decisions 110–118, then the changes they specify. Four of them reverse or amend standing requirements, four settle questions nothing had asked, and five small defects ride along without a §10 entry. Everything here came from the owner clicking through a built product rather than from review — which is the pattern Phases 3, 5, 6 and 7 each recorded separately and which this phase exists because of.
+
+**Slices, one per session:**
+
+- **9.0 — the decisions, no code.** §10 gains 110–118. FR text amended in §5, §6, §10.7, FR-2, FR-3, FR-4, FR-6, FR-8, FR-9, FR-10, FR-14, FR-16 and §7.4's clause index. Forward pointers on decisions 22, 27, 32, 34, 39, 40, 62, 74, 80, 82, 83, 83a, 84 and 108. **Gate:** the owner reads them and approves. Nothing is built until they do, because four of them reverse reasoning that is currently correct in the code.
+- **9.1 — the second round becomes visible.** Decisions 111 and 112, the resolving-vote 404, and red/green on FR-18's grids. The 404 and the reversal are one root cause: the profile queries with `SECOND_ROUND_POOL` and 404s when the vote the reviewer just cast removes them from it. Widening the *list* alone leaves the bug in place. `SECOND_ROUND_POOL` itself does not move — it is clause 17b's pass-membership predicate and the reviewer's cohort is a different question.
+- **9.2 — first-round voting moves to the page.** Decision 113, plus a search box, plus folding the hand-inlined pool predicate in `first-round/actions.ts` back onto `FIRST_ROUND_POOL`.
+- **9.3 — two schema changes.** Decisions 114 (`RubricLevel`, dropping `RubricCategory.description`) and 116 (`Assignment.suspectedAiUse`). Two migrations. **Restart `next dev` after each, and confirm the port actually freed** — the Phase 3 trap and its `taskkill` corollary both apply here, and `npm run verify` stays green through either failure.
+- **9.4 — roster and pool.** Decisions 115 and 117. Two guards on the roster page that must stay distinct, and a fourth verb on FR-8 that must not become a second unassign.
+- **9.5 — admin surfaces.** Decision 118, the moved-on filter on both results pages, the mapping screen's two tweaks, a real back button, and the ethnicity truncation.
+
+**Gate:** each slice has its own, listed in `plans/phase-9.md`. The phase gate is that the two guides are brought back into line with the screens — `REVIEWER_GUIDE.md`'s screenshots r4–r8 were taken from the first- and second-round surfaces this phase rewrites.
+
+**Sequencing against Phase 8.** Slice 7 of Phase 8 — a board member running a full mock cycle from `ADMIN_GUIDE.md` alone — is still open, and it should run **after** Phase 9, not before. Running it first would test the tool against documentation Phase 9 then invalidates, and would spend the one genuinely scarce resource in this project (a board member who has never seen it) on screens that are about to change.
+
+**One census worth keeping.** Before decision 114's migration was written, `RubricCategory.description` was counted across every instance: 17 of 18 rows non-null, none whitespace-only. But 12 were the same four strings the seed writes and regenerates, and 4 more were keyboard mash on a walkthrough instance. **One row held prose a person wrote for its purpose.** The backfill-into-the-top-value rule is kept anyway, because the next cycle's admin will write descriptions that are real — but the number is recorded here so nobody later mistakes a careful migration rule for evidence that a lot was at stake.
+
 ## 4. Sequencing and time
 
 Phases 0 through 4 are the shippable core. Phases 5 through 7 extend it. Phase 8 is what makes it survive you.
