@@ -244,6 +244,36 @@ describe("blockers — decision 108's visibility gates", () => {
     expect(findings.canCommit).toBe(true);
   });
 
+  it("reports an UNSET Response column once, as unchosen — not as Backend only", () => {
+    // Found by clicking through, not by this suite: an unset Response column is
+    // also not visible, so a "not visible" test counted it in both blockers and
+    // the second line said it was "set to Backend only", which was untrue.
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [field({ id: "essay", category: FieldCategory.RESPONSE, isReviewerVisible: null })],
+    });
+
+    expect(findings.unchosenVisibilityCount).toBe(1);
+    expect(findings.hiddenResponseCount).toBe(0);
+    expect(findings.blockers.join(" ")).not.toMatch(/backend only\./i);
+    expect(findings.canCommit).toBe(false);
+  });
+
+  it("reports an unset Response GROUP the same way", () => {
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [field({ id: "m", groupId: "g1", groupRole: "OPTION", isReviewerVisible: null })],
+      groups: [
+        { id: "g1", category: FieldCategory.RESPONSE, isIncluded: true, isReviewerVisible: null },
+      ],
+    });
+
+    expect(findings.unchosenVisibilityCount).toBe(1);
+    expect(findings.hiddenResponseCount).toBe(0);
+  });
+
   it("blocks a commit where an included Response column is Backend only", () => {
     // §6 protects Responses with a blocker rather than a lock: the state is
     // reachable, and this is what refuses it.

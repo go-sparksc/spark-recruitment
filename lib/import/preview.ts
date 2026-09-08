@@ -156,17 +156,25 @@ export function buildPreview(input: PreviewInput): PreviewFindings {
       return mustChooseVisibility(field, group);
     }).length + input.groups.filter(groupMustChooseVisibility).length;
 
+  // Deliberately `=== false` rather than "not visible". An unset Response column
+  // is also not visible, but it is not *set to Backend only* — it is unchosen,
+  // which the blocker above already reports. Counting it here too would report
+  // one column twice and say something untrue about it in the second line.
   const hiddenResponseCount =
     input.fields.filter((field) => {
       if (field.groupId !== null) return false;
       const resolved = resolveField(field, null, "WRITTEN_REVIEWER");
-      return resolved.isIncluded && resolved.category === FieldCategory.RESPONSE && !resolved.isVisible;
+      return (
+        resolved.isIncluded &&
+        resolved.category === FieldCategory.RESPONSE &&
+        field.isReviewerVisible === false
+      );
     }).length +
     input.groups.filter(
       (group) =>
         group.isIncluded &&
         group.category === FieldCategory.RESPONSE &&
-        group.isReviewerVisible !== true,
+        group.isReviewerVisible === false,
     ).length;
 
   const blockers: string[] = [];
