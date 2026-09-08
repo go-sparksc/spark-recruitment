@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { requireAdmin } from "@/lib/auth";
+import { STAGE_LABEL } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Instances — Spark SC Recruitment" };
@@ -108,7 +109,7 @@ export default async function Home() {
                       {dateFormat.format(instance.createdAt)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {instance.currentStage.replace(/_/g, " ").toLowerCase()}
+                      {STAGE_LABEL[instance.currentStage]}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {instance._count.applicants}

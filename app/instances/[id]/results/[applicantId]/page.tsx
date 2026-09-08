@@ -5,6 +5,7 @@ import { InstanceCrumbs } from "../../instance-crumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
+import { ROUND_LABEL, STATUS_LABEL } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { buildPassHistory } from "@/lib/final";
 import { resolutionLabel } from "@/lib/passes";
@@ -217,7 +218,10 @@ export default async function ApplicantResultPage({
           label="Complete reviews"
           value={`${summary.completedCount} of ${active.length} assigned`}
         />
-        <Stat label="Status" value={`${applicant.status} · ${applicant.stageReached}`} />
+        <Stat
+          label="Status"
+          value={`${STATUS_LABEL[applicant.status]} · ${ROUND_LABEL[applicant.stageReached]}`}
+        />
       </dl>
 
       {/* FR-10 clause: all three reviewers' scores AND notes. */}

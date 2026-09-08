@@ -12,17 +12,11 @@ import {
 } from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
 import { requireInstance } from "@/lib/auth";
+import { STAGE_LABEL } from "@/lib/labels";
 import { SECOND_ROUND_POOL } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Instance — Spark SC Recruitment" };
-
-const STAGE_LABEL: Record<InstanceStage, string> = {
-  [InstanceStage.WRITTEN]: "Written round",
-  [InstanceStage.FIRST_ROUND]: "First round",
-  [InstanceStage.SECOND_ROUND]: "Second round",
-  [InstanceStage.COMPLETE]: "Complete",
-};
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
