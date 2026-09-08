@@ -133,7 +133,79 @@ cover two different strengths of evidence.
 
 ---
 
-## Slices 9.2 – 9.5
+## Slice 9.2 — first-round voting moves to the page
+
+Decision 113. The vote control leaves FR-14's list; the list becomes a browsing
+and finding surface carrying the reviewer's own vote as a marker.
+
+**Files:** `lib/first-round.ts` (`filterFirstRoundRows`), `lib/first-round.test.ts`,
+`app/r/[instanceId]/first-round/{page.tsx,vote-buttons.tsx,actions.ts}`.
+
+**The search is a plain GET form, not a client-side filter**, and that is decision
+33 applied rather than a preference. A client filter would be snappier and would
+be inert for the ~640 ms decision 33 measured — on the one screen in the product
+that is opened cold on a phone by someone who has never seen it. The `?q=` also
+survives in the URL, so opening an applicant and coming back lands on the same
+narrowed list. The filter itself lives in `lib/` per CLAUDE.md's Phase-5 rule.
+
+**`votedCount` is over every row and the list renders the filtered set.** Two
+different sets, deliberately: "voted on 1 of 4" under a search for one name reads
+as finished. Stated in the code because the two calls sit three lines apart and
+look like they should take the same argument.
+
+**The marker is deliberately not decision 111's green.** That colour means an
+*outcome* — the round decided this person — and a reviewer seeing their own "yes"
+in green would read it as the applicant having got through. Muted text, and the
+word carries it.
+
+**`actions.ts` stopped re-deriving the pool predicate inline.** It was the one
+caller of four spelling out `status` and `stageReached` by hand instead of using
+`FIRST_ROUND_POOL`, which is exactly the drift the constant exists to prevent.
+
+### What the gate found
+
+**Two applicants named "Diego Hoffmann", indistinguishable on the row.** The
+first-round list printed the name and nothing else, so a search for "diego"
+returned two identical rows and a reviewer had to open both to tell which was
+which. Phase 6 hit this same collision on FR-18's grid and fixed it there by
+rendering the written round's `Applicant N` handle beside the name; this list had
+never learned it. Decision 113 is what raised the stakes — a list you *browse*
+tolerates a duplicate name, a list you *search* does not — and the same change
+also made the number searchable in practice, since the filter matches
+`sourceRowIndex` and the row had never shown a reviewer what number to type.
+Fixed by rendering the handle. **Found by searching the screen, not by reading
+the diff**, which is the fourth phase running where that is how a surface defect
+surfaced.
+
+**A false alarm worth recording so nobody re-investigates it.** Two attempts to
+vote through the browser recorded nothing and produced no POST at all, which
+looked exactly like decision 33's dead-control-before-hydration failure — the
+first-round buttons are `type="button"` with `onClick`, so they genuinely are
+inert in that window, unlike the second round's form-bound control. It was not
+that: a five-second wait changed nothing, and the same button clicked by
+coordinate fired immediately and recorded the vote. It was an artifact of the
+test harness's ref-based clicking, not the product. The hydration exposure is
+real and pre-existing, but it is not what happened here.
+
+**Gate — PASSED.**
+
+- [x] No vote control on any list row.
+- [x] The vote works on the applicant's page and records.
+- [x] "You voted yes" marker appears on that row and nowhere else.
+- [x] `Voted on 1 of 48` — the counter is over all rows, not the filtered four.
+- [x] Search by name narrows (4 of 48), and `Clear` restores.
+- [x] Search by number resolves the name collision to one row.
+- [x] Colliding names are distinguishable on the row.
+
+Run on a throwaway instance seeded for it (`SEED_INSTANCE_ID=seed_p92`), since no
+existing instance was at `currentStage = FIRST_ROUND`. Deleted afterwards, audit
+rows first so the deletion orphaned none — decision 109 records that nothing ages
+those out any more, and an instance that was never a real cycle should leave zero
+rows behind rather than one. The other six instances were confirmed untouched.
+
+---
+
+## Slices 9.3 – 9.5
 
 Scope is in `BUILD_PLAN.md`'s Phase 9 section; each is written up here as it is
 built.

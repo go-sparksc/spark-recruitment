@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ApplicantStatus, Round, VoteValue } from "@/generated/prisma/enums";
+import { Round, VoteValue } from "@/generated/prisma/enums";
+import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 
@@ -49,12 +50,12 @@ export async function submitFirstRoundVote(formData: FormData): Promise<VoteStat
   // stage, or already advanced by a finalize that happened while this page was
   // open — must not receive a vote that FR-15 would then count.
   const applicant = await prisma.applicant.findFirst({
-    where: {
-      id: applicantId,
-      instanceId,
-      status: ApplicantStatus.ACTIVE,
-      stageReached: Round.FIRST_ROUND,
-    },
+    // `FIRST_ROUND_POOL`, not the same two fields spelled out again. This was
+    // the one caller of the four that re-derived the predicate inline, which is
+    // precisely the drift the constant exists to prevent — the loader, the
+    // detail page and FR-15's finalize all read it, and a fifth definition here
+    // would have been the one that silently disagreed.
+    where: { id: applicantId, instanceId, ...FIRST_ROUND_POOL },
     select: { id: true },
   });
 

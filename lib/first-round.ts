@@ -76,8 +76,46 @@ export function toFirstRoundListRow(source: FirstRoundApplicantSource): FirstRou
 /// Decision 62's "voted on N of M". Here rather than in the component so the
 /// definition of "voted" and the rows it counts cannot part company — a skip is
 /// not a vote, and this is the one place that says so.
+///
+/// **Counted over every row, never over the filtered view.** Decision 113 turns
+/// this list into a browsing surface with a search box, and "voted on 3 of 4"
+/// under a search for "chen" would be answering a question nobody asked. The
+/// page passes the full set here and the filtered set to the list.
 export function votedCount(rows: readonly FirstRoundListRow[]): number {
   return rows.filter((row) => row.vote !== null).length;
+}
+
+/// Decision 113's search, over the name and the anonymous handle.
+///
+/// Here rather than in the page for CLAUDE.md's Phase-5 rule: a page that
+/// transforms query results before rendering them puts the transformation in
+/// `lib/`, and a filter is exactly that. It is also the piece most likely to be
+/// quietly wrong — matching on the wrong field, or case-sensitively — in a way
+/// no typecheck would catch.
+///
+/// **Matches the source row index as well as the name**, because that is the
+/// handle every other surface in the round prints beside the name ("Applicant
+/// 47") and a reviewer reading one off a screen has no reason to know it is not
+/// searchable. Digits typed on their own therefore find the applicant with that
+/// number, and are also allowed to match a name — nothing here is exclusive.
+///
+/// Case-folded and NFC-normalised on both sides, so "róisín" finds `Róisín` and
+/// "ROISIN" does not (the accent is a different character, and pretending
+/// otherwise is `lib/reconciliation.ts`'s job, not a search box's). Whitespace
+/// is trimmed; an empty or whitespace-only query returns every row rather than
+/// none, which is what makes clearing the box the obvious way back.
+export function filterFirstRoundRows(
+  rows: readonly FirstRoundListRow[],
+  query: string,
+): FirstRoundListRow[] {
+  const needle = query.normalize("NFC").trim().toLocaleLowerCase();
+  if (needle === "") return [...rows];
+
+  return rows.filter((row) => {
+    const name = row.displayName.normalize("NFC").toLocaleLowerCase();
+    if (name.includes(needle)) return true;
+    return String(row.sourceRowIndex).includes(needle);
+  });
 }
 
 // ---------------------------------------------------------------------------

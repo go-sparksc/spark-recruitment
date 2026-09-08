@@ -12,6 +12,7 @@ import type { DemographicColumn } from "@/lib/demographics";
 import {
   FIRST_ROUND_POOL,
   buildFirstRoundResultRows,
+  filterFirstRoundRows,
   type FirstRoundResultSource,
   toFirstRoundListRow,
   votedCount,
@@ -99,6 +100,72 @@ describe("votedCount", () => {
 
   it("is zero for an empty pool", () => {
     expect(votedCount([])).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Decision 113's search
+// ---------------------------------------------------------------------------
+
+describe("filterFirstRoundRows", () => {
+  const rows = [
+    toFirstRoundListRow(source({ id: "a", displayName: "Cecilia Fang", sourceRowIndex: 151 })),
+    toFirstRoundListRow(source({ id: "b", displayName: "Róisín O'Brien", sourceRowIndex: 7 })),
+    toFirstRoundListRow(source({ id: "c", displayName: "Diego Hoffmann", sourceRowIndex: 42 })),
+    toFirstRoundListRow(source({ id: "d", displayName: "Diego Rossi", sourceRowIndex: 415 })),
+  ];
+
+  /// The clear-the-box path. Returning nothing for an empty query would make an
+  /// empty search box look like an empty round.
+  it("returns every row for an empty or whitespace-only query", () => {
+    expect(filterFirstRoundRows(rows, "")).toHaveLength(4);
+    expect(filterFirstRoundRows(rows, "   ")).toHaveLength(4);
+  });
+
+  it("matches a name case-insensitively, anywhere in it", () => {
+    expect(filterFirstRoundRows(rows, "fang").map((r) => r.applicantId)).toEqual(["a"]);
+    expect(filterFirstRoundRows(rows, "CECILIA").map((r) => r.applicantId)).toEqual(["a"]);
+    expect(filterFirstRoundRows(rows, "diego").map((r) => r.applicantId)).toEqual(["c", "d"]);
+  });
+
+  it("matches the handle a reviewer can read off the row", () => {
+    // Every surface in this round prints "Applicant 42" beside the name, and a
+    // reviewer typing 42 has no reason to know that is not searchable.
+    expect(filterFirstRoundRows(rows, "42").map((r) => r.applicantId)).toEqual(["c"]);
+  });
+
+  /// A substring match on the number, deliberately: 41 finds Applicant 415, the
+  /// same way "Die" finds "Diego". Pinned because the alternative — exact match
+  /// on digits — is a defensible other choice, and a later reader should see
+  /// that this one was made rather than fallen into.
+  it("matches a number as a substring, not only exactly", () => {
+    expect(filterFirstRoundRows(rows, "41").map((r) => r.applicantId)).toEqual(["d"]);
+    expect(filterFirstRoundRows(rows, "1").map((r) => r.applicantId)).toEqual(["a", "d"]);
+  });
+
+  it("finds an accented name typed with its accents", () => {
+    expect(filterFirstRoundRows(rows, "róisín").map((r) => r.applicantId)).toEqual(["b"]);
+  });
+
+  /// **The limit, stated rather than discovered.** Stripping accents is
+  /// `lib/reconciliation.ts`'s job and is tested there against published
+  /// reference pairs; a search box that quietly folded them would be a second,
+  /// weaker copy of that logic. "roisin" finding nothing is the honest result.
+  it("does not fold accents away, which is reconciliation's job and not this one", () => {
+    expect(filterFirstRoundRows(rows, "roisin")).toHaveLength(0);
+  });
+
+  it("returns nothing when nobody matches", () => {
+    expect(filterFirstRoundRows(rows, "zzz")).toHaveLength(0);
+  });
+
+  /// The filtered view narrows the list and must not narrow decision 62's
+  /// counter, which is why the page passes different sets to each.
+  it("does not disturb the rows it was given", () => {
+    const before = rows.map((r) => r.applicantId);
+    filterFirstRoundRows(rows, "diego");
+    expect(rows.map((r) => r.applicantId)).toEqual(before);
+    expect(votedCount(rows)).toBe(votedCount(rows));
   });
 });
 
