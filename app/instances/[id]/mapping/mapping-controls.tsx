@@ -141,6 +141,7 @@ function VisibilityChoice({
   value,
   disabled,
   lockedNote,
+  forcesBackendOnly,
   onChange,
 }: {
   value: boolean | null;
@@ -148,6 +149,13 @@ function VisibilityChoice({
   /// Set when the choice is not the admin's to make — a demographic column, or
   /// an excluded one. Renders the state read-only with the reason.
   lockedNote: string | null;
+  /// True only where the lock actually overrides the stored value, which is the
+  /// DEMOGRAPHIC case: §6 hides it whatever is stored, so showing Backend only
+  /// is the truth. An EXCLUDED column is different — exclusion hides it without
+  /// changing the flag, so it keeps displaying the choice that will take effect
+  /// again the moment it is re-included. Showing Backend only there would tell
+  /// the admin the opposite of what re-including does.
+  forcesBackendOnly: boolean;
   onChange: (next: boolean) => void;
 }) {
   return (
@@ -156,8 +164,8 @@ function VisibilityChoice({
         <input
           type="checkbox"
           role="radio"
-          aria-checked={value === true}
-          checked={value === true}
+          aria-checked={value === true && !forcesBackendOnly}
+          checked={value === true && !forcesBackendOnly}
           disabled={disabled || lockedNote !== null}
           onChange={() => onChange(true)}
         />
@@ -167,8 +175,8 @@ function VisibilityChoice({
         <input
           type="checkbox"
           role="radio"
-          aria-checked={value === false || lockedNote !== null}
-          checked={value === false || lockedNote !== null}
+          aria-checked={value === false || forcesBackendOnly}
+          checked={value === false || forcesBackendOnly}
           disabled={disabled || lockedNote !== null}
           onChange={() => onChange(false)}
         />
@@ -295,6 +303,7 @@ export function GroupPanel({
           value={group.isReviewerVisible}
           disabled={pending}
           lockedNote={visibilityLock(group.category, group.isIncluded)}
+          forcesBackendOnly={group.category === FieldCategory.DEMOGRAPHIC}
           onChange={(next) =>
             run(() => setGroupRoundSettings(instanceId, group.id, { isReviewerVisible: next }))
           }
@@ -314,7 +323,7 @@ export function GroupPanel({
           edits left is better read as settled than as broken. */}
       {frozen ? (
         <p className="text-muted-foreground mt-4 text-xs">
-          Grouping and category are {FROZEN_NOTE}. Inclusion and the round toggles above are not.
+          Grouping and category are {FROZEN_NOTE}. Inclusion and the visibility choice above are not.
         </p>
       ) : (
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -613,6 +622,7 @@ export function ColumnControls({
             value={column.isReviewerVisible}
             disabled={pending}
             lockedNote={visibilityLock(column.effectiveCategory, column.effectiveIncluded)}
+            forcesBackendOnly={column.effectiveCategory === FieldCategory.DEMOGRAPHIC}
             onChange={(next) =>
               run(() => setFieldRoundSettings(instanceId, column.id, { isReviewerVisible: next }))
             }

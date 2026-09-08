@@ -205,8 +205,10 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
           </CardHeader>
           <CardContent>
             <p className="text-sm">
-              These columns are hidden from every reviewer until you choose Reviewer-visible or
-              Backend only for them. Nothing else is blocked.
+              {unchosenCount === 1
+                ? "This column is hidden from every reviewer until you choose Reviewer-visible or Backend only for it."
+                : "These columns are hidden from every reviewer until you choose Reviewer-visible or Backend only for them."}{" "}
+              Nothing else is blocked.
             </p>
           </CardContent>
         </Card>
@@ -245,7 +247,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
               Category, inclusion and visibility are set here and apply to every member, so a group
               cannot end up half hidden and half visible.
               {committed
-                ? " Category and grouping are fixed now that the import has committed; inclusion and the round toggles are not."
+                ? " Category and grouping are fixed now that the import has committed; inclusion and the visibility choice are not."
                 : null}
             </CardDescription>
           </CardHeader>
@@ -268,7 +270,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
           <CardTitle>Columns</CardTitle>
           <CardDescription>
             {committed
-              ? "Include and the per-round toggles decide what reviewers see, and stay editable for the life of the cycle. Display name, designation, grouping and category are fixed — each of them decides what the imported data means."
+              ? "Include and the visibility choice decide what reviewers see, and stay editable for the life of the cycle. Display name, designation, grouping and category are fixed — each of them decides what the imported data means."
               : "Every column starts as Other and included. Categories are never guessed from header text."}
           </CardDescription>
         </CardHeader>

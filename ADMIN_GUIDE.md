@@ -148,9 +148,19 @@ is either an empty round or a leak.
 Work down the table and answer for each column. A column you have not answered
 shows **not set** in amber, and the banner at the top counts them.
 
+![Columns with visibility set, and one still unanswered](docs/img/02b-column-visibility.jpg)
+
 > **You cannot commit until every column has an answer.** This is a hard stop,
 > not a warning. Demographic columns and excluded columns are not counted —
 > their answer is already decided for them.
+
+The same list appears on a cycle that has **already** committed, if a column
+somehow ends up without an answer. Nothing is blocked at that point — the
+applicants exist and the cycle runs — but those columns stay hidden from every
+reviewer until you decide, so the screen says so rather than leaving you to
+notice.
+
+![A committed cycle with one column still unanswered](docs/img/02c-visibility-outstanding.jpg)
 
 What to tick, in practice: **the essays Reviewer-visible**, the administrative
 columns (timestamps, network ID, tags) **Backend only**. The judgement calls are
