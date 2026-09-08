@@ -582,11 +582,11 @@ it like the sensitive file it is.
 
 ## When a cycle is over
 
-Nothing else is required. The cycle stays where it is, readable, for as long as
-the club wants it.
+Nothing else is required. The cycle stays where it is, readable, in full, for as
+long as the club wants it. Nothing expires, nothing is cleaned up on a schedule,
+and no essay, email or demographic answer is ever deleted by the system.
 
-**Retention** on the instance list is where old cycles are eventually cleaned up:
-the club keeps the most recent few in full, and older ones can have their essays,
-emails and demographic answers deleted while the statistics are kept. That is a
-deliberate, confirmed action — nothing is ever deleted automatically. Export
-first.
+If you do need a cycle gone, **Delete instance** on that cycle's Settings page is
+the only way, and it is deliberately hard to do by accident: it asks for the app
+password and for you to type the instance's name. It removes everything —
+applicants, scores, notes, votes, decisions — and cannot be undone. Export first.

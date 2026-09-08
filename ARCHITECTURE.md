@@ -78,13 +78,12 @@ lib/
   demographics.ts   §10.7's checked predicate and 1/n weighting
   funnel.ts         FR-19's breakdown, built on demographics.ts
   export.ts         what "the entire instance" and "intact" mean
-  archive.ts        retention split, frozen summary, purge plan
+  labels.ts         display strings for the closed enums
   rate-limit.ts     attempt-counter state machine
   session.ts        cookie payload shape and expiry
 
   ...and their database halves, which hold queries and nothing else:
   instance-io.ts    ← export.ts
-  archive-io.ts     ← archive.ts
   rate-limit-store.ts ← rate-limit.ts
   auth.ts / reviewer-auth.ts ← session.ts / reviewer-session.ts
 ```
@@ -105,7 +104,6 @@ worked example.
 ```
 /                             instance list          app password
 /login                        sign in                — (name + app password)
-/archive                      retention              app password
 
 /instances/new                create a cycle         app password
 /instances/[id]               the hub                instance password
@@ -116,9 +114,8 @@ worked example.
   /interviews                 FR-12 import
   /passes                     FR-17, FR-18
   /final                      FR-19
-  /export                     FR-20                  ← reachable when archived
-  /audit                      §8 activity log        ← reachable when archived
-  /archive                    frozen summary         ← the archived redirect target
+  /export                     FR-20
+  /audit                      §8 activity log
   /settings                   password reset, delete  app password ONLY
   /unlock                     instance password prompt
 
@@ -127,7 +124,6 @@ worked example.
   /first-round/[applicantId]  first round
   /second-round/[applicantId] second round
   /pool                       claim an open slot
-  /closed                     shown when the cycle is archived
 ```
 
 **`/settings` gates on the app password alone, deliberately.** FR-5 makes an
@@ -205,7 +201,6 @@ write to it). **Re-run them by hand after any schema change.**
 ```bash
 npm run check:round-trip     # FR-20: export, delete, restore, compare — destructive
 npm run check:rate-limit     # the row lock, under real concurrency
-npm run check:archive-purge  # §8 retention — destructive, DO NOT run on production
 npx tsx prisma/checks/unique-constraints.ts
 npx tsx prisma/checks/field-groups.ts
 npx tsx prisma/checks/passes.ts
@@ -214,10 +209,12 @@ npx tsx prisma/checks/interview-import.ts
 npx tsx prisma/checks/reconciliation-fixture.ts
 ```
 
-Each cleans up what it creates and verifies that it did. `archive-purge` is the
-exception worth knowing about: it runs a real purge, which ages out orphaned
-audit rows **by date**, so its fixture dates are deliberately pinned to 2001. See
-the incident note in `CLAUDE.md`.
+Each cleans up what it creates and verifies that it did. That rule has one known
+failure mode, and it is worth reading before writing a new check: a check's own
+fixtures can destroy real rows through the mechanism it is testing, if the
+mechanism is date-, rank- or threshold-driven. The script that taught this was
+`archive-purge`, removed with the feature by decision 109; the incident note in
+`CLAUDE.md` outlives it deliberately.
 
 ---
 
@@ -231,7 +228,6 @@ rather than defaulting to open.
 | `DATABASE_URL` | Postgres. A pooled endpoint is fine for the app. |
 | `ADMIN_PASSWORD_HASH` | argon2id. **Escape every `$` as `\$` in `.env`** — Next expands `$VAR`. Not escaped in a hosting dashboard. |
 | `SESSION_SECRET` | Signs both cookies. There is no session table, so rotating this is how every session is revoked at once. |
-| `RETENTION_CYCLES` | Optional, default 2. How many cycles `/archive` keeps in full. Deliberately not editable in-app — see decision 94. |
 | `DIRECT_URL` | Only if `prisma migrate` fails against a pooled endpoint. |
 | `DEV_ALLOWED_ORIGINS` | Local only, for testing the reviewer dashboard on a real phone. |
 
@@ -250,14 +246,17 @@ hiding it — closing it would need an app-level security view no requirement as
 for.
 
 **Orphaned instance-deletion records**, also `instanceId = null`, are what
-survives a deleted cycle. Both classes age out when the next archive-and-purge
-runs, on the same threshold as everything else.
+survives a deleted cycle. **Nothing ages either class out.** Archive-and-purge
+swept them by date and decision 109 removed it, so both accumulate for the life
+of the deployment — a handful of rows a year at this scale, accepted rather than
+replaced with a scheduled job. The `RateLimitBucket` rows themselves are a
+different matter and are still pruned, on every successful admin sign-in.
 
 ---
 
 ## Where the reasoning is written down
 
-- **`PRD.md` §10** — 97 numbered decisions, each recording what was chosen, what
+- **`PRD.md` §10** — 109 numbered decisions, each recording what was chosen, what
   was rejected, and why. When something looks arbitrary, it is usually in here.
 - **`plans/phase-N.md`** — the design history, one file per build phase,
   including what each gate found.

@@ -257,7 +257,7 @@ Admin manually rejects G during pass 1
 ---
 
 ### Phase 8 — Hardening and handoff
-**Build:** Rate limiting on password and access code endpoints. Audit logging per PRD §8. Archive-and-purge. `ARCHITECTURE.md`, `ADMIN_GUIDE.md`, `REVIEWER_GUIDE.md` (one page, screenshots, no jargon). Demo instance with synthetic data for training.
+**Build:** Rate limiting on password and access code endpoints. Audit logging per PRD §8. ~~Archive-and-purge~~ — built, then removed by decision 109, which withdrew §8's retention requirement. `ARCHITECTURE.md`, `ADMIN_GUIDE.md`, `REVIEWER_GUIDE.md` (one page, screenshots, no jargon). Demo instance with synthetic data for training.
 
 **Gate:** A board member who has never used the tool runs a complete mock cycle on the demo instance, start to finish, using only `ADMIN_GUIDE.md`. Every place they get stuck is a documentation bug. This is the real succession test and it is worth doing properly.
 

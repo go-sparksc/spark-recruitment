@@ -14,9 +14,11 @@ CSV import and field mapping, reviewer assignment, a phone-first scoring dashboa
 first-round interview import and voting, second-round deliberation by sequential passes,
 the final class with its demographic funnel, and a full JSON export whose round trip is
 verified by deleting the database and restoring from the file alone. The hardening pass
-is in as well: sign-in rate limiting shared across processes, a name behind every audit
-row, and archive-and-purge, which freezes a finished cycle's aggregate statistics and
-then destroys its essays, emails and demographics. What remains is the succession gate —
+is in as well: sign-in rate limiting shared across processes and a name behind every
+audit row. Finished cycles are kept in full and indefinitely — an earlier retention
+rule that purged old ones was reversed, for the reasons in PRD decision 109, leaving
+FR-5's confirmed per-instance deletion as the only way to remove a cycle. What remains
+is the succession gate —
 a board member who has never used the tool running a complete mock cycle from
 `ADMIN_GUIDE.md` alone — which has not been run yet.
 
@@ -26,7 +28,7 @@ is the one-page version to paste into Slack alongside the access code.
 **[ARCHITECTURE.md](ARCHITECTURE.md)** is for the next person to maintain the code.
 
 **[PRD.md](PRD.md)** has the full specification, including the permissions model and the
-97 numbered decisions recording what was chosen and why. **[BUILD_PLAN.md](BUILD_PLAN.md)**
+109 numbered decisions recording what was chosen and why. **[BUILD_PLAN.md](BUILD_PLAN.md)**
 has the phased execution plan, and **[plans/](plans/)** is the design history, one file
 per phase, including what each gate found.
 
