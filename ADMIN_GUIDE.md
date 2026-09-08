@@ -101,9 +101,15 @@ Add it by hand: find that column in the table below, set its **group** to
 
 ### The group's settings
 
-Set **Category** to `Demographics`. The line beside it will change to *"Hidden
-from written and first-round reviewers"* — that is the tool enforcing the club's
-own rule that reviewers do not see ethnicity while scoring.
+Set **Category** to `Demographics`. The visibility checkboxes beside it will
+lock themselves to **Backend only**, greyed out, reading *"locked: demographics
+are never shown (§6)"* — that is the tool enforcing the club's own rule that
+reviewers do not see ethnicity. You cannot turn it off, and that is deliberate:
+the rule is the system's job, not something you have to remember.
+
+> This applies to **all three rounds**, including second-round deliberation.
+> Ethnicity is an admin statistic — you see it on the results and composition
+> screens — and it never reaches a reviewer.
 
 Category, inclusion and visibility are set on the *group* and apply to all
 eleven columns, so a group cannot end up half hidden and half visible.
@@ -121,12 +127,41 @@ Further down, in the columns table:
 Every column starts as **Other**. The tool never guesses from the header text —
 guessing is how a demographic column ends up visible to reviewers.
 
-**Set every essay question to `Responses`.** These are what written reviewers
-read; if none are marked, reviewers open a profile and see nothing at all. The
-preview in the next step will warn you if you forget.
+**Set every essay question to `Responses`.** These are what reviewers read.
 
 Leave the administrative columns (timestamps, response type, network ID) as
-Other. They are kept but shown to nobody.
+Other.
+
+Category says what a column *is*. It no longer says who sees it — that is the
+next section, and it is a separate decision.
+
+### Who sees each column
+
+Every column has two checkboxes: **Reviewer-visible** and **Backend only**. They
+are mutually exclusive, and **neither is ticked to begin with**. There is no
+default and the tool will not pick one for you, because the wrong silent default
+is either an empty round or a leak.
+
+- **Reviewer-visible** — every reviewer sees it, in all three rounds.
+- **Backend only** — no reviewer sees it, in any round. You still see it.
+
+Work down the table and answer for each column. A column you have not answered
+shows **not set** in amber, and the banner at the top counts them.
+
+> **You cannot commit until every column has an answer.** This is a hard stop,
+> not a warning. Demographic columns and excluded columns are not counted —
+> their answer is already decided for them.
+
+What to tick, in practice: **the essays Reviewer-visible**, the administrative
+columns (timestamps, network ID, tags) **Backend only**. The judgement calls are
+things like major, minor and graduation year — reviewers can see them if the
+club wants that, and it is a one-click change later if you get it wrong.
+
+> **The essays are the one answer the tool argues with.** If you mark a column
+> `Responses` and then set it Backend only, the commit is refused. Marking
+> something a Response is saying it is what reviewers read, so hiding it is
+> almost always a mis-click. If you genuinely want it hidden, change its
+> category or un-include it.
 
 ---
 
@@ -136,17 +171,29 @@ Other. They are kept but shown to nobody.
 
 ![The import preview](docs/img/03-preview.jpg)
 
-This is the last point at which a bad file is cheap to fix. Two kinds of thing
+This is the last point at which a bad file is cheap to fix. Three kinds of thing
 appear here.
 
+**Things that stop you committing.** The two most common come straight from step
+2:
+
+> *3 columns have no visibility set. Choose Reviewer-visible or Backend only for
+> each on the columns screen.*
+
+> *2 Response columns are set to Backend only. Reviewers would not see the
+> essays.*
+
+Both mean going back to step 2 and finishing the table. Neither can be dismissed
+— that is the point of them. The count tells you how many are left.
+
 **Worth checking** — things that are probably wrong but might be deliberate.
-These do not block you. The most common one is:
+These do not block you:
 
-> *No column is categorised as a Response. Written reviewers see only Response
-> fields, so every profile in the written round will be empty.*
+> *No column is categorised as a Response. Nothing marks the essays, so reviewer
+> profiles will show only whatever Other columns you set to Reviewer-visible.*
 
-That means you skipped the last part of step 2. Go back and fix it, then return
-here — the warning disappears.
+That one is a warning rather than a stop, because an application built entirely
+from short-answer Other columns is unusual but not wrong.
 
 **Problems in the file itself** — two applicants sharing an email address, a
 blank name, an address with spaces around it. Each is listed with the rows
@@ -158,8 +205,8 @@ When both sections are clear, press **Commit**. Applicants are created and the
 column mapping is fixed from here on.
 
 > Some things stay editable after committing: whether a column is included, and
-> which rounds can see it. What a column *means* — its category, its group, its
-> name — does not.
+> whether reviewers can see it. What a column *means* — its category, its group,
+> its name — does not.
 
 Committing takes you through one more screen that spells out exactly what becomes
 permanent. Read it rather than clicking past it.
@@ -281,10 +328,13 @@ Reviewers do this part. You send them the link and the code, and watch.
 
 ### What a reviewer sees
 
-**Not the applicant's name.** Written reviewers see "Applicant 11" and the essay
-answers, and nothing else — not the name, not the email, not ethnicity, not the
-year they graduate. That is deliberate and it is enforced by the tool, not by
-people remembering.
+**Not the applicant's name.** Written reviewers see "Applicant 11" and whatever
+you marked Reviewer-visible in step 2 — the essays, and anything else you ticked.
+Not the name, not the email, and never ethnicity. That is deliberate and it is
+enforced by the tool, not by people remembering.
+
+The name and email rule is specific to this round: reviewers see both from the
+first round onwards. The ethnicity rule is not — it holds in every round.
 
 They score against your rubric, with your guidance text beside each box, and
 scores **save as they tap** — there is no submit button to forget.

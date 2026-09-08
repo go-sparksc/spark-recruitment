@@ -30,9 +30,12 @@ You stay signed in for a day, so you can put your phone down and come back.
 These are yours. The counter at the top says how many you have finished.
 
 **You will not see anyone's name.** Applicants are "Applicant 11", "Applicant
-14", and so on. You see what they wrote and nothing else — not their name, not
-their email, not their year, not their background. That is on purpose, and it is
-not something anyone can switch off for you.
+14", and so on — not their name, not their email, and never their background.
+That is on purpose, and it is not something anyone can switch off for you.
+
+Beyond that, what you see is what your admin chose to show: the written answers
+always, and sometimes a detail like the major or graduation year. If a field is
+not there, it is because it was deliberately kept back.
 
 Tap one to open it.
 
@@ -78,16 +81,21 @@ are applicants sitting in the pool and you have time, you can take one on.
 ![Your first-round list](docs/img/r4-first-round-list.jpg)
 
 Same link, pick **First round**, use that round's code. What you do is
-different: instead of essays you get **interview scores and notes**, and instead
-of numbers you give **one vote, yes or no**.
+different: you get **interview scores and notes** on top of the application, and
+instead of numbers you give **one vote, yes or no**.
 
 Names are visible from here on. The written round hid them; the first and second
 rounds do not.
 
 Every row on the list carries the vote — tap **Yes** or **No** right there. The
-counter at the top says how many you have voted on. Tap a name to see the
-interview in full: one score per interviewer, the per-category breakdown folded
-underneath, and the interviewer's notes. The same two buttons are at the bottom.
+counter at the top says how many you have voted on. Tap a name to see the whole
+picture: one score per interviewer, the per-category breakdown folded underneath,
+the interviewer's notes, and the application they wrote. The same two buttons are
+at the bottom.
+
+> **The written answers are here too.** They used to be hidden in this round, on
+> the theory that the interview was what you were judging. They are not any more:
+> if you want to check what someone wrote against how they interviewed, you can.
 
 ![An applicant in the first round](docs/img/r5-first-round-applicant.jpg)
 
@@ -109,8 +117,11 @@ together, in one or more **passes** that an admin opens. Until a pass is open th
 list is there to read — the line under the heading tells you which.
 
 Tap a name for the full profile: the interview scores and notes, every written
-review with the reviewer's name on it, and the whole application, including the
-answers the written round hid.
+review with the reviewer's name on it, and the application itself.
+
+> **You will not see anyone's ethnicity or background here**, and neither did the
+> earlier rounds. Those answers exist — the club reports on them — but they are
+> an admin figure, not something a deliberation is conducted over.
 
 ![The full profile](docs/img/r7-second-round-profile.jpg)
 
