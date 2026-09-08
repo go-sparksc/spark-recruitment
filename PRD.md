@@ -51,12 +51,7 @@ The single most important design decision: **applicants are identified by a syst
 
 ```
 Instance
-  id, name, passwordHash, createdAt, archivedAt
-  archiveSummary: jsonb        // null until archive-and-purge runs. The frozen
-                               //   aggregate statistics §8 retains: FR-19's
-                               //   funnel and the stage counts, rendered BEFORE
-                               //   the purge empties the data they are computed
-                               //   from. See decision 95.
+  id, name, passwordHash, createdAt
   currentStage: WRITTEN | FIRST_ROUND | SECOND_ROUND | COMPLETE
   importCommittedAt            // null until FR-3 commit. Non-null is what
                                //   refuses a second CSV. See FR-3.
@@ -595,7 +590,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 - **Blocked when no pass exists.** An admin who reaches the second round, creates no pass, and closes the round would otherwise leave every applicant unresolved with no `PassApplicant` row to find them by, and FR-19 would render an empty Unresolved group over a live pool. Tell the admin to create a pass first.
 - **Audited**, per §8, alongside the other admin overrides.
 
-Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no `UNRESOLVED` status, because an applicant's fate at the end of the round is already recorded on their final pass row and a second copy could disagree with the first. **FR-19, FR-20, and the §8 archive-and-purge therefore identify unresolved applicants by that row, never by `status`.** A successor reading `ACTIVE` in a `COMPLETE` instance is looking at the wrong column.
+Note that `Applicant.status` stays `ACTIVE` for these applicants — there is no `UNRESOLVED` status, because an applicant's fate at the end of the round is already recorded on their final pass row and a second copy could disagree with the first. **FR-19 and FR-20 therefore identify unresolved applicants by that row, never by `status`.** A successor reading `ACTIVE` in a `COMPLETE` instance is looking at the wrong column.
 
 **Edge cases that must be handled explicitly, not left to inference:**
 
@@ -677,9 +672,9 @@ The applicant data is sensitive. The S26 file contains real names, USC emails, e
 - **Passwords:** hashed with argon2id or bcrypt. Never logged, never emailed, never displayed.
 - **Transport:** HTTPS only, enforced.
 - **Repository:** real applicant data never enters the repo. `.gitignore` covers `*.csv`, `*.xlsx`, `/data`, `/uploads`. Development uses synthetic seed data.
-- **Retention:** an admin-triggered "archive and purge" that keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold. Recommend two cycles. **Every operative word in that sentence is defined by decision 95** — what "aggregate statistics" are and when they are computed, exactly which columns and tables are destroyed, and how "older than N cycles" is ranked. The threshold itself is the `RETENTION_CYCLES` environment variable, per decision 94.
+- **Retention: the platform keeps every cycle in full, indefinitely.** There is no scheduled or threshold-driven deletion of applicant data, and FR-5's manual instance deletion is the only way to remove a cycle — admin-triggered, one instance at a time, gated on the app-level password plus typing the instance name. This reverses an earlier requirement for an "archive and purge"; the reasoning is in decision 109, and it is the club's own retention practice rather than a limitation.
 - **Audit:** log admin overrides (manual assignment, manual rejection, and the reversal of a manual rejection — the only decision reversal in v1, see decisions 106 and 107) with actor, timestamp, and previous value.
-- **Instance deletion is audited, and its audit row outlives the instance.** Deleting an instance runs in one transaction: purge that instance's existing `AuditLog` rows, since they describe entities about to stop existing and their `previousValue` payloads can carry applicant data that retention says should not survive the cycle; write the deletion record with the instance's name, applicant count, and stage, and no applicant data; then delete the instance, which `ON DELETE SET NULL` leaves the record orphaned by design. What remains is exactly one row per deleted instance. Archive-and-purge must age these out on the same threshold as everything else, or they accumulate forever.
+- **Instance deletion is audited, and its audit row outlives the instance.** Deleting an instance runs in one transaction: purge that instance's existing `AuditLog` rows, since they describe entities about to stop existing and their `previousValue` payloads can carry applicant data that retention says should not survive the cycle; write the deletion record with the instance's name, applicant count, and stage, and no applicant data; then delete the instance, which `ON DELETE SET NULL` leaves the record orphaned by design. What remains is exactly one row per deleted instance. **Nothing ages these out.** Archive-and-purge was the only thing that ever did, and decision 109 removes it; these rows and decision 92's app-level lockout rows now accumulate for the life of the deployment. Accepted at this scale and stated here rather than left to be discovered — see decision 109.
 
 ## 9. Success metrics
 
@@ -712,7 +707,7 @@ These need answers before or during the relevant build phase. They are the place
 
    **What counts as checked (see also decision 12 on how a group comes to exist at all):** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text Specify your ethnicity… column is a member of the group with groupRole = FREE_TEXT. It is excluded from the checked predicate and from 1/n, and it is what FR-19 displays beneath the breakdown. Being a member is what lets FR-19 find it; being FREE_TEXT is what keeps it out of the count. Inclusion is set on the group and applies to every member, so n is never counted over a partially excluded set.
 
-   **Unchanged by decision 108, and the reason the `category` enum survives it.** 108 took visibility away from `category` but not classification: `lib/demographics.ts` still selects the columns this counting runs over by `category === DEMOGRAPHIC`, and FR-19 still finds the write-in through group membership. A demographic column being invisible to every reviewer does not make it uncounted — §6 governs who may read a live applicant, this decision governs what the club counts about the cohort, and `lib/archive-io.ts` already relies on that separation.
+   **Unchanged by decision 108, and the reason the `category` enum survives it.** 108 took visibility away from `category` but not classification: `lib/demographics.ts` still selects the columns this counting runs over by `category === DEMOGRAPHIC`, and FR-19 still finds the write-in through group membership. A demographic column being invisible to every reviewer does not make it uncounted — §6 governs who may read a live applicant, this decision governs what the club counts about the cohort, and FR-19's funnel on the results and final-class surfaces already relies on that separation.
 
 8. **Import draft state. RESOLVED: a staging table.** Parsed rows land in `ImportRow` at upload and are deleted at commit; detected group proposals live in `Instance.importProposals` until named or dismissed, and are cleared at the same moment. A `CHECK` makes that clearing a database guarantee rather than a line of code. Rejected: a client-held payload, which exceeds Next's 1MB server-action body limit on a real 150-applicant export with five essays each; and a temp file, which does not survive a Vercel deploy.
 
@@ -870,7 +865,7 @@ These need answers before or during the relevant build phase. They are the place
 
     **What the sign-out clear does not cover, stated rather than left to be discovered.** Sign-out is a server action and the clearing is a client-side side effect on its submit, so a sign-out tapped before the page hydrates signs the reviewer out and leaves the drafts behind. That is decision 33's window again, and it is not closable here: clearing browser storage is not something a server action can do. The TTL is the backstop for precisely that case, which is why this decision does not rest on the sign-out path alone.
 
-    **Related, and the reason this needed writing down at all:** decision 26 is careful that the dialog is not the guarantee and the mirror is. That makes the mirror the one component whose *absence* is a silent failure and whose *persistence* is a privacy question, and it had neither an owner nor an expiry. Both are now stated. No schema change and no server-side storage — this is entirely browser-local, which is also why §8's retention rules could never have reached it.
+    **Related, and the reason this needed writing down at all:** decision 26 is careful that the dialog is not the guarantee and the mirror is. That makes the mirror the one component whose *absence* is a silent failure and whose *persistence* is a privacy question, and it had neither an owner nor an expiry. Both are now stated. No schema change and no server-side storage — this is entirely browser-local, which is also why §8's data-handling rules could never have reached it.
 
 38. **Unsaved work at the moment an applicant is returned to the pool. RESOLVED: the return clears that assignment's draft, and does not hold for a save in flight.** Decision 37 named three things that clear the mirror — a confirmed save, signing out, and the 7-day TTL — and returning an applicant is a fourth that it did not anticipate, because return-to-pool did not exist when it was written.
 
@@ -1186,6 +1181,8 @@ and decision 79, checked in the same place.
 
     The cost is real and worth naming: changing it means a redeploy, and a successor has to know the variable exists. `.env.example` carries it with its default and `ARCHITECTURE.md` names it, which is the whole of the mitigation.
 
+    **Reversed by decision 109.** `RETENTION_CYCLES` no longer exists, in the code or in `.env.example`. Retained as a record of the reasoning, not as a description of the system.
+
 95. **What archive-and-purge keeps, what it destroys, and what "older than N cycles" means. RESOLVED.** §8 gives the requirement in one sentence — "keeps aggregate statistics and deletes essays, emails, and demographics for cycles older than a configurable threshold" — and every operative word in it needed a definition.
 
     **Ordering.** Instances sorted by `createdAt` descending; the newest `RETENTION_CYCLES` are retained and everything past that rank is a candidate. The **cutoff date** is the `createdAt` of the oldest retained instance. Below `RETENTION_CYCLES` instances there are no candidates and no cutoff.
@@ -1212,6 +1209,8 @@ and decision 79, checked in the same place.
     The exemptions are implemented as a second gate, `requireInstanceUnlocked`, rather than as a flag on the first. Anything that mutates, or that renders applicant data the purge emptied, calls `requireInstance` and gets the redirect. Reaching for the weaker gate to make a page load is the mistake this split is shaped to make obvious.
 
     **Orphaned audit rows.** §8 requires the instance-deletion records — `instanceId = null` by design — be aged out on the same threshold. They belong to no cycle, so cycle rank cannot apply to them: rows older than the cutoff date above are deleted. Decision 92's app-level lockout rows age out by the same rule, which is the only thing that keeps them from accumulating forever.
+
+    **Reversed by decision 109.** Every surface, module and column described above has been deleted, and §8 no longer asks for any of it. Retained as a record: the reasoning about materializing aggregates before a destructive step, and about a UI affordance not being a safety mechanism, outlives the feature. Note that this entry is where the orphaned-row sweep came from, and 109 accepts its loss — those rows now accumulate.
 
 96. **Not every table belongs to an instance, and the export manifest has to say which. RESOLVED: an explicit `NON_INSTANCE_TABLES` list.** `lib/export.test.ts` asserts *set equality* between the models in the generated Prisma client and `EXPORT_TABLE_NAMES`, so that a table added to the schema cannot be silently dropped from FR-20's export. Decision 92 adds the first table that is genuinely not instance-owned, which means that assertion now fails for a correct reason.
 
@@ -1307,6 +1306,30 @@ and decision 79, checked in the same place.
     - **A draft instance keeps the choices an admin demonstrably made, and unsets the rest.** A row where either old boolean was non-null was touched by a person and carries over; a row where both were null was never touched and becomes unset, so the no-default rule applies to it. Without this the one uncommitted instance would have lost seven real choices to re-ticking. One of those seven — a column explicitly hidden from written reviewers, untouched for the first round — had an old effective state that *included* unconditional second-round visibility under the OTHER rule above, and the Backend-only mapping forecloses that without an explicit re-decision. Accepted because the direction is fail-safe and the row count is one, on a non-production instance — not because the distinction does not matter.
 
     **`category` survives, as classification.** It decides §10.7's 1/n counting and FR-19's breakdown, and the visibility layer reads it only to apply the DEMOGRAPHIC lock. The mapping table therefore keeps its category selector alongside the new checkboxes. §6 states the exception rather than claiming a clean binary, because a successor reading "binary" and finding `category` in the resolver would reasonably conclude one of the two was wrong.
+
+109. **Archive-and-purge is removed and §8's retention requirement is withdrawn. RESOLVED, reversing decisions 94 and 95 and amending §5, §8, and decisions 14 and 92.** The platform keeps every cycle in full, indefinitely. FR-5's manual instance deletion is untouched and becomes the only way to remove a cycle.
+
+    **Why, and it is not a change of mind about the data being sensitive.** §1 and §8 are still right that these records hold essays about family trauma, immigration status, self-reported ethnicity and first-generation status. What the retention rule got wrong is where that data lives. Spark SC already holds all of it, indefinitely, in Google Drive, Sheets and Typeform, and will go on holding it whatever this platform does. Purging it *here* therefore reduces the club's standing exposure by nothing measurable; it destroys the cycle detail the club wants to keep while leaving every other copy in place, and makes this one system inconsistent with the club's actual practice everywhere else. The club's decision is to retain full cycle detail, responses included, for future reference. A retention control that deletes the least-exposed copy of a record is security theatre with a real cost, and this is the entry that says so rather than leaving a successor to re-derive it.
+
+    **What survives, and it is the part that matters.** Deletion stays possible and stays deliberate: FR-5's typed-name gate, admin-triggered, one instance at a time, behind the app-level password. §8's other protections are untouched — the two password gates, argon2id hashing, HTTPS, the repository rule, and the audit log. Nothing about who may *read* an applicant changes; §6 and decision 108 are the whole of that, and this decision does not touch them.
+
+    **Removed:** `lib/archive.ts`, `lib/archive-io.ts` and their tests; the `/archive` retention screen and its typed-name purge action; the per-instance frozen-summary page; the reviewer-side closed page; `prisma/checks/archive-purge.ts`; the `RETENTION_CYCLES` environment variable; and `Instance.archivedAt`, `Instance.archiveSummary` and the `Instance_archive_pair` CHECK constraint.
+
+    Three consequences, each recorded because each would otherwise be found at a bad moment.
+
+    **1. Orphaned `AuditLog` rows now accumulate forever.** The instance-deletion records of §8 and decision 14 carry `instanceId = null` by design, and decision 92's app-level lockout rows do too. Belonging to no cycle, they could not be ranked by cycle, so decision 95 aged them out by date against the retention cutoff — and that sweep was the only thing that ever deleted them. Nothing replaces it, and deliberately: at one cycle per semester and 2–6 admins this is a handful of rows a year, and a scheduled job would be new machinery, a new failure mode, and a second date-driven deletion path of exactly the kind that already destroyed nine real rows once (see `CLAUDE.md`'s security note). Named here rather than solved. **`RateLimitBucket` rows are not affected**: `pruneSpent` runs on every successful admin sign-in, independently of any of this, which is also why decision 96 is untouched.
+
+    **2. An FR-20 export written before this change no longer restores.** `parseExport` rejects unknown columns, so an older file fails with `Instance[0] carries unknown columns: archivedAt, archiveSummary`. `EXPORT_FORMAT_VERSION` is deliberately **not** bumped: `lib/export.ts` already states that adding or removing a column is not a format change, and that the manifest error naming the column is the more precise failure. The recovery is deleting those two keys from the JSON. Decision 86's round-trip guarantee is a same-version guarantee and always was; this is the first time that has cost anything, so it is written down.
+
+    **3. `requireInstanceUnlocked` is gone, and the gate is one function again.** It existed solely to hold decision 95's four exemptions — the archive summary, settings, the export and the audit view — open on a cycle whose live screens had been emptied. With no purge there is no emptied cycle, so its four callers fold back into `requireInstance`, which loses a per-request `findUnique` in the bargain. Decision 95's warning that "reaching for the weaker gate to make a page load is the mistake this split is shaped to make obvious" goes with it; the audit page keeps its own, separate reason for gating on the instance password rather than app-level access, which is that `previousValue` can carry applicant data.
+
+    Forward pointers:
+
+    - **94** — reversed. `RETENTION_CYCLES`, and its argument that a threshold editable from behind a shared password could be set to 0, describe a control that no longer exists.
+    - **95** — reversed in full. Its ordering rule, its two independent defences against a second purge, its keep-and-destroy lists, both read-only gates and the four exemptions all describe code that has been deleted. Worth reading anyway if retention is ever revisited: the reasoning about materializing aggregates *before* a destructive step, and about a UI affordance not being a safety mechanism, is not specific to this feature.
+    - **14** — amended. The instance-deletion audit row still outlives its instance; nothing ages it out now. See consequence 1.
+    - **92** — amended on the same terms for the app-level lockout rows.
+    - **96** — **unchanged.** `NON_INSTANCE_TABLES` and its `RateLimitBucket` entry are driven by decision 92, not by retention, and survive this intact. Said out loud because 94, 95 and 96 were built in one phase and the range is easy to misread.
 
 ## 11. Out of scope for v1, worth noting for v2
 
