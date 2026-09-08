@@ -55,6 +55,8 @@ Scale: 160+ applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
   Two corollaries worth having in front of you. **Check the route that is actually failing, not a neighbouring one**: a 200 from a page that avoids the new column proves nothing about the page that uses it. And **read the dev server log before theorising** — the untruncated Prisma error names the exact field, and it is in `next dev`'s output the whole time.
 
+  **Restarting it is not the same as stopping it, and a failed stop is the signal.** Stopping the background task can kill the `npm` wrapper while leaving the underlying Next process alive and still bound to port 3000 — still serving the stale client, which is the exact state the restart existed to clear. The replacement `npm run dev` does not fail loudly: it prints `Port 3000 is in use ... using available port 3001 instead`, reports `Ready`, then exits 1 with `Another next dev server is already running` and the old PID. So the browser keeps talking to the old server on 3000, and `npm run verify` is green throughout — the Phase 3 trap, one layer further down. This happened during decision 109's migration and needed `taskkill /PID <pid> /F` (its output names the PID) to actually free the port. **Treat a dev server that did not respond to a normal stop as a thing to check, not a thing to retry:** confirm the port is free, or that the process is gone, before assuming the restart took. Re-running the start command on top of it reproduces the confusion rather than resolving it.
+
 ## Testing
 
 Four things get real tests:
