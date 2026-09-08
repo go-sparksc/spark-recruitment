@@ -80,11 +80,16 @@ FieldGroup                     // several CSV columns forming one logical questi
                                //   displayName is what a rename changes.
   displayName                  // admin-editable; the heading FR-19 renders
   category: DEMOGRAPHIC | RESPONSE | OTHER
+                               //   classification, not visibility. Decides §10.7's
+                               //   1/n counting and FR-19's breakdown, and gates
+                               //   the DEMOGRAPHIC lock in §6. See decision 108.
   isMultiSelect                // bool; true when members can be checked together
   isIncluded                   // bool, default true; applies to every member
   ordinal
-  visibleToWrittenReviewer     // nullable bool; null = the §6 default
-  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default
+  isReviewerVisible            // nullable bool; applies to every member.
+                               //   true = every reviewer round; false = no reviewer
+                               //   round; NULL = not yet chosen, and resolves hidden.
+                               //   There is no default: see FR-2 and decision 108.
   UNIQUE (instanceId, key)
 
 Field                          // one per CSV column
@@ -100,15 +105,17 @@ Field                          // one per CSV column
                                //   at commit, when their values become
                                //   Applicant.email and Applicant.displayName.
   category: DEMOGRAPHIC | RESPONSE | OTHER
-                               //   the group's value wins when groupId is set
+                               //   the group's value wins when groupId is set.
+                               //   Classification, not visibility — decision 108.
   ordinal
   isIncluded                   // bool, default true; false = value retained but excluded
                                //   from every review surface. See FR-2. The group's
                                //   value wins when groupId is set.
-  visibleToWrittenReviewer     // nullable bool; null = the §6 default for this category.
-                               //   The group's value wins when groupId is set.
-  visibleToFirstRoundReviewer  // nullable bool; null = the §6 default for this category.
-                               //   The group's value wins when groupId is set.
+  isReviewerVisible            // nullable bool. true = every reviewer round;
+                               //   false = no reviewer round; NULL = not yet chosen,
+                               //   and resolves hidden. No default, and forced false
+                               //   where category is DEMOGRAPHIC. The group's value
+                               //   wins when groupId is set. See §6 and decision 108.
   UNIQUE (instanceId, ordinal)
   CHECK ((groupId IS NULL) = (groupRole IS NULL))
                                // "set only when groupId is set", enforced.
@@ -351,7 +358,7 @@ Five notes on this model:
 
 - `Applicant.data` as JSONB rather than a key-value table. CSV columns vary cycle to cycle, so the schema cannot be fixed, but Postgres can still index and query inside JSONB. A separate `Field` table carries the human-facing metadata. This is meaningfully simpler than entity-attribute-value and just as flexible.
 - **Every score, vote, and note references `applicantId`, never a name.** This is the fix for the current workbook's core problem.
-- The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check, plus a free-text column for anything not listed. These become one FieldGroup with ten OPTION members and one FREE_TEXT member, which is what tells the UI and the demographic aggregations to treat them as one question rather than eleven independent ones. Category, inclusion, and the §6 visibility toggles are properties of the group, not of its members, so a group cannot end up half hidden and half visible, and a partially excluded group cannot occur. The FREE_TEXT member is a member for display and reconciliation only: it is excluded from the checked predicate and from the 1/n counting in §10.7.
+- The source export uses one-hot columns for ethnicity: ten separate columns, any number of which an applicant may check, plus a free-text column for anything not listed. These become one FieldGroup with ten OPTION members and one FREE_TEXT member, which is what tells the UI and the demographic aggregations to treat them as one question rather than eleven independent ones. Category, inclusion, and the §6 visibility flag are properties of the group, not of its members, so a group cannot end up half hidden and half visible, and a partially excluded group cannot occur. The FREE_TEXT member is a member for display and reconciliation only: it is excluded from the checked predicate and from the 1/n counting in §10.7.
 - **`PassApplicant` exists because pass membership cannot be reconstructed after the fact.** FR-17 fixes membership at pass creation, but `Applicant.status` only ever shows the *current* state; once an applicant is resolved there is no way to ask "who was in pass 1?" without a stored roster. It is also where the all-COI case lands: §7.4 requires that an applicant every reviewer has recused from be distinguishable from a unanimous result, and `NEEDS_ADMIN` is that distinction. Resolution is a property of an applicant *within a pass*, not of the applicant.
 - **The interview rubric is its own table, and `InterviewResult.score` is imported rather than derived.** `InterviewCategory` is deliberately separate from `RubricCategory`: the written rubric and the interview rubric are different instruments with different categories, and goal 5 requires both be reconfigurable between cycles, which rules out fixed columns. `score` holds the average exactly as the source sheet carries it — if it disagrees with the mean of the category rows, the sheet wins, because that is the number the interviewers actually recorded. There is deliberately no `UNRESOLVED` on `ApplicantStatus`: an applicant left undecided when the second round closes is identified by their row in the final pass, not by a second copy of that fact on the applicant. See FR-17.
 
@@ -359,13 +366,17 @@ Five notes on this model:
 
 Enforced server-side. A reviewer request for a hidden field returns nothing, rather than the client hiding it.
 
-| Field category | Written reviewer | First-round reviewer | Second-round reviewer | Admin |
+**Mapped columns carry one binary flag, not a per-round matrix.** Decision 108 replaced the three-category × four-viewer matrix with `isReviewerVisible` on each `Field` and `FieldGroup`. There is no per-round distinction for any mapped column: a column is visible to all three reviewer rounds or to none of them.
+
+| What | Written reviewer | First-round reviewer | Second-round reviewer | Admin |
 |---|---|---|---|---|
 | Applicant name | **Hidden** | Visible | Visible | Visible |
 | Applicant email | **Hidden** | Visible | Visible | Visible |
-| DEMOGRAPHIC | Hidden | Hidden | Visible | Visible |
-| RESPONSE | Visible | **Hidden** | Visible | Visible |
-| OTHER | Configurable, default hidden | Configurable, default hidden | Visible | Visible |
+| Mapped column, `isReviewerVisible = true` | Visible | Visible | Visible | Visible |
+| Mapped column, `isReviewerVisible = false` | Hidden | Hidden | Hidden | Visible |
+| Mapped column, `isReviewerVisible` unset | Hidden | Hidden | Hidden | Visible |
+| Mapped column, category DEMOGRAPHIC | **Hidden, locked** | **Hidden, locked** | **Hidden, locked** | Visible |
+| Any column with `isIncluded = false` | Hidden | Hidden | Hidden | **Hidden** |
 | Interview scores | Hidden | Visible | Visible | Visible |
 | Interview notes | Hidden | Visible | Visible | Visible |
 | Written rubric scores and review notes, from other reviewers | Hidden | Hidden | Visible | Visible |
@@ -373,13 +384,17 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 
 **The last two rows were one row, and it was carrying two questions.** It read "Other reviewers' scores/votes — Hidden until pass closes" for a second-round reviewer, which refused FR-16's own list of what that reviewer sees. Prior-round evidence is what a deliberation is conducted on; the votes being cast now are what anchoring is about. See decision 77, and decision 74 for why "until pass closes" became plain Hidden. Written scores and review notes are attributed to the reviewer who gave them, the same way FR-14 attributes an interview score to its interviewer.
 
-**Where "configurable" is configured, and for how long.** The OTHER row's two toggles live on the FR-2 mapping table, and they stay editable there after the import commits — along with the include/exclude checkbox, and unlike everything else on that table. See decision 34. Visibility is a per-round control and rounds run weeks after a CSV is imported, so freezing it at commit would close the only window in which it can be set before anyone has a reason to open it.
+**Category no longer decides visibility, with one exception, and the exception is the point.** `category` survives as a classification — it decides §10.7's 1/n counting and FR-19's breakdown — and it is read by the visibility layer only to force `DEMOGRAPHIC` to hidden. That lock is not configurable and is enforced server-side, not merely omitted from the UI: goal 3's premise is that the bias controls are enforced by the system rather than by an admin remembering. See decision 108, which carries decision 18's reasoning forward into the binary model.
 
-The written-reviewer row is a deliberate change from the current spreadsheet, where reviewers see whatever columns are in front of them. Written reviewers grading essays have no need for ethnicity or first-gen status, and hiding them removes a bias vector at no cost.
+**`RESPONSE` is protected by a commit blocker rather than by a lock.** FR-3 refuses to commit an import in which any included `RESPONSE` column is Backend only, which is the same enforcement strength as the DEMOGRAPHIC lock. It is deliberately not a lock, because the two fail in opposite directions: hiding is fail-safe, while showing is not, and `category` freezes at commit while `isReviewerVisible` does not. A locked-open flag on a frozen enum is the one state in this model that cannot be walked back — a column mistakenly marked Responses would be reviewer-visible for the life of the instance. Decision 34's "a column mis-marked RESPONSE can still be hidden by un-including it" is the escape hatch this preserves.
+
+**Where the flag is set, and for how long.** On the FR-2 mapping table, where it stays editable after the import commits — along with the include/exclude checkbox, and unlike everything else on that table. See decision 34. Rounds run weeks after a CSV is imported, so freezing visibility at commit would close the only window in which it can be set before anyone has a reason to open it. There is no default: FR-2 requires an explicit choice on every eligible column, and FR-3 blocks the commit until every one has been made.
+
+Hiding demographics from reviewers is a deliberate change from the current spreadsheet, where reviewers see whatever columns are in front of them. Reviewers grading essays have no need for ethnicity or first-gen status, and hiding them removes a bias vector at no cost. Under decision 108 that now holds in the second round too, not only in the written and first rounds.
 
 Names are hidden from written reviewers for the same reason (open decision 4). Written reviewers see an anonymous label built from `sourceRowIndex`, e.g. "Applicant 47." Names remain visible to admins throughout, including on FR-10, since decisions cannot be made against anonymous labels. A written reviewer who recognizes an applicant from the essay itself can still return to pool.
 
-**Email is hidden from written reviewers too, and the row above is not redundant.** USC addresses are `firstname.lastname@usc.edu` — an email is a name in disguise, and FR-2 makes email un-excludable, so it exists on every applicant. Both `Applicant.displayName` and `Applicant.email` are promoted columns rather than `Field` rows, so neither is covered by the per-field `visibleToWrittenReviewer` toggle. The server-side visibility layer therefore has three inputs: FieldGroup rows for grouped columns, Field rows for ungrouped ones, and fixed rules for the promoted ones (displayName and email hidden in the written round, sourceRowIndex exposed only as the anonymous label). Resolving a field to its effective category, inclusion, and visibility belongs in one shared helper, not re-derived per surface.
+**Email is hidden from written reviewers too, and the row above is not redundant.** USC addresses are `firstname.lastname@usc.edu` — an email is a name in disguise, and FR-2 makes email un-excludable, so it exists on every applicant. Both `Applicant.displayName` and `Applicant.email` are promoted columns rather than `Field` rows, so neither is covered by the per-field `isReviewerVisible` flag. The server-side visibility layer therefore has three inputs: FieldGroup rows for grouped columns, Field rows for ungrouped ones, and fixed rules for the promoted ones (displayName and email hidden in the written round, sourceRowIndex exposed only as the anonymous label). Resolving a field to its effective category, inclusion, and visibility belongs in one shared helper, not re-derived per surface.
 
 ## 7. Functional requirements
 
@@ -394,16 +409,18 @@ Opening an instance lands on that instance's hub, which lists every surface it h
 - Detected header (read-only)
 - Editable display name (defaults to a cleaned version of the header)
 - Include/exclude checkbox (default on)
-- Category selector: Demographics / Responses / Other. **Every column defaults to Other**; the importer never guesses a category from header text, because a wrong silent guess is worse than an unset one.
-- Per-round visibility, shown for Other only: hidden in both reviewer rounds by default, with a toggle for the written round and one for the first round. §6 makes Other "configurable" and this is where it is configured; Demographics and Responses show their §6 default read-only.
+- Category selector: Demographics / Responses / Other. **Every column defaults to Other**; the importer never guesses a category from header text, because a wrong silent guess is worse than an unset one. Category is a classification, not a visibility control — see §6 and decision 108.
+- Visibility: two mutually exclusive checkboxes, **Reviewer-visible** and **Backend only**. **There is no default and neither box is ticked to begin with.** Reviewer-visible means all three reviewer rounds; Backend only means none of them. A column whose category is Demographics shows both boxes disabled, with Backend only fixed — §6's lock, enforced server-side rather than merely omitted from the UI.
 
-This row and the include/exclude checkbox above it remain editable after the import commits; every other control on this table freezes at that point. The mapping table is therefore the admin's surface for the whole cycle rather than only for the import. See FR-3 and decision 34.
+**Every eligible column must have a visibility state explicitly chosen**, and FR-3 refuses to commit until they all do. Eligible means included, non-promoted, and not category Demographics; a grouped column inherits the group's choice, so the choice is made once on the group. Leaving a column unset is not a third state — it resolves hidden until chosen, so an unset column can never leak — it is simply not a committable one.
+
+This row and the include/exclude checkbox above it remain editable after the import commits; every other control on this table freezes at that point. The mapping table is therefore the admin's surface for the whole cycle rather than only for the import. See FR-3 and decision 34. Because visibility can also be left unset on an instance that has already committed — decision 108's migration leaves ambiguous rows unchosen rather than guessing — the mapping table shows the outstanding list on committed instances too, not only before commit.
 
 Some questions arrive as several columns. The ten one-hot ethnicity columns are one question, not ten. The mapping table detects likely groups by their value signature — every non-empty value in the column is the same literal, and that literal is the column's own header — and presents them for confirmation. Three guards keep the heuristic honest: a column with no non-empty values has no signature and is never a candidate, a run of one column is not a group, and comparison is exact, since `Black` is a strict prefix of `Black or African American`.
 
 **A detected group is a proposal, not a result.** It is not stored as a FieldGroup until the admin names it, which is also when its immutable `key` is assigned. Dismissing it discards it. Doing neither is a third state, and FR-3 warns about it before commit rather than silently importing the columns ungrouped — which would leave the §10.7 demographic breakdown with no group to read and nobody the wiser until FR-11.
 
-The admin can rename a group, split it, merge two, or assign an ungrouped column to a group. The free-text write-in will not be detected, since its values vary by definition, so attaching it to its group is a manual step the mapping table must support. Include/exclude and category are set on the group and apply to every member; individual members of a group cannot be excluded or categorized separately.
+The admin can rename a group, split it, merge two, or assign an ungrouped column to a group. The free-text write-in will not be detected, since its values vary by definition, so attaching it to its group is a manual step the mapping table must support. Include/exclude, category and visibility are set on the group and apply to every member; individual members of a group cannot be excluded, categorized or made visible separately.
 
 Two columns require explicit designation and cannot be excluded: **email** (used as the join key for later imports) and **display name** (first + last, or a single name column).
 
@@ -411,14 +428,19 @@ Two columns require explicit designation and cannot be excluded: **email** (used
 
 **Duplicates are compared on the normalized email — trimmed, NFC, lowercased — not the verbatim one.** USC addresses are case-insensitive, and two rows differing only in case would otherwise pass the preview and then violate `UNIQUE (instanceId, email)` at commit, after the admin has approved the import. The verbatim value is what the preview displays, so a normalization that changes anything is visible rather than silent; an address that is whitespace-only normalizes to empty and counts as blank, not as a duplicate.
 
+The preview carries two blockers of its own, both from decision 108's visibility model, both enforced server-side on the commit action rather than only in the UI:
+
+- **A column with no visibility state chosen.** FR-2 requires an explicit Reviewer-visible or Backend only on every eligible column, and this is where that requirement is enforced. Unset resolves hidden, so committing past it would be safe but silent — an admin would discover in the written round that they had decided nothing.
+- **An included RESPONSE column set to Backend only.** §6 protects Responses with a blocker rather than a lock, and this is the blocker. The reasoning for choosing a blocker over a lock is in §6 and decision 108.
+
 The preview also carries two warnings that do not block, because each describes a plausible instance the system should not overrule:
 
 - **A detected group that has been neither named nor dismissed.** Committing past it imports the columns as independent questions, and no demographic breakdown will ever find them.
-- **No included field resolving to RESPONSE.** Under §6 that is the only category a written reviewer sees, so every profile in the written round would be empty — a failure that otherwise surfaces in front of thirty reviewers rather than here.
+- **No included field resolving to RESPONSE at all.** The blocker above cannot fire in this case — there is no Response column to be set wrongly — so the warning is still needed. An instance with nothing marked Responses is one where the written round's profiles are likely to be thin, but it is not necessarily wrong, since Other columns can be made Reviewer-visible.
 
 An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. The only correction after commit is deleting the instance and importing again, which destroys every round's work along with the applicants; v1 has no applicant edit surface, and the only decision reversal is decision 107's, which reaches a manual reject in a still-open pass and nothing earlier (decision 106). This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
-**What "final" covers is field *identity*, not presentation policy.** Frozen at commit: the one-CSV rule, and each column's category, group membership, display name and email/name designation. Not frozen: inclusion and the two per-round visibility toggles, which stay editable for the life of the instance. The line between them is what a property keys — `Applicant.data` is keyed by `Field.id`, so recategorising or regrouping a column changes what an already-written key means, while the three booleans key nothing and orphan nothing. See decision 34.
+**What "final" covers is field *identity*, not presentation policy.** Frozen at commit: the one-CSV rule, and each column's category, group membership, display name and email/name designation. Not frozen: inclusion and the `isReviewerVisible` flag, which stay editable for the life of the instance. The line between them is what a property keys — `Applicant.data` is keyed by `Field.id`, so recategorising or regrouping a column changes what an already-written key means, while the two booleans key nothing and orphan nothing. See decisions 34 and 108.
 
 **Commit is guarded by a two-step confirmation**, because it is irreversible and it sits on a page whose whole purpose is reviewing and adjusting. Following the primary control renders a panel naming what is about to become final — how many applicants will be created, the one-CSV rule, and the column properties that freeze — and the commit itself is a separate submit inside that panel. Deliberately lighter than FR-5's typed-name gate for deletion, which is rare and destroys existing work, where commit is on the path every instance takes and creates rather than destroys. See decision 35.
 
@@ -498,7 +520,7 @@ A regeneration that preserves manual overrides treats them as consumed capacity 
 **FR-9 Reviewer dashboard, written.** Reviewer selects Round → Written, then their name from a dropdown. They see:
 
 - Their assigned applicants as a list with completion state (0/4 scored, 4/4 scored)
-- An applicant detail view: anonymous label (e.g. "Applicant 47"), all RESPONSE fields, rubric always visible alongside. No name, per §6.
+- An applicant detail view: anonymous label (e.g. "Applicant 47"), every reviewer-visible field, rubric always visible alongside. No name, per §6.
 - Score inputs per rubric category, plus a free-text note
 - Autosave on every change. A dropped connection mid-review must not lose work.
 - "Return to pool" on any applicant, with a required reason (conflict of interest / other)
@@ -540,7 +562,7 @@ Each sheet is staged, previewed, and committed on its own schedule, per decision
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
-**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. Demographics and written responses are hidden per §6. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
+**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. **The reviewer also sees every reviewer-visible field, written responses included** — decision 108 removed the per-round distinction that hid them here, so this round reads the same application the written round did. Demographics remain hidden, per §6's lock. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
 
 **FR-15 First-round results.** Applicants ranked by yes percentage descending, where `yes% = yes / (yes + no)`, skips excluded from both numerator and denominator. Show raw counts alongside the percentage; 2/2 and 14/14 are not the same signal. An applicant with zero non-skip votes carries no real percentage; the count cell — not the row — carries a visual marker the same way FR-10's under-3/3 marker works, per decision 46. Two applicants tied on yes percentage are ordered by raw non-skip vote count descending, then `sourceRowIndex` ascending, per decision 46.
 
@@ -548,7 +570,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 
 ### 7.4 Second round and passes
 
-**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: demographics, written responses, written scores, written review notes, interview scores, interview notes. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: every reviewer-visible field, written scores, written review notes, interview scores, interview notes. **Demographics are not in that list.** Decision 108 locked them out of every reviewer round including this one; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
 
 **FR-17 Passes.** The admin creates sequential passes. This is the most intricate piece of the system, so the state machine is specified explicitly:
 
@@ -690,6 +712,8 @@ These need answers before or during the relevant build phase. They are the place
 
    **What counts as checked (see also decision 12 on how a group comes to exist at all):** the one-hot columns store the column's own label when checked and an empty string when not, which is what the form exports actually emit. Checked means a non-empty value; empty string, `null`, and an absent key are all unchecked. This predicate belongs in one shared helper, not re-derived per surface. The free-text Specify your ethnicity… column is a member of the group with groupRole = FREE_TEXT. It is excluded from the checked predicate and from 1/n, and it is what FR-19 displays beneath the breakdown. Being a member is what lets FR-19 find it; being FREE_TEXT is what keeps it out of the count. Inclusion is set on the group and applies to every member, so n is never counted over a partially excluded set.
 
+   **Unchanged by decision 108, and the reason the `category` enum survives it.** 108 took visibility away from `category` but not classification: `lib/demographics.ts` still selects the columns this counting runs over by `category === DEMOGRAPHIC`, and FR-19 still finds the write-in through group membership. A demographic column being invisible to every reviewer does not make it uncounted — §6 governs who may read a live applicant, this decision governs what the club counts about the cohort, and `lib/archive-io.ts` already relies on that separation.
+
 8. **Import draft state. RESOLVED: a staging table.** Parsed rows land in `ImportRow` at upload and are deleted at commit; detected group proposals live in `Instance.importProposals` until named or dismissed, and are cleared at the same moment. A `CHECK` makes that clearing a database guarantee rather than a line of code. Rejected: a client-held payload, which exceeds Next's 1MB server-action body limit on a real 150-applicant export with five essays each; and a temp file, which does not survive a Vercel deploy.
 
 9. **Instance created before the CSV commits. RESOLVED.** Name and password are collected at upload, because `passwordHash` is non-null and §8 forbids an ungated instance existing even as a draft. FR-5 therefore governs unlock and rotation, not creation. Consequence: FR-1 lists draft instances, marked as such.
@@ -721,6 +745,8 @@ These need answers before or during the relevant build phase. They are the place
     Honouring it would create a route to showing ethnicity to written reviewers that no requirement asks for, against goal 3's premise that the bias controls are enforced by the system rather than by an admin remembering. So `lib/fields.ts` reads an override only where the resolved category is `OTHER`, and the FR-2 mapping table only offers the toggles there — an override on another category is unreachable through the UI and inert if it arrives some other way.
 
     The cost is that the columns are wider than their meaning: a DEMOGRAPHIC row can hold a value that nothing reads. Accepted rather than splitting the columns per category, which would complicate the resolver to prevent a state the UI cannot produce. If a future cycle genuinely needs one response hidden from written reviewers, that is a §6 change first.
+
+    **Superseded by decision 108.** The question this entry answers — which categories the per-round toggles apply to — dissolves with the toggles themselves: there is one binary flag and no per-round distinction. Its *reasoning* is what survives. The hazard it was written to close, a route to showing ethnicity to a reviewer, is now closed by 108's DEMOGRAPHIC lock, which is enforced in the resolver rather than only omitted from the UI — the same "inert if it arrives some other way" property this entry gave the old override columns. The closing sentence above was also load-bearing and was honoured: 108 is a §6 change first.
 
 19. **Rate limiting on the password endpoints. RESOLVED in Phase 8 — see decision 92.** A stopgap shipped in Phase 1 and this entry enumerated what it did not cover; decision 92 answers the first and last of those bullets with a Postgres-backed store and lockout logging. The middle three were correct as written and survive unchanged. The description below is of the Phase 1 stopgap and is kept because it is what the "what it does not cover" list is written against.
 
@@ -808,6 +834,8 @@ These need answers before or during the relevant build phase. They are the place
 
     **Frozen, and correctly:** `category`, group membership and group role, group creation, split and merge, `displayName`, and `promotedRole`. Each of these changes what an already-written `fieldId` key means, or what §10.7 counts over, across a cohort that already exists. `promotedRole` is the strongest case and is different in kind from the others: the EMAIL and NAME columns' `Field` rows are *deleted* at commit, once their values become `Applicant.email` and `Applicant.displayName`, so there is nothing left to re-designate. Its freeze is a fact about the data rather than a choice about scope.
 
+    **Amended by decision 108**, which replaced the two per-round columns with a single `isReviewerVisible`. The frozen/editable line this entry draws is unchanged and survives as written; only the names on the editable side move, and the per-round framing below is now historical. Its final paragraph on the DEMOGRAPHIC case is superseded — see the note at the end of this entry.
+
     **Editable after commit:** `isIncluded`, `visibleToWrittenReviewer` and `visibleToFirstRoundReviewer`, on both `Field` and `FieldGroup`. They key nothing. §6 marks OTHER "configurable" and FR-2 names the mapping table as where it is configured, so freezing them left that capability with nowhere to live. They are also **per-round** controls, and rounds run weeks after an import — so the one window in which an admin could decide what written reviewers see closed before the applicants existed and long before any reviewer signed in. An admin realistically asks "should written reviewers see the major?" while briefing reviewers, not while mapping CSV columns. The only correction FR-3 offered was deleting the instance and importing again, which destroys every applicant, assignment and score to change one boolean.
 
     **Two consequences, stated rather than left to be discovered.** Un-including a column after commit removes it from FR-10's admin profile as well as from every reviewer surface, since `lib/fields.ts` resolves `isIncluded: false` to invisible for every viewer including ADMIN — and it is reversible, because commit writes every non-promoted column into `Applicant.data` regardless of inclusion. Separately, because category stays frozen, the *set* of columns eligible for a per-round toggle is fixed at commit: decision 18 reads an override only where the resolved category is OTHER. A column mis-marked RESPONSE can still be hidden by un-including it. A column mis-marked DEMOGRAPHIC cannot be shown to written reviewers at all, and that case stays stuck deliberately — unfreezing category would create a two-step route, recategorise and then tick Written, to showing ethnicity to written reviewers, which is the hazard goal 3 exists to close.
@@ -815,6 +843,8 @@ These need answers before or during the relevant build phase. They are the place
     **Audited under §8, and allowed at any time including mid-round.** Audited on decision 31's argument, since it changes who can reach applicant data. Not restricted to the gaps between rounds, because the admin who notices the problem while reviewers are working is precisely the person this decision is about, and a mid-round block would rebuild the same trap one layer in.
 
     No schema change. All three columns have existed on both tables since Phase 0; §5 is unchanged by this decision.
+
+    **What decision 108 changes here.** The editable set becomes `isIncluded` and `isReviewerVisible`. The third paragraph's closing case inverts: a column mis-marked DEMOGRAPHIC still cannot be shown to any reviewer, but that is now the doing of §6's lock rather than of category-gated overrides, and it holds in the second round as well. Its companion sentence — *"A column mis-marked RESPONSE can still be hidden by un-including it"* — becomes load-bearing rather than incidental: it is the escape hatch that lets §6 protect Responses with a commit blocker instead of a lock, and 108 cites it by name. One clause here is genuinely gone: this entry says the *set* of columns eligible for a toggle is fixed at commit, which was true when only OTHER was overridable. Under 108 every non-demographic column is eligible, so nothing is fixed by category any more.
 
 35. **The guard on FR-3's commit. RESOLVED: a two-step confirmation naming what becomes final.** Commit was a single unguarded button on the preview page, and it is irreversible twice over: an instance accepts one CSV, and — until decision 34 — commit also permanently froze every category, group, inclusion flag and visibility toggle. FR-5 guards instance *deletion* behind the app-level password **and** typing the instance name. The action that ends the only cheap opportunity to catch a bad file had no guard at all.
 
@@ -1052,7 +1082,7 @@ and decision 79, checked in the same place.
 
 82. **A second-round reviewer votes from the applicant's profile, not from the list. RESOLVED.** FR-16's list is a reading and recusal surface; the vote control lives on the profile and nowhere else, and the list renders no vote state of its own.
 
-    **This is deliberately not an application of the every-tap-counts rule.** That rule governs fast, independent review surfaces — FR-14's first-round list, where a vote is a reaction to two numbers and a paragraph, and where an extra tap really is a review that does not get completed. Second-round voting is not that surface. §7.4 and FR-16 both frame this round as reading the complete applicant profile — demographics, written responses, written scores and notes, interview scores and notes — and deliberating over it, and FR-17 requires an explicit submit for exactly that reason. **Requiring the profile to be open before voting is the correct tradeoff, not friction to be designed away.** A vote cast from a row nobody opened is the outcome the requirement is written to prevent, and saving a tap to allow it would be optimizing the wrong quantity.
+    **This is deliberately not an application of the every-tap-counts rule.** That rule governs fast, independent review surfaces — FR-14's first-round list, where a vote is a reaction to two numbers and a paragraph, and where an extra tap really is a review that does not get completed. Second-round voting is not that surface. §7.4 and FR-16 both frame this round as reading the complete applicant profile — the reviewer-visible fields, written scores and notes, interview scores and notes; demographics until decision 108 removed them — and deliberating over it, and FR-17 requires an explicit submit for exactly that reason. **Requiring the profile to be open before voting is the correct tradeoff, not friction to be designed away.** A vote cast from a row nobody opened is the outcome the requirement is written to prevent, and saving a tap to allow it would be optimizing the wrong quantity.
 
     The conflict control stays on the list, and that is not an inconsistency. A reviewer recuses because they recognized the name, which happens on the list; if the only way to declare a conflict were the profile, declaring one would mean first opening the demographics and essays of the person you are recusing from. Recusal is triggered by the row, voting is triggered by the profile, and each control sits where its trigger is.
 
@@ -1256,6 +1286,27 @@ and decision 79, checked in the same place.
     **Concurrency.** The first write is a conditional update on `(passId, applicantId, resolution = REJECTED)`; zero rows aborts the transaction and the admin is told the rejection was already reversed. Same posture as pass creation letting the index decide between two admins.
 
     **The reject's confirm is unchanged.** Decision 106 calls it the guard on the mis-tap, and a reversal that exists is a reason to keep that friction, not to soften it with "you can undo this". The reversal is announced by its own section on the pass page and by the admin guide.
+
+108. **Field visibility becomes one binary flag, explicitly chosen. RESOLVED, amending §5, §6, FR-2, FR-3, FR-12, FR-14, FR-16, and decisions 18 and 34.** §6's three-category × four-viewer matrix is replaced by `isReviewerVisible` on `Field` and `FieldGroup`: true means all three reviewer rounds, false means none of them, and there is no per-round distinction for any mapped column. Admin sees everything not excluded, as before. Name, email and the interview surfaces are untouched — they were never category-driven.
+
+    **Three behaviour changes, not two.** The first two were the point of the change and were approved as such. The third follows from the model and is recorded here because it was not asked for and would otherwise be discovered.
+
+    1. **Written responses become visible to first-round reviewers.** RESPONSE resolved hidden for that viewer; it no longer does. FR-14 amended.
+    2. **Demographics become invisible to second-round reviewers.** DEMOGRAPHIC resolved visible for that viewer; it no longer does, and the lock below makes it unconfigurable. FR-16 amended.
+    3. **Every OTHER-category column loses its unconditional second-round visibility.** The old matrix gave OTHER `SECOND_ROUND_REVIEWER: true`, so a second-round reviewer saw the major, graduation date, minor, how-they-heard and the administrative timestamps whether or not anyone had decided they should. The binary has no state meaning "hidden in the first two rounds, visible in the third", so mapping OTHER to Backend only forecloses it. At migration time this affected **50 ungrouped included OTHER columns across the four committed instances** — grouped members are excluded from that count, since they inherit a DEMOGRAPHIC group and are covered by change 2 instead. Seven are substantive: Major, Other Major, Second Major, Other Second Major, Minor, Graduation Date, and How did you hear about Spark SC?. The remaining 43 are timestamps, Tags, Network ID, Response Type, Ending and a row number, which no deliberation reads.
+
+        Accepted rather than preserved. It could have been preserved — by letting the flag govern only the written and first rounds, with the second round seeing everything included and non-demographic — but that reintroduces the per-round distinction this decision exists to remove, and makes "Backend only" a false label. The direction is fail-safe, it is what "Backend only means no reviewer in any round" has to mean, and the remedy for any column that genuinely belongs in a deliberation is one tick on a screen the admin is already on. That tick also makes the choice explicit, where today it is inherited from a default nobody set. Stated rather than buried because "the complete applicant profile" got quietly narrower and FR-16 is where a successor will look.
+
+    **DEMOGRAPHIC is locked to Backend only; RESPONSE is protected by a blocker instead.** The lock is enforced in `lib/fields.ts` and refused by the mapping actions server-side, not merely omitted from the UI — decision 18's "inert if it arrives some other way" property, carried into the new model, and the reason 18's reasoning outlives 18's question. RESPONSE deliberately does not get the mirror-image lock. The two fail in opposite directions: hiding is fail-safe, showing is not, and `category` freezes at commit while `isReviewerVisible` does not, so a locked-open flag on a frozen enum is the one state here that cannot be walked back — a column mistakenly marked Responses would be reviewer-visible for the life of the instance, with un-including it the only escape, which decision 34 notes also strips it from FR-10's admin profile. Instead FR-3 refuses to commit while any included RESPONSE column is Backend only: the same enforcement strength, applied at a gate rather than as a permanent property.
+
+    **No default, and unset is not a third state.** Neither checkbox is ticked on a newly mapped column, and FR-3 blocks the commit until every eligible column has a state — eligible meaning included, non-promoted, and not DEMOGRAPHIC. `NULL` resolves hidden everywhere, so an unchosen column cannot leak; it simply is not committable. The mapping table's outstanding list therefore also renders on **committed** instances, which it never did before, because the migration below can leave a committed instance with unchosen columns and no commit gate remains behind them.
+
+    **The migration, and what it decided about existing rows.** The two per-round columns are dropped and backfilled into one. RESPONSE → visible; DEMOGRAPHIC → Backend only; OTHER on a committed instance → its old value where the two rounds agreed. Two cases were judgment calls and are recorded as such:
+
+    - **A split row — the two old booleans disagreeing — becomes unset, not a guess.** "Visible to written reviewers only" has no binary equivalent, and choosing either direction silently would either widen exposure or hide a column an admin deliberately showed. The survey found **zero** such rows in any instance, so this rule wrote nothing; it is kept because the next import can produce one and the alternative is a silent decision.
+    - **A draft instance keeps the choices an admin demonstrably made, and unsets the rest.** A row where either old boolean was non-null was touched by a person and carries over; a row where both were null was never touched and becomes unset, so the no-default rule applies to it. Without this the one uncommitted instance would have lost seven real choices to re-ticking. One of those seven — a column explicitly hidden from written reviewers, untouched for the first round — had an old effective state that *included* unconditional second-round visibility under the OTHER rule above, and the Backend-only mapping forecloses that without an explicit re-decision. Accepted because the direction is fail-safe and the row count is one, on a non-production instance — not because the distinction does not matter.
+
+    **`category` survives, as classification.** It decides §10.7's 1/n counting and FR-19's breakdown, and the visibility layer reads it only to apply the DEMOGRAPHIC lock. The mapping table therefore keeps its category selector alongside the new checkboxes. §6 states the exception rather than claiming a clean binary, because a successor reading "binary" and finding `category` in the resolver would reasonably conclude one of the two was wrong.
 
 ## 11. Out of scope for v1, worth noting for v2
 
