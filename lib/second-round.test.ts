@@ -9,12 +9,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AssignmentStatus } from "@/generated/prisma/enums";
+import { ApplicantStatus, AssignmentStatus } from "@/generated/prisma/enums";
 import {
   buildInterviewCards,
   buildWrittenReviews,
   conflictCount,
   toSecondRoundListRow,
+  undecidedCount,
   type WrittenReviewSource,
 } from "@/lib/second-round";
 
@@ -40,6 +41,7 @@ describe("toSecondRoundListRow", () => {
       conflicts: [],
       interviewResultCount: 2,
       hasInterviewNotes: true,
+      status: ApplicantStatus.ACTIVE,
     });
 
     expect(row).toEqual({
@@ -49,7 +51,34 @@ describe("toSecondRoundListRow", () => {
       hasConflict: false,
       interviewResultCount: 2,
       hasInterviewNotes: true,
+      outcome: null,
     });
+  });
+
+  /// Decisions 111 and 112: the row survives the outcome and names it. Still an
+  /// outcome and not a vote — nothing here counts anything.
+  it("names the outcome for an applicant the round has finished with", () => {
+    const sparklet = toSecondRoundListRow({
+      id: "app-1",
+      displayName: "Cecilia Fang",
+      sourceRowIndex: 151,
+      conflicts: [],
+      interviewResultCount: 2,
+      hasInterviewNotes: true,
+      status: ApplicantStatus.SPARKLET,
+    });
+    expect(sparklet.outcome).toBe("SPARKLET");
+
+    const rejected = toSecondRoundListRow({
+      id: "app-2",
+      displayName: "Diego Hoffmann",
+      sourceRowIndex: 152,
+      conflicts: [],
+      interviewResultCount: 2,
+      hasInterviewNotes: true,
+      status: ApplicantStatus.REJECTED,
+    });
+    expect(rejected.outcome).toBe("REJECTED");
   });
 
   it("reads one conflict row as flagged", () => {
@@ -60,6 +89,7 @@ describe("toSecondRoundListRow", () => {
       conflicts: [{}],
       interviewResultCount: 0,
       hasInterviewNotes: false,
+      status: ApplicantStatus.ACTIVE,
     });
 
     expect(row.hasConflict).toBe(true);
@@ -74,10 +104,35 @@ describe("toSecondRoundListRow", () => {
         conflicts: flagged ? [{}] : [],
         interviewResultCount: 2,
         hasInterviewNotes: true,
+        status: ApplicantStatus.ACTIVE,
       }),
     );
 
     expect(conflictCount(rows)).toBe(2);
+  });
+
+  /// Decision 112: resolved applicants keep their rows, so the row count stopped
+  /// answering "how much is left to do" and the header needs both numbers.
+  it("counts only the applicants the round has not finished with", () => {
+    const rows = [
+      ApplicantStatus.ACTIVE,
+      ApplicantStatus.SPARKLET,
+      ApplicantStatus.REJECTED,
+      ApplicantStatus.ACTIVE,
+    ].map((status, index) =>
+      toSecondRoundListRow({
+        id: `app-${index}`,
+        displayName: `Applicant ${index}`,
+        sourceRowIndex: index,
+        conflicts: [],
+        interviewResultCount: 2,
+        hasInterviewNotes: true,
+        status,
+      }),
+    );
+
+    expect(rows).toHaveLength(4);
+    expect(undecidedCount(rows)).toBe(2);
   });
 });
 

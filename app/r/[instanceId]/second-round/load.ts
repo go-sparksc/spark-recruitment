@@ -8,7 +8,7 @@ import "server-only";
 // test can reach it.
 
 import { Round } from "@/generated/prisma/enums";
-import { SECOND_ROUND_POOL } from "@/lib/passes";
+import { SECOND_ROUND_COHORT } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { toSecondRoundListRow, type SecondRoundListRow } from "@/lib/second-round";
 
@@ -17,18 +17,29 @@ export async function loadSecondRoundList(
   reviewerId: string,
 ): Promise<SecondRoundListRow[]> {
   const applicants = await prisma.applicant.findMany({
-    // **`SECOND_ROUND_POOL`, the same constant FR-17 creates a pass from.** Two
-    // definitions of "who is in the second round" would mean a reviewer reading
-    // an applicant who is not in the pass, or a pass containing someone nobody
-    // was shown.
-    where: { instanceId, ...SECOND_ROUND_POOL },
+    // **`SECOND_ROUND_COHORT`, not `SECOND_ROUND_POOL`** — decision 112. This
+    // asks who reached the second round, and the answer stays true after the
+    // applicant resolves; the pool asks who a new pass is created over, which is
+    // clause 17b and is `status = ACTIVE` by requirement.
+    //
+    // The two were one constant until decision 112, because the sets coincided.
+    // They no longer do, and the comment that used to stand here — "two
+    // definitions of who is in the second round would mean a reviewer reading an
+    // applicant who is not in the pass" — had the risk backwards: it is the
+    // shared constant that would have forced one of the two surfaces to be
+    // wrong. A reviewer reading a resolved applicant is now the requirement.
+    where: { instanceId, ...SECOND_ROUND_COHORT },
     // Source order, the order both earlier rounds run in, so an applicant sits
-    // in a stable place across all three.
+    // in a stable place across all three — and, since decision 112, keeps that
+    // place when they resolve rather than jumping or vanishing.
     orderBy: { sourceRowIndex: "asc" },
     select: {
       id: true,
       displayName: true,
       sourceRowIndex: true,
+      // Decision 111's outcome. The durable record, and the only one that still
+      // answers once the pass that wrote it has closed.
+      status: true,
       interviewNotes: { select: { id: true } },
       _count: { select: { interviewResults: true } },
       // **Only this reviewer's conflict.** Whose else would be a fact about a
@@ -46,6 +57,7 @@ export async function loadSecondRoundList(
       id: applicant.id,
       displayName: applicant.displayName,
       sourceRowIndex: applicant.sourceRowIndex,
+      status: applicant.status,
       conflicts: applicant.conflicts,
       interviewResultCount: applicant._count.interviewResults,
       hasInterviewNotes: applicant.interviewNotes !== null,

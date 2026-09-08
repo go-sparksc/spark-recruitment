@@ -8,6 +8,7 @@ import { InstanceCrumbs } from "../../instance-crumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplicantStatus, PassStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
+import { outcomeOfResolution } from "@/lib/labels";
 import {
   buildPassGrid,
   conflictsInForce,
@@ -137,6 +138,15 @@ export default async function PassDetailPage({
       // and the recount otherwise — a manual reject and the close-round's
       // NEEDS_ADMIN are both writes no recount reproduces.
       resolutionLabel: resolutionLabel(row.resolution),
+      // Decision 111's colour, extended to FR-18 — no §6 question here, since
+      // this page is admin-only and already renders every vote.
+      //
+      // **From `row.resolution`, which is THIS pass's conclusion, and never from
+      // the applicant's current status.** §7.4 is explicit that a pass row
+      // records what happened in that pass; an applicant rejected in pass 3 was
+      // genuinely carried by pass 1, and colouring pass 1's grid by what is true
+      // today would make a historical record lie about itself.
+      outcome: outcomeOfResolution(row.resolution),
       mutable: isMutableResolution(row.stored),
     };
   });

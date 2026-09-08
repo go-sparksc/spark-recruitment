@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 import { CoiCell } from "./coi-cell";
 import { removeConflict, type PassActionState } from "../actions";
 import { Button } from "@/components/ui/button";
+import { OUTCOME_TONE, type Outcome } from "@/lib/labels";
 import type { EffectiveVote, PassTally } from "@/lib/passes";
 
 export interface GridReviewer {
@@ -23,6 +24,10 @@ export interface GridRow {
   conflicts: boolean[];
   tally: PassTally;
   resolutionLabel: string;
+  /// Decision 111's colour, for THIS pass's conclusion. Null for `CARRIED`,
+  /// `NEEDS_ADMIN` and an unresolved row — decision 112 keeps those uncoloured,
+  /// and an admin reading green on a carry would take it for a decision.
+  outcome: Outcome | null;
   /// False once the pass has settled this applicant. Decision 76 does not reopen
   /// a terminal row, so its conflicts render without a control.
   mutable: boolean;
@@ -140,9 +145,23 @@ export function PassGrid({
                   {row.tally.yes} / {row.tally.no} / {row.tally.skip}
                 </td>
 
-                {/* 18d. */}
-                <td className="text-muted-foreground border-l px-3 py-2 whitespace-nowrap">
-                  {row.resolutionLabel}
+                {/* 18d, now carrying decision 111's colour. The label is
+                    unchanged and is still what says which state this is — the
+                    tone is a second channel for reading a long grid at a
+                    glance, not the only one. Uncoloured for CARRIED,
+                    NEEDS_ADMIN and an unresolved row. */}
+                <td className="border-l px-3 py-2 whitespace-nowrap">
+                  {row.outcome === null ? (
+                    <span className="text-muted-foreground">{row.resolutionLabel}</span>
+                  ) : (
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        OUTCOME_TONE[row.outcome]
+                      }`}
+                    >
+                      {row.resolutionLabel}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}

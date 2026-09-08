@@ -12,7 +12,12 @@
 // promises cells are "written exactly as they were recorded", and
 // lib/export-csv.test.ts pins the literal.
 
-import { ApplicantStatus, InstanceStage, Round } from "@/generated/prisma/enums";
+import {
+  ApplicantStatus,
+  InstanceStage,
+  PassResolution,
+  Round,
+} from "@/generated/prisma/enums";
 
 export const STAGE_LABEL: Record<InstanceStage, string> = {
   [InstanceStage.WRITTEN]: "Written round",
@@ -38,3 +43,54 @@ export const STATUS_LABEL: Record<ApplicantStatus, string> = {
   [ApplicantStatus.REJECTED]: "Rejected",
   [ApplicantStatus.SPARKLET]: "Sparklet",
 };
+
+// ---------------------------------------------------------------------------
+// Outcome colour — decision 111
+// ---------------------------------------------------------------------------
+
+/// The two terminal outcomes, as one word both enums agree on.
+///
+/// `ApplicantStatus` and `PassResolution` each carry SPARKLET and REJECTED for
+/// the same two facts at different scopes — what is true of the applicant, and
+/// what one pass concluded. Decision 111 colours both, and a third surface
+/// (FR-18's grid) colours the second. One type here is what stops the reviewer
+/// list, the reviewer profile and the admin grid from each inventing a green.
+export type Outcome = "SPARKLET" | "REJECTED";
+
+/// Green for accepted, red for rejected, per decision 111.
+///
+/// **The classes live beside the vocabulary rather than in the components** for
+/// the same reason `STATUS_LABEL` does: three private colour choices are three
+/// chances for one screen to say something the next one contradicts, and this
+/// one is a fact about a person that three surfaces render at once. Both tones
+/// carry a border and a background as well as a text colour, so the state does
+/// not rest on hue alone — a red/green distinction is the single most common
+/// colour-vision failure, and the label beside it is what actually carries the
+/// meaning.
+export const OUTCOME_TONE: Record<Outcome, string> = {
+  SPARKLET: "border-emerald-600/40 bg-emerald-50 text-emerald-800",
+  REJECTED: "border-red-600/40 bg-red-50 text-red-800",
+};
+
+/// What is true of the applicant now. `ACTIVE` is not an outcome.
+export function outcomeOfStatus(status: ApplicantStatus): Outcome | null {
+  if (status === ApplicantStatus.SPARKLET) return "SPARKLET";
+  if (status === ApplicantStatus.REJECTED) return "REJECTED";
+  return null;
+}
+
+/// What one pass concluded about them. `CARRIED` and `NEEDS_ADMIN` are settled
+/// states and deliberately not outcomes — decision 112 keeps them uncoloured,
+/// because "a result occurred" is all a reviewer may read off them and an admin
+/// reading a colour there would take a carry for a decision.
+///
+/// This is `isTerminal` in lib/passes.ts asked as a question about vocabulary
+/// rather than about the state machine. `passes.test.ts` asserts the two agree
+/// across every `PassResolution` and null — the same drift guard `needsAdminAtClose`
+/// and `UNRESOLVED_AT_CLOSE` already carry, so a fifth resolution cannot teach
+/// only one of them.
+export function outcomeOfResolution(resolution: PassResolution | null): Outcome | null {
+  if (resolution === PassResolution.SPARKLET) return "SPARKLET";
+  if (resolution === PassResolution.REJECTED) return "REJECTED";
+  return null;
+}

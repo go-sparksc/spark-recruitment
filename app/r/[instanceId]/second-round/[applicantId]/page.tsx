@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { ConflictControl } from "../conflict-control";
 import { VoteButtons } from "./vote-buttons";
 import { PassStatus, Round } from "@/generated/prisma/enums";
-import { SECOND_ROUND_POOL, voteAvailability } from "@/lib/passes";
+import { SECOND_ROUND_COHORT, voteAvailability } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { applicantLabel, buildApplicantView } from "@/lib/review";
@@ -40,14 +40,25 @@ export default async function SecondRoundApplicantPage({
 
   const [applicant, fields, groups, rubric, interviewCategories] = await Promise.all([
     prisma.applicant.findFirst({
-      // The pool predicate again, so an applicant who has resolved cannot be
-      // reached by keeping the URL open.
-      where: { id: applicantId, instanceId, ...SECOND_ROUND_POOL },
+      // **`SECOND_ROUND_COHORT`, matching the list** — decision 112. This used
+      // to be `SECOND_ROUND_POOL`, with a comment saying a resolved applicant
+      // "cannot be reached by keeping the URL open". That was the intent and it
+      // had a defect the requirement never wanted: `submitPassVote` revalidates
+      // *this* route, so the reviewer whose own vote resolved the applicant was
+      // re-rendered through a query that no longer matched, and got a 404 in
+      // place of any confirmation. The page they were standing on disappeared
+      // underneath them at the moment they used it.
+      //
+      // Reading is now allowed for the whole cohort and writing is not: the
+      // vote and conflict actions keep the ACTIVE predicate, which is where
+      // "cannot be reached" actually belonged.
+      where: { id: applicantId, instanceId, ...SECOND_ROUND_COHORT },
       select: {
         id: true,
         displayName: true,
         email: true,
         sourceRowIndex: true,
+        status: true,
         data: true,
         conflicts: {
           where: { reviewerId: reviewer.id, round: Round.SECOND_ROUND },
@@ -147,6 +158,10 @@ export default async function SecondRoundApplicantPage({
     : [null, null];
 
   const availability = voteAvailability({
+    // Decision 111's outcome, read from the durable record. An applicant
+    // resolved by an EARLIER pass is not a member of the open one, so nothing
+    // above would have anything to say about them.
+    applicantStatus: applicant.status,
     hasOpenPass: openPass !== null,
     isMember: membership !== null,
     hasConflict: applicant.conflicts.length > 0,
@@ -353,7 +368,13 @@ export default async function SecondRoundApplicantPage({
           vote cast from a row nobody opened is what FR-17's explicit submit is
           written to prevent. */}
       <section className="mt-6">
-        <h2 className="text-sm font-medium">Your vote</h2>
+        <h2 className="text-sm font-medium">
+          {availability.kind === "RESOLVED" ? "Outcome" : "Your vote"}
+        </h2>
+        {/* The standing promise, and decision 111 does not weaken it: what this
+            page gained is the outcome, not anybody's ballot. The sentence is
+            still true and is worth keeping exactly where a reviewer is deciding
+            whether to trust the screen. */}
         <p className="text-muted-foreground mt-1 mb-2 text-sm">
           Nobody else&rsquo;s vote is shown here, during the pass or after it closes.
         </p>
@@ -364,19 +385,26 @@ export default async function SecondRoundApplicantPage({
         />
       </section>
 
-      {/* Beside the vote, because it is the alternative to casting one. */}
-      <section className="mt-6">
-        <h2 className="text-sm font-medium">Conflict of interest</h2>
-        <p className="text-muted-foreground mt-1 mb-2 text-sm">
-          Flag one if you know this applicant well enough that your vote would not be fair.
-        </p>
-        <ConflictControl
-          instanceId={instanceId}
-          applicantId={applicant.id}
-          applicantName={applicant.displayName}
-          flagged={applicant.conflicts.length > 0}
-        />
-      </section>
+      {/* Beside the vote, because it is the alternative to casting one.
+
+          Absent once the round has finished with this applicant, for decision
+          100's reason: `flagConflict` refuses a resolved applicant, so offering
+          the control would be offering something that fails. Decision 112 keeps
+          the page reachable; it does not make it writable. */}
+      {availability.kind === "RESOLVED" ? null : (
+        <section className="mt-6">
+          <h2 className="text-sm font-medium">Conflict of interest</h2>
+          <p className="text-muted-foreground mt-1 mb-2 text-sm">
+            Flag one if you know this applicant well enough that your vote would not be fair.
+          </p>
+          <ConflictControl
+            instanceId={instanceId}
+            applicantId={applicant.id}
+            applicantName={applicant.displayName}
+            flagged={applicant.conflicts.length > 0}
+          />
+        </section>
+      )}
     </main>
   );
 }

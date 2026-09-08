@@ -9,7 +9,8 @@
 // The resolution state machine is NOT here. That is lib/passes.ts, which knows
 // nothing about rendering; this module knows nothing about resolution.
 
-import { AssignmentStatus } from "@/generated/prisma/enums";
+import { ApplicantStatus, AssignmentStatus } from "@/generated/prisma/enums";
+import { outcomeOfStatus, type Outcome } from "@/lib/labels";
 import { reviewerAverage, scoreSummary, type ScoreSummary } from "@/lib/results";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,11 @@ export interface SecondRoundListRow {
   /// exists, so the row can say so before anyone opens it.
   interviewResultCount: number;
   hasInterviewNotes: boolean;
+  /// What the round decided about them, or null while they are still in it.
+  /// Decisions 111 and 112: the row persists after a terminal outcome and says
+  /// which way it went. Nothing else about the vote is here — no count, no other
+  /// reviewer, per decision 74's surviving half.
+  outcome: Outcome | null;
 }
 
 export interface SecondRoundListSource {
@@ -39,6 +45,7 @@ export interface SecondRoundListSource {
   conflicts: readonly unknown[];
   interviewResultCount: number;
   hasInterviewNotes: boolean;
+  status: ApplicantStatus;
 }
 
 export function toSecondRoundListRow(source: SecondRoundListSource): SecondRoundListRow {
@@ -51,6 +58,7 @@ export function toSecondRoundListRow(source: SecondRoundListSource): SecondRound
     hasConflict: source.conflicts.length > 0,
     interviewResultCount: source.interviewResultCount,
     hasInterviewNotes: source.hasInterviewNotes,
+    outcome: outcomeOfStatus(source.status),
   };
 }
 
@@ -61,6 +69,17 @@ export function toSecondRoundListRow(source: SecondRoundListSource): SecondRound
 /// way would drift from the rows under it.
 export function conflictCount(rows: readonly SecondRoundListRow[]): number {
   return rows.filter((row) => row.hasConflict).length;
+}
+
+/// How many the round has not finished with. Decision 112 keeps resolved
+/// applicants on the list, so "how many rows are there" stopped answering "how
+/// much is left to do" and the header needs both numbers.
+///
+/// Here rather than in the page for the same reason `conflictCount` is: it
+/// decides which of three sentences the header renders, and a count derived in
+/// the component would be a second definition of "still in the round".
+export function undecidedCount(rows: readonly SecondRoundListRow[]): number {
+  return rows.filter((row) => row.outcome === null).length;
 }
 
 // ---------------------------------------------------------------------------

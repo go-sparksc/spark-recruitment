@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 import { submitPassVote, type VoteState } from "../actions";
 import { Button } from "@/components/ui/button";
 import { VoteValue } from "@/generated/prisma/enums";
+import { OUTCOME_TONE } from "@/lib/labels";
 import type { VoteAvailability } from "@/lib/passes";
 
 /// FR-17's vote control. Decision 82 puts it here, on the profile, and nowhere
@@ -31,6 +32,28 @@ export function VoteButtons({
   const [choice, setChoice] = useState<VoteValue | null>(
     availability.kind === "OPEN" ? availability.current : null,
   );
+
+  if (availability.kind === "RESOLVED") {
+    // Decision 111, the reversal of decision 74's outcome half. Checked first
+    // because it is the only state here that is permanent — everything below
+    // describes this reviewer's relationship to one open pass, and this
+    // describes what happened to the applicant.
+    //
+    // The colour and the label come from lib/labels.ts, so this reads the same
+    // as the list row the reviewer arrived from and as FR-18's grid. Still no
+    // count, no tally and no other reviewer: decision 74's surviving half.
+    const sparklet = availability.outcome === "SPARKLET";
+    return (
+      <div className={`rounded-md border p-4 text-sm ${OUTCOME_TONE[availability.outcome]}`}>
+        <p className="font-medium">
+          {sparklet ? "This applicant is now a Sparklet." : "This applicant was rejected."}
+        </p>
+        <p className="mt-1">
+          The second round has finished with them, so there is nothing left to vote on.
+        </p>
+      </div>
+    );
+  }
 
   if (availability.kind === "NO_PASS") {
     return (

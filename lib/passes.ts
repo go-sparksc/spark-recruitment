@@ -27,8 +27,10 @@ import {
   InstanceStage,
   PassResolution,
   PassStatus,
+  Round,
   VoteValue,
 } from "@/generated/prisma/enums";
+import { outcomeOfStatus, type Outcome } from "@/lib/labels";
 
 // ---------------------------------------------------------------------------
 // Membership
@@ -45,7 +47,30 @@ import {
 ///
 /// One constant, read by pass creation and by the close-second-round action —
 /// the same discipline `FIRST_ROUND_POOL` follows in lib/first-round.ts.
+///
+/// **Not what a reviewer's list is made of.** It was, until decision 112, and
+/// only because the two sets happened to coincide. See `SECOND_ROUND_COHORT`.
 export const SECOND_ROUND_POOL = { status: ApplicantStatus.ACTIVE } as const;
+
+/// Everyone who reached the second round, whatever became of them. Decision 112.
+///
+/// **This is a different question from `SECOND_ROUND_POOL` and the two must not
+/// be merged back.** That one asks *who is a pass created over*, which is clause
+/// 17b and is `status = ACTIVE` by requirement. This one asks *who does a
+/// reviewer see*, which decision 112 answers with "everyone, for the life of the
+/// round" — a resolved applicant keeps their row, locked, showing the outcome.
+///
+/// They were the same predicate until decision 112, which is exactly why sharing
+/// the constant was a trap rather than a saving: widening the shared one would
+/// have created passes over already-resolved applicants, and leaving it alone
+/// would have kept resolved applicants off the list. One of the two surfaces had
+/// to be wrong, and neither would have looked it.
+///
+/// `stageReached` rather than a status list because it is the durable record of
+/// how far someone got: FR-15's finalize advances it to SECOND_ROUND and leaves
+/// it there, so it stays true after the applicant becomes a SPARKLET, is
+/// REJECTED by a pass, or sits ACTIVE and undecided at the close.
+export const SECOND_ROUND_COHORT = { stageReached: Round.SECOND_ROUND } as const;
 
 // ---------------------------------------------------------------------------
 // One reviewer, one applicant
@@ -635,6 +660,23 @@ export function summarizePass(source: PassSummarySource): PassSummary {
 // ---------------------------------------------------------------------------
 
 export type VoteAvailability =
+  /// The second round has finished with this applicant for good — decision 112
+  /// keeps them on the reviewer's surfaces, locked, and decision 111 says which
+  /// way it went.
+  ///
+  /// **Carries the outcome, which is the reversal.** The `SETTLED` variant below
+  /// deliberately carried nothing, because decision 83 forbade naming an
+  /// outcome; 111 reverses that half and accepts the cost it names — a terminal
+  /// outcome is unanimous by construction, so telling a reviewer that an
+  /// applicant became a Sparklet tells them every other eligible reviewer voted
+  /// yes. That is priced in the decision, not overlooked here.
+  ///
+  /// Read from `Applicant.status`, never from a pass row, and that is not an
+  /// implementation detail: an applicant resolved in pass 1 is not a member of
+  /// pass 2, so the open pass has nothing to say about them. Status is the
+  /// durable record and the only one that still answers after the pass that
+  /// wrote it has closed.
+  | { kind: "RESOLVED"; outcome: Outcome }
   /// No pass is open. FR-17: a vote lands in the currently open pass, and
   /// without one there is nowhere for it to land.
   | { kind: "NO_PASS" }
@@ -647,18 +689,25 @@ export type VoteAvailability =
   /// The pass has already concluded on this applicant, so decision 75's window
   /// has shut on its own.
   ///
-  /// **Carries no resolution, deliberately.** Decision 83 forbids telling a
-  /// reviewer which way it went, and 83a is what "settled" reveals — that a
-  /// result occurred, nothing more. This value is a prop to a client component,
-  /// so anything on it is serialised into the page payload whether or not the
-  /// component renders it; the way to not reveal a field is to not send it.
-  /// The reviewer surfaces only ever reach this state with `CARRIED`, since the
-  /// terminal outcomes change `Applicant.status` and the profile 404s first, but
-  /// the type should not depend on that staying true.
+  /// **Still carries no resolution, and now that is the whole of what it is
+  /// for.** Decision 112 makes `CARRIED` and `NEEDS_ADMIN` the only states that
+  /// reach here — the terminal two go to `RESOLVED` above — and those two are
+  /// exactly the ones decision 112 keeps uncoloured and unnamed. "A result
+  /// occurred, nothing more" was 83a's reading of settled, and it survives 111
+  /// intact for the non-terminal case: a mixed vote reveals that reviewers
+  /// disagreed and nothing about who.
+  ///
+  /// This value is a prop to a client component, so anything on it is serialised
+  /// into the page payload whether or not the component renders it; the way to
+  /// not reveal a field is still to not send it.
   | { kind: "SETTLED" }
   | { kind: "OPEN"; current: VoteValue | null };
 
 export interface VoteAvailabilityInput {
+  /// What is true of the applicant now, across every pass. Decision 112's
+  /// terminal check, and the reason it is a *status* rather than a pass row is
+  /// on the `RESOLVED` variant above.
+  applicantStatus: ApplicantStatus;
   hasOpenPass: boolean;
   isMember: boolean;
   hasConflict: boolean;
@@ -680,7 +729,19 @@ export interface VoteAvailabilityInput {
 /// because decision 68 has already deleted this reviewer's vote: they are SKIP
 /// whatever the row says, and telling them the pass has settled would be
 /// answering a question they did not ask.
+///
+/// **`RESOLVED` outranks all four, including the conflict**, and that ordering
+/// is deliberate rather than convenient. Every other state here answers *may
+/// this reviewer vote right now* — a question about one person's relationship to
+/// one open pass. `RESOLVED` answers *may anyone ever again*, and the answer is
+/// no. A reviewer holding a conflict on an applicant who has already become a
+/// Sparklet is owed the outcome, not a note about their own recusal; their
+/// conflict is still rendered by the conflict control beside it, so nothing is
+/// hidden by putting the durable fact first.
 export function voteAvailability(input: VoteAvailabilityInput): VoteAvailability {
+  const outcome = outcomeOfStatus(input.applicantStatus);
+  if (outcome !== null) return { kind: "RESOLVED", outcome };
+
   if (!input.hasOpenPass) return { kind: "NO_PASS" };
   if (!input.isMember) return { kind: "NOT_IN_PASS" };
   if (input.hasConflict) return { kind: "CONFLICT" };

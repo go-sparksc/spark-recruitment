@@ -5,21 +5,30 @@ import { ConflictControl } from "./conflict-control";
 import { loadSecondRoundList } from "./load";
 import { SignOutButton } from "../sign-out-button";
 import { InstanceStage, PassStatus, Round } from "@/generated/prisma/enums";
+import { OUTCOME_TONE, STATUS_LABEL } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { applicantLabel } from "@/lib/review";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
-import { conflictCount } from "@/lib/second-round";
+import { conflictCount, undecidedCount } from "@/lib/second-round";
 
 export const metadata = { title: "Second round — Spark SC" };
 
-/// FR-16's list. Everyone still in the second round, with the profile a tap away.
+/// FR-16's list. Everyone who reached the second round, with the profile a tap
+/// away — decision 112, which keeps a resolved applicant here rather than
+/// dropping them.
 ///
-/// **No vote control on this screen, unlike FR-14's list.** A first-round vote is
-/// a reaction to two numbers and a paragraph, so voting from the row saves a tap
-/// that costs nothing. A pass vote is the outcome of reading a full profile and
-/// arguing about it in a room, and FR-17 is explicit that selecting without
-/// submitting records nothing. Putting a vote button on a row nobody has opened
-/// would be the opposite of what the requirement asks for.
+/// **No vote control on this screen.** Decision 82: a pass vote is the outcome
+/// of reading a full profile and arguing about it in a room, and FR-17 is
+/// explicit that selecting without submitting records nothing. Putting a vote
+/// button on a row nobody has opened would be the opposite of what the
+/// requirement asks for. (The comparison 82 drew against FR-14's list was
+/// wrong about that screen — see decision 113 — but the conclusion for this one
+/// is unchanged, and it never rested on the comparison.)
+///
+/// **An outcome is not a vote state.** Decision 111 puts green and red on the
+/// rows the round has finished with. That is the applicant's status, not
+/// anybody's ballot: no count, no tally and no other reviewer reaches this
+/// page, which is decision 74's surviving half and clause 17z.
 export default async function SecondRoundListPage({
   params,
 }: {
@@ -52,6 +61,10 @@ export default async function SecondRoundListPage({
   if (!instance) notFound();
 
   const flagged = conflictCount(rows);
+  // Decision 112: the row count stopped answering "how much is left". Both
+  // numbers come from lib/second-round.ts so the header cannot disagree with the
+  // rows underneath it.
+  const undecided = undecidedCount(rows);
 
   // Decision 64's lesson, applied before it can bite a second time: an empty
   // list means two opposite things, and so does a list with nothing to do on it.
@@ -85,22 +98,38 @@ export default async function SecondRoundListPage({
             round is finalized — check back, or ask in Slack.
           </p>
         ) : (
-          // ACTIVE is empty while the round is still open: every applicant has
-          // been resolved by the passes so far. A real end state, and a
-          // different one from both of the above.
+          // Stage is SECOND_ROUND and the cohort is empty: the first round was
+          // finalized and advanced nobody. A real state, and a different one
+          // from both of the above.
+          //
+          // **This branch used to mean something else.** Before decision 112 the
+          // list was `status = ACTIVE`, so an empty one also meant "every
+          // applicant has been resolved" — which is now impossible here, because
+          // resolved applicants keep their rows. That sentence moved to the
+          // header below, where it is derived from the rows rather than from
+          // their absence.
           <p className="text-muted-foreground mt-6 rounded-md border p-4 text-sm">
-            Every applicant in the second round has been decided. There is nothing left to vote on.
+            Nobody was advanced to the second round. The first round has been finalized — ask in
+            Slack if that looks wrong.
           </p>
         )
       ) : (
         <>
           <p className="mt-5 text-sm font-medium">
             {rows.length} applicant{rows.length === 1 ? "" : "s"} in the round
+            {undecided < rows.length ? (
+              <span className="text-muted-foreground font-normal">
+                {" · "}
+                {undecided === 0 ? "all decided" : `${undecided} still to decide`}
+              </span>
+            ) : null}
           </p>
           <p className="text-muted-foreground mt-1 text-sm">
-            {openPass
-              ? "A pass is open. Open an applicant to read their full profile and vote."
-              : "Open an applicant to read their full profile. Voting happens in a pass, which an admin opens — until then this is here to read."}
+            {undecided === 0
+              ? "Every applicant has been decided. These stay here so you can see how the round finished."
+              : openPass
+                ? "A pass is open. Open an applicant to read their full profile and vote."
+                : "Open an applicant to read their full profile. Voting happens in a pass, which an admin opens — until then this is here to read."}
             {flagged > 0 ? ` You have flagged a conflict on ${flagged} of them.` : null}
           </p>
 
@@ -123,6 +152,23 @@ export default async function SecondRoundListPage({
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
+                    {/* Decision 111. The outcome, and only the outcome — the
+                        label is what carries the meaning and the colour is the
+                        thing you can read across a list at a glance. No count
+                        and no other reviewer, per decision 74's surviving half.
+
+                        `STATUS_LABEL` rather than a word invented here, so the
+                        reviewer's list, the profile and every admin surface all
+                        call a Sparklet the same thing. */}
+                    {row.outcome !== null ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                          OUTCOME_TONE[row.outcome]
+                        }`}
+                      >
+                        {STATUS_LABEL[row.outcome]}
+                      </span>
+                    ) : null}
                     <span className="text-muted-foreground text-sm">
                       {row.interviewResultCount === 0 && !row.hasInterviewNotes
                         ? "no interview data"
@@ -156,8 +202,17 @@ export default async function SecondRoundListPage({
                     width of the row to open into. */}
                 {/* Decision 100: once the round is closed there is nothing a
                     conflict could still bear on, and the action refuses one, so
-                    the control is absent rather than offered and refused. */}
-                {finished ? null : (
+                    the control is absent rather than offered and refused.
+
+                    **The same rule now covers a resolved applicant**, and this
+                    is the half decision 112 would have broken by accident.
+                    `flagConflict` re-checks `SECOND_ROUND_POOL` — status ACTIVE
+                    — deliberately, because a resolved applicant is readable but
+                    not writable. Keeping their row on the list without this
+                    would put a working-looking control on every green and red
+                    row that the action then refuses, which is exactly the
+                    offered-and-refused shape decision 100 exists to prevent. */}
+                {finished || row.outcome !== null ? null : (
                   <div className="border-t border-dashed px-4">
                     <ConflictControl
                       instanceId={instanceId}

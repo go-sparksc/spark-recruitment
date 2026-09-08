@@ -174,9 +174,18 @@ export async function submitPassVote(
   }
   const value = raw as typeof VoteValue.YES | typeof VoteValue.NO;
 
+  // **Still `SECOND_ROUND_POOL` here, deliberately.** Decision 112 widened what
+  // a reviewer may *read* to the whole cohort and left what they may *write*
+  // exactly where it was: a resolved applicant is not votable. This is the guard
+  // that carries "cannot be reached", which the profile's query used to be asked
+  // to carry as well and could not do without 404ing the reviewer whose own vote
+  // had just resolved them.
   const applicant = await prisma.applicant.findFirst({
     where: { id: applicantId, instanceId, ...SECOND_ROUND_POOL },
-    select: { id: true },
+    // `status` is ACTIVE by the predicate above. Selected and passed through
+    // rather than assumed, so that if this query's predicate ever changes, the
+    // availability below follows it instead of quietly disagreeing with it.
+    select: { id: true, status: true },
   });
 
   // **Decision 71's permissive half, and it is not an error.** An admin may have
@@ -218,6 +227,7 @@ export async function submitPassVote(
   // The same function the profile renders the control from, so a control that is
   // absent and an action that refuses cannot be answering different questions.
   const availability = voteAvailability({
+    applicantStatus: applicant.status,
     hasOpenPass: openPass !== null,
     isMember: membership !== null,
     hasConflict: conflict !== null,
@@ -226,6 +236,14 @@ export async function submitPassVote(
   });
 
   switch (availability.kind) {
+    case "RESOLVED":
+      // Unreachable through the query above, which already filtered to ACTIVE
+      // and returned decision 71's permissive message when it matched nothing.
+      // Handled rather than defaulted so that adding a state to the union is a
+      // typecheck failure here, which is the property this switch exists for —
+      // and if the predicate above is ever widened, this refuses rather than
+      // falling through to a write.
+      return { error: "This applicant has already been decided, so votes can no longer change." };
     case "NO_PASS":
       return { error: "No pass is open. Voting opens when an admin starts one." };
     case "NOT_IN_PASS":

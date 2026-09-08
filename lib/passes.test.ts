@@ -46,6 +46,7 @@ import {
   type PassInput,
   type ReversalContext,
 } from "@/lib/passes";
+import { outcomeOfResolution } from "@/lib/labels";
 
 /// Eleven reviewers, the number BUILD_PLAN's cases use.
 const REVIEWERS = Array.from({ length: 11 }, (_, i) => `rev-${i + 1}`);
@@ -578,6 +579,7 @@ describe("summarizePass", () => {
 
 describe("voteAvailability", () => {
   const open = {
+    applicantStatus: ApplicantStatus.ACTIVE,
     hasOpenPass: true,
     isMember: true,
     hasConflict: false,
@@ -661,6 +663,92 @@ describe("voteAvailability", () => {
     ]) {
       const availability = voteAvailability({ ...open, storedResolution: resolution });
       expect(availability.kind === "SETTLED").toBe(!isMutableResolution(resolution));
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Decisions 111 and 112 — the terminal outcome, named
+  // -------------------------------------------------------------------------
+
+  /// Decision 111 reverses decision 74's outcome half. The cost is stated there
+  /// and is real: a terminal outcome is unanimous by construction, so this tells
+  /// the reviewer who cast the last vote how every other one voted.
+  it("is RESOLVED and names the outcome for a Sparklet", () => {
+    expect(
+      voteAvailability({ ...open, applicantStatus: ApplicantStatus.SPARKLET }),
+    ).toStrictEqual({ kind: "RESOLVED", outcome: "SPARKLET" });
+  });
+
+  it("is RESOLVED and names the outcome for a rejected applicant", () => {
+    expect(
+      voteAvailability({ ...open, applicantStatus: ApplicantStatus.REJECTED }),
+    ).toStrictEqual({ kind: "RESOLVED", outcome: "REJECTED" });
+  });
+
+  /// **The case the built product actually reaches, and the one the old code
+  /// 404'd on.** An applicant resolved in pass 1 is not a member of pass 2, so
+  /// the open pass has nothing to say about them. Reading the outcome off
+  /// `Applicant.status` rather than off a pass row is what makes this answerable
+  /// at all — `isMember: false` would otherwise win and report NOT_IN_PASS,
+  /// which is true and useless.
+  it("is RESOLVED for an applicant decided by an earlier pass, not NOT_IN_PASS", () => {
+    expect(
+      voteAvailability({
+        ...open,
+        applicantStatus: ApplicantStatus.SPARKLET,
+        isMember: false,
+        storedResolution: null,
+      }),
+    ).toStrictEqual({ kind: "RESOLVED", outcome: "SPARKLET" });
+  });
+
+  /// After the round closes there is no open pass at all, and the outcome is
+  /// still the thing the reviewer is owed.
+  it("is RESOLVED with no pass open", () => {
+    expect(
+      voteAvailability({
+        ...open,
+        applicantStatus: ApplicantStatus.REJECTED,
+        hasOpenPass: false,
+      }),
+    ).toStrictEqual({ kind: "RESOLVED", outcome: "REJECTED" });
+  });
+
+  /// RESOLVED outranks the conflict, unlike SETTLED which does not. Every other
+  /// state answers "may this reviewer vote now"; this one answers "may anyone
+  /// ever again", and the conflict control beside it still shows the recusal.
+  it("reports the outcome ahead of the reviewer's own conflict", () => {
+    expect(
+      voteAvailability({
+        ...open,
+        applicantStatus: ApplicantStatus.SPARKLET,
+        hasConflict: true,
+      }),
+    ).toStrictEqual({ kind: "RESOLVED", outcome: "SPARKLET" });
+  });
+
+  /// Decision 112 keeps CARRIED and NEEDS_ADMIN uncoloured and unnamed. CARRIED
+  /// stays SETTLED and stays empty — `toStrictEqual` is what catches an outcome
+  /// key arriving on it, which would travel in the RSC payload whether or not
+  /// the component rendered it.
+  it("leaves a CARRIED applicant settled and unnamed", () => {
+    expect(
+      voteAvailability({ ...open, storedResolution: PassResolution.CARRIED }),
+    ).toStrictEqual({ kind: "SETTLED" });
+  });
+
+  /// The vocabulary and the state machine, asserted to agree. Same drift guard
+  /// `needsAdminAtClose` and `UNRESOLVED_AT_CLOSE` carry: a fifth resolution
+  /// cannot teach only one of them.
+  it("agrees with isTerminal about which resolutions are outcomes", () => {
+    for (const resolution of [
+      PassResolution.SPARKLET,
+      PassResolution.REJECTED,
+      PassResolution.CARRIED,
+      PassResolution.NEEDS_ADMIN,
+      null,
+    ]) {
+      expect(outcomeOfResolution(resolution) !== null).toBe(isTerminal(resolution));
     }
   });
 });
