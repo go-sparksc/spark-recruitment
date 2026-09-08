@@ -89,15 +89,47 @@ that pass*, so an applicant rejected in pass 3 was genuinely carried by pass 1 a
 pass 1's grid has to keep saying so.
 
 **Gate — in a browser, not curl** (Phase 7's process failure was hand-minted
-tokens behind "renders correctly" claims):
+tokens behind "renders correctly" claims). **PASSED.**
 
-- [ ] Cast the vote that completes unanimity. Land on a green profile, not a 404.
-- [ ] The list shows red and green, and the row keeps its place in source order.
-- [ ] A `CARRIED` applicant is present, settled, and **uncoloured**.
-- [ ] A resolved row offers no conflict control, on the list and on the profile.
-- [ ] Pass 1's grid still shows pass 1's resolutions after pass 2 exists.
-- [ ] No other reviewer's vote is in the RSC payload (decision 74, clause 17z).
-- [ ] A bad applicant id under `/r/` renders the new not-found with a way back.
+- [x] Cast the vote that completes unanimity. Land on a green profile, not a 404.
+- [x] The list shows red and green, and the row keeps its place in source order.
+- [x] A `CARRIED` applicant is present, settled, and **uncoloured**.
+- [x] A resolved row offers no conflict control, on the list and on the profile.
+- [x] Pass 1's grid still shows pass 1's resolutions after pass 2 exists.
+- [x] No other reviewer's vote is in the RSC payload (decision 74, clause 17z).
+- [x] A bad applicant id under `/r/` renders the new not-found with a way back.
+
+**How the first one was reached, since it needed a state the seed does not
+contain.** No applicant anywhere was one vote from resolving, so the transition
+was staged on `seed_walk0907` — the instance named throwaway — by creating pass 1
+and writing YES votes for 11 of its 12 eligible second-round reviewers. The
+twelfth vote was cast by hand in the browser, signed in as that reviewer.
+
+Before: "Your vote", Yes / No / Submit, and a conflict control. After submitting:
+the same URL, no navigation, no 404 — the section became "Outcome" carrying the
+green "This applicant is now a Sparklet", and the conflict section was gone. The
+list went from "30 still to decide" to 29, with the green badge on Applicant 1
+holding its place in source order.
+
+The database recorded all four writes FR-17 requires: 12 `PassVote` rows,
+`PassApplicant.resolution = SPARKLET` with `resolvedAt`, `Applicant.status =
+SPARKLET`, and a `Decision` at `stage = SECOND_ROUND` with `actor = SYSTEM`
+(decision 69).
+
+**The staging and teardown scripts were scratch, not committed**, and the
+teardown asserted its own result rather than assuming it: 1 pass, 12 votes, 1
+decision and 1 resolved applicant removed, all four counts back to zero, and
+`seed_walk0907` confirmed back at 30 active with no pass. That check matters more
+here than it usually would — `CLAUDE.md`'s security note is about a fixture that
+destroyed rows the script had never created, so a script that writes votes into a
+real instance is exactly the shape that goes wrong. It was guarded three ways:
+the instance id hardcoded, the instance *name* required to still contain
+"throwaway", and a refusal if any pass already existed.
+
+**Decision 74's payload check is a code reading, not a byte inspection**: the
+profile's only `passVote` query is a `findUnique` scoped to the signed-in
+reviewer, unchanged by this slice. Said plainly because "verified" should not
+cover two different strengths of evidence.
 
 ---
 
