@@ -4,6 +4,7 @@ import { useActionState } from "react";
 
 import { uploadInterviewSheet, type InterviewImportState } from "./actions";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /// A form bound to a server action rather than an onClick handler, the same
 /// posture decision 35 argued for FR-3's commit. React ships this with
@@ -32,14 +33,13 @@ export function UploadForm({
       <input type="hidden" name="instanceId" value={instanceId} />
       <input type="hidden" name="sheet" value={sheet} />
 
-      <input
+      <Input
         type="file"
         name="file"
         accept=".csv,text/csv"
         required
         disabled={pending}
         aria-label={`${label} CSV`}
-        className="text-sm file:mr-3 file:rounded-md file:border file:bg-transparent file:px-3 file:py-1.5 file:text-sm"
       />
 
       {hasStaged ? (
