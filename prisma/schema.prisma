@@ -103,7 +103,7 @@ enum MatchTier {
 /// second round closes is identified by `PassApplicant.resolution = NEEDS_ADMIN` on
 /// their final pass row (PRD FR-17), and stays ACTIVE. A status value would be a
 /// second copy of that fact with no rule for which one wins when they disagree.
-/// FR-19, FR-20 and archive-and-purge read the pass row, never this column.
+/// FR-19 and FR-20 read the pass row, never this column.
 /// There was also an ADVANCED here, dropped per PRD decision 41. It meant
 /// "selected, not yet active in the next round" and nothing downstream read it
 /// or cleared it: FR-17 defines second-round pass membership as every applicant
@@ -188,25 +188,6 @@ model Instance {
   currentStage InstanceStage @default(WRITTEN)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-  /// When §8's archive-and-purge ran. Null on a live cycle.
-  ///
-  /// Also the read-only flag: `requireInstance` and `requireReviewer` both
-  /// refuse a non-null instance, because the live screens would render blank
-  /// names and empty essays beside real scores, which reads as data loss rather
-  /// than as retention. See PRD decision 95.
-  archivedAt   DateTime?
-  /// The aggregate statistics §8 retains, frozen at the moment of the purge.
-  ///
-  /// **Materialized rather than computed on read, and that is the whole design.**
-  /// FR-19's funnel is computed from `Applicant.data`, which the purge empties —
-  /// so a purge that did not freeze the numbers first would destroy the very
-  /// statistics §8 says to keep, while appearing to comply. Written inside the
-  /// purge transaction, before anything is deleted.
-  ///
-  /// Null on a live cycle, where the funnel is computed from the rows instead.
-  /// Non-null is what the archive page renders. Shape is `ArchiveSummary` in
-  /// lib/archive.ts, versioned by `summaryVersion`.
-  archiveSummary Json?
 
   /// Null until the FR-3 commit. Non-null is what refuses a second CSV: an
   /// instance accepts exactly one file and commit is final.
@@ -890,9 +871,14 @@ model AuditLog {
   ///
   /// deleteInstance purges the instance's other audit rows first — they
   /// describe entities about to stop existing and their previousValue can carry
-  /// applicant data that retention says must not outlive the cycle — then
-  /// writes the deletion record, which this FK orphans by design. Its identity
-  /// lives in entityId and previousValue, not in the dead reference.
+  /// applicant data that should not outlive the cycle — then writes the
+  /// deletion record, which this FK orphans by design. Its identity lives in
+  /// entityId and previousValue, not in the dead reference.
+  ///
+  /// Nothing deletes the orphans. Archive-and-purge aged them out by date and
+  /// decision 109 removed it, so these rows and the limiter's lockout rows now
+  /// accumulate for the life of the deployment. Accepted at this scale; see
+  /// decision 109's first consequence.
   instanceId    String?
   instance      Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
   /// The ROLE that acted: "admin", or "system" for a lockout the limiter wrote

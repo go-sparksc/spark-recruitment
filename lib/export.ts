@@ -18,9 +18,15 @@
 //     identity and the comparison needs no exceptions.
 
 /// Bumped when the shape of the envelope changes in a way an older restore
-/// could not read. Adding a column to a table is NOT a format change — it is
+/// could not read. Adding or removing a column is NOT a format change — it is
 /// caught by the manifest check in `parseExport`, which is the more precise
 /// failure and names the column.
+///
+/// Removal was first exercised by decision 109, which dropped `archivedAt` and
+/// `archiveSummary`: an export written before it fails with
+/// `Instance[0] carries unknown columns: archivedAt, archiveSummary`, and the
+/// recovery is deleting those two keys. Decision 86's round-trip guarantee is a
+/// same-version guarantee, which is why this number did not move.
 export const EXPORT_FORMAT_VERSION = 1;
 
 // ---------------------------------------------------------------------------
@@ -59,7 +65,7 @@ export interface TableManifest {
 /// compile time — a table added here with no query fails `npm run typecheck`
 /// rather than exporting as an empty array.
 export const EXPORT_TABLES = [
-  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "archivedAt", "archiveSummary", "importCommittedAt", "importProposals"] },
+  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "importCommittedAt", "importProposals"] },
   { table: "FieldGroup", columns: ["id", "instanceId", "key", "displayName", "category", "isMultiSelect", "isIncluded", "ordinal", "isReviewerVisible", "createdAt", "updatedAt"] },
   { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "isReviewerVisible", "createdAt", "updatedAt"] },
   { table: "ImportRow", columns: ["id", "instanceId", "rowIndex", "cells", "discarded", "createdAt"] },
@@ -124,7 +130,7 @@ export const NON_INSTANCE_TABLES: readonly string[] = [
 /// real column of its table, which catches the typo case that would otherwise
 /// leave a timestamp quietly unconverted.
 export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> = {
-  Instance: ["createdAt", "updatedAt", "archivedAt", "importCommittedAt"],
+  Instance: ["createdAt", "updatedAt", "importCommittedAt"],
   FieldGroup: ["createdAt", "updatedAt"],
   Field: ["createdAt", "updatedAt"],
   ImportRow: ["createdAt"],
@@ -152,7 +158,8 @@ export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> 
 
 /// Columns that are **nullable** `Json` in the schema.
 ///
-/// These are the only two places where `null` cannot be written as `null`:
+/// These are the only two remaining places where `null` cannot be written as
+/// `null`:
 /// Prisma wants `Prisma.DbNull` for a SQL NULL in a nullable Json column and
 /// `Prisma.JsonNull` for a JSON `null` literal, and passing a bare `null` is a
 /// type error rather than a silent wrong write. Non-nullable Json columns
@@ -164,11 +171,7 @@ export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> 
 /// instance, which is the guard §5 added for a different reason and which
 /// happens to cover this one too.
 export const NULLABLE_JSON_COLUMNS: Readonly<Partial<Record<ExportTableName, readonly string[]>>> = {
-  // archiveSummary rides here so an archived cycle's frozen statistics survive
-  // the FR-20 round trip. It is the one thing left describing that cycle's
-  // demographics after the purge, so an export that dropped it would be lossy in
-  // exactly the way decision 86 says an export must not be.
-  Instance: ["importProposals", "archiveSummary"],
+  Instance: ["importProposals"],
   AuditLog: ["previousValue"],
 };
 
