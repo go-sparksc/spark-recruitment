@@ -53,7 +53,7 @@ export function ImportCommitted({
         </p>
         <p>
           <strong className="font-medium">What is still yours to change:</strong> whether a column is
-          included, and which rounds can see it. Those are below and stay editable for the whole
+          included, and whether reviewers can see it. Those are below and stay editable for the whole
           cycle — a round happens weeks after an import, and deciding what reviewers see is not a
           decision anyone makes while mapping CSV columns. What is fixed is what each column{" "}
           <em>means</em>: its display name, its email or name designation, its grouping and its

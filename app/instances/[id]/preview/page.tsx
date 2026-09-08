@@ -230,8 +230,8 @@ export default async function PreviewPage({
                   which the name.
                 </li>
                 <li className="text-muted-foreground">
-                  · Still yours to change afterwards: whether a column is included, and which rounds
-                  can see it. Those stay on the mapping table for the whole cycle.
+                  · Still yours to change afterwards: whether a column is included, and whether
+                  reviewers can see it. Those stay on the mapping table for the whole cycle.
                 </li>
                 {findings.warnings.length > 0 ? (
                   <li className="text-amber-700 dark:text-amber-400">
