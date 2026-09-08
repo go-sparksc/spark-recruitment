@@ -203,6 +203,39 @@ rows first so the deletion orphaned none — decision 109 records that nothing a
 those out any more, and an instance that was never a real cycle should leave zero
 rows behind rather than one. The other six instances were confirmed untouched.
 
+### The handle audit this slice prompted
+
+Fixing one list raised the obvious question, so every surface that renders an
+applicant's name was checked rather than assumed. Carrying a handle already:
+FR-10's results table (`#{sourceRowIndex}`), FR-19's final dashboard, the admin
+applicant profile, FR-8's assignments page, FR-11's selection confirm panel, both
+second-round surfaces and FR-18's grid.
+
+**Missing it, and scheduled into 9.5:**
+
+- `app/instances/[id]/first-round-results/results-table.tsx` — FR-15's ranked
+  list, name alone beside the checkboxes that advance or reject. **The
+  consequential one.** On the list 9.2 fixed, a name collision cost a reviewer
+  opening the wrong profile; here it costs advancing the wrong applicant. The
+  confirm panel has the same gap — it joins `displayName` for unvoted rejects and
+  can print one name twice.
+- `app/r/[instanceId]/first-round/[applicantId]/page.tsx` — the profile header.
+  Cosmetic by comparison, and inconsistent with the second round's profile and
+  with the list that now links to it.
+
+**Left alone, deliberately:** FR-12/13's reconciliation picker labels candidates
+`name — email`. Email is the join key and disambiguates better than a row number
+where one exists; it degenerates only where FR-3 permitted a blank email. Noted
+so a successor sees the choice was made.
+
+**The general lesson, which is the reusable part.** Phase 6 found this on FR-18's
+grid and fixed it there. Phase 9.2 found it again on the first-round list. Twice
+is a pattern: the data model refuses name-keying correctly, and then the
+*presentation* layer reintroduces the ambiguity one screen at a time, because
+each screen decides independently whether to print the handle. Anywhere a name
+identifies an applicant next to a control that acts on them, the handle belongs
+beside it.
+
 ---
 
 ## Slices 9.3 – 9.5
