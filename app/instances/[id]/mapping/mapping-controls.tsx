@@ -124,6 +124,75 @@ export function ProposalCard({
 
 // ---------------------------------------------------------------------------
 
+/// §6's visibility control, shared by the group panel and the column row so the
+/// two cannot drift.
+///
+/// Two mutually exclusive checkboxes rather than a dropdown or a radio pair, by
+/// request. A radio group is the native control for this shape and would get
+/// keyboard and screen-reader behaviour for free, so the ARIA roles below are
+/// doing by hand what `type="radio"` would have done on its own — without them
+/// the pair announces as two independent toggles, which is the one reading that
+/// is actually wrong.
+///
+/// Neither box is ticked when the value is null. That is FR-2's no-default
+/// rule made visible: unchosen looks unchosen. There is deliberately no way
+/// back to it — clicking a ticked box is a no-op rather than an untick.
+function VisibilityChoice({
+  value,
+  disabled,
+  lockedNote,
+  onChange,
+}: {
+  value: boolean | null;
+  disabled: boolean;
+  /// Set when the choice is not the admin's to make — a demographic column, or
+  /// an excluded one. Renders the state read-only with the reason.
+  lockedNote: string | null;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <span className="flex items-center gap-3" role="radiogroup" aria-label="Reviewer visibility">
+      <label className="flex items-center gap-1.5 text-xs">
+        <input
+          type="checkbox"
+          role="radio"
+          aria-checked={value === true}
+          checked={value === true}
+          disabled={disabled || lockedNote !== null}
+          onChange={() => onChange(true)}
+        />
+        Reviewer-visible
+      </label>
+      <label className="flex items-center gap-1.5 text-xs">
+        <input
+          type="checkbox"
+          role="radio"
+          aria-checked={value === false || lockedNote !== null}
+          checked={value === false || lockedNote !== null}
+          disabled={disabled || lockedNote !== null}
+          onChange={() => onChange(false)}
+        />
+        Backend only
+      </label>
+      {lockedNote !== null ? (
+        <span className="text-muted-foreground text-xs">{lockedNote}</span>
+      ) : value === null ? (
+        <span className="text-xs text-amber-600">not set</span>
+      ) : null}
+    </span>
+  );
+}
+
+/// The reason a column's visibility is not the admin's to choose, or null when
+/// it is. Mirrors `mustChooseVisibility`'s exemptions in lib/fields.ts — that
+/// function decides whether the commit is blocked, this decides what the row
+/// says, and they must agree.
+function visibilityLock(category: FieldCategory, isIncluded: boolean): string | null {
+  if (category === FieldCategory.DEMOGRAPHIC) return "locked: demographics are never shown (§6)";
+  if (!isIncluded) return "excluded, so hidden from everyone";
+  return null;
+}
+
 export interface GroupView {
   id: string;
   key: string;
@@ -131,8 +200,8 @@ export interface GroupView {
   category: FieldCategory;
   isIncluded: boolean;
   isMultiSelect: boolean;
-  visibleToWrittenReviewer: boolean | null;
-  visibleToFirstRoundReviewer: boolean | null;
+  isReviewerVisible: boolean | null;
+  needsVisibilityChoice: boolean;
   members: { id: string; displayName: string; groupRole: FieldGroupRole | null }[];
 }
 
@@ -220,48 +289,16 @@ export function GroupPanel({
           Multi-select
         </label>
 
-        {/* §6 makes only OTHER configurable per round. For the other two the
-            toggles would be stored and never read, so they are not offered. */}
-        {group.category === FieldCategory.OTHER ? (
-          <>
-            <label className="flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
-                checked={group.visibleToWrittenReviewer ?? false}
-                disabled={pending || !group.isIncluded}
-                onChange={(e) =>
-                  run(() =>
-                    setGroupRoundSettings(instanceId, group.id, {
-                      visibleToWrittenReviewer: e.target.checked,
-                    }),
-                  )
-                }
-              />
-              Written reviewers
-            </label>
-            <label className="flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
-                checked={group.visibleToFirstRoundReviewer ?? false}
-                disabled={pending || !group.isIncluded}
-                onChange={(e) =>
-                  run(() =>
-                    setGroupRoundSettings(instanceId, group.id, {
-                      visibleToFirstRoundReviewer: e.target.checked,
-                    }),
-                  )
-                }
-              />
-              First-round reviewers
-            </label>
-          </>
-        ) : (
-          <span className="text-muted-foreground text-xs">
-            {group.category === FieldCategory.DEMOGRAPHIC
-              ? "Hidden from written and first-round reviewers (§6)"
-              : "Visible to written reviewers, hidden from first round (§6)"}
-          </span>
-        )}
+        {/* One choice for the whole group, since §5 makes visibility a property
+            of the group and not of its members. */}
+        <VisibilityChoice
+          value={group.isReviewerVisible}
+          disabled={pending}
+          lockedNote={visibilityLock(group.category, group.isIncluded)}
+          onChange={(next) =>
+            run(() => setGroupRoundSettings(instanceId, group.id, { isReviewerVisible: next }))
+          }
+        />
       </div>
 
       {group.isMultiSelect && !hasFreeText ? (
@@ -377,13 +414,13 @@ export interface ColumnView {
   groupId: string | null;
   groupRole: FieldGroupRole | null;
   promotedRole: PromotedRole | null;
-  visibleToWrittenReviewer: boolean | null;
-  visibleToFirstRoundReviewer: boolean | null;
+  isReviewerVisible: boolean | null;
   /// Resolved through lib/fields.ts, so the row shows what the group actually
   /// imposes rather than what the column happens to store.
   effectiveCategory: FieldCategory;
   effectiveIncluded: boolean;
   inheritedFromGroup: boolean;
+  needsVisibilityChoice: boolean;
 }
 
 export function ColumnControls({
@@ -568,39 +605,18 @@ export function ColumnControls({
           Include
         </label>
 
-        {!grouped && column.effectiveCategory === FieldCategory.OTHER ? (
-          <>
-            <label className="flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
-                checked={column.visibleToWrittenReviewer ?? false}
-                disabled={pending || !column.effectiveIncluded}
-                onChange={(e) =>
-                  run(() =>
-                    setFieldRoundSettings(instanceId, column.id, {
-                      visibleToWrittenReviewer: e.target.checked,
-                    }),
-                  )
-                }
-              />
-              Written
-            </label>
-            <label className="flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
-                checked={column.visibleToFirstRoundReviewer ?? false}
-                disabled={pending || !column.effectiveIncluded}
-                onChange={(e) =>
-                  run(() =>
-                    setFieldRoundSettings(instanceId, column.id, {
-                      visibleToFirstRoundReviewer: e.target.checked,
-                    }),
-                  )
-                }
-              />
-              1st round
-            </label>
-          </>
+        {/* Offered on every category now, not only OTHER — decision 108. A
+            grouped column shows nothing here, since the group carries the
+            choice; a promoted column has no Field row after commit. */}
+        {!grouped && !promoted ? (
+          <VisibilityChoice
+            value={column.isReviewerVisible}
+            disabled={pending}
+            lockedNote={visibilityLock(column.effectiveCategory, column.effectiveIncluded)}
+            onChange={(next) =>
+              run(() => setFieldRoundSettings(instanceId, column.id, { isReviewerVisible: next }))
+            }
+          />
         ) : null}
 
         {grouped ? (

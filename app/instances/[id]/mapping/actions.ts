@@ -148,8 +148,7 @@ export async function setFieldRoundSettings(
   fieldId: string,
   patch: {
     isIncluded?: boolean;
-    visibleToWrittenReviewer?: boolean | null;
-    visibleToFirstRoundReviewer?: boolean | null;
+    isReviewerVisible?: boolean | null;
   },
 ): Promise<ActionState> {
   const { instance, session } = await openInstance(instanceId);
@@ -159,9 +158,9 @@ export async function setFieldRoundSettings(
     select: {
       groupId: true,
       promotedRole: true,
+      category: true,
       isIncluded: true,
-      visibleToWrittenReviewer: true,
-      visibleToFirstRoundReviewer: true,
+      isReviewerVisible: true,
     },
   });
   if (!field) return { error: "No such column." };
@@ -179,13 +178,18 @@ export async function setFieldRoundSettings(
     return { error: "The email and name columns cannot be excluded (FR-2)." };
   }
 
+  // §6's DEMOGRAPHIC lock, refused here and not only hidden in the UI. The
+  // resolver already treats a stored true as inert, so this is the second of
+  // two independent guards rather than the only one — goal 3 is that the bias
+  // control is the system's, not an admin's memory. Decision 108.
+  if (patch.isReviewerVisible === true && field.category === FieldCategory.DEMOGRAPHIC) {
+    return { error: "Demographic columns cannot be shown to reviewers (§6)." };
+  }
+
   const data = {
     ...(patch.isIncluded !== undefined ? { isIncluded: patch.isIncluded } : {}),
-    ...(patch.visibleToWrittenReviewer !== undefined
-      ? { visibleToWrittenReviewer: patch.visibleToWrittenReviewer }
-      : {}),
-    ...(patch.visibleToFirstRoundReviewer !== undefined
-      ? { visibleToFirstRoundReviewer: patch.visibleToFirstRoundReviewer }
+    ...(patch.isReviewerVisible !== undefined
+      ? { isReviewerVisible: patch.isReviewerVisible }
       : {}),
   };
 
@@ -204,8 +208,7 @@ export async function setFieldRoundSettings(
           // this row records a policy change, not what the policy exposed.
           previousValue: {
             isIncluded: field.isIncluded,
-            visibleToWrittenReviewer: field.visibleToWrittenReviewer,
-            visibleToFirstRoundReviewer: field.visibleToFirstRoundReviewer,
+            isReviewerVisible: field.isReviewerVisible,
           },
         },
       });
@@ -411,8 +414,7 @@ export async function setGroupRoundSettings(
   groupId: string,
   patch: {
     isIncluded?: boolean;
-    visibleToWrittenReviewer?: boolean | null;
-    visibleToFirstRoundReviewer?: boolean | null;
+    isReviewerVisible?: boolean | null;
   },
 ): Promise<ActionState> {
   const { instance, session } = await openInstance(instanceId);
@@ -421,20 +423,23 @@ export async function setGroupRoundSettings(
     where: { id: groupId, instanceId },
     select: {
       id: true,
+      category: true,
       isIncluded: true,
-      visibleToWrittenReviewer: true,
-      visibleToFirstRoundReviewer: true,
+      isReviewerVisible: true,
     },
   });
   if (!group) return { error: "No such group." };
 
+  // §6's DEMOGRAPHIC lock, the group half. This is the one that matters most in
+  // practice: the ethnicity group is the column set goal 3 is written about.
+  if (patch.isReviewerVisible === true && group.category === FieldCategory.DEMOGRAPHIC) {
+    return { error: "Demographic columns cannot be shown to reviewers (§6)." };
+  }
+
   const data = {
     ...(patch.isIncluded !== undefined ? { isIncluded: patch.isIncluded } : {}),
-    ...(patch.visibleToWrittenReviewer !== undefined
-      ? { visibleToWrittenReviewer: patch.visibleToWrittenReviewer }
-      : {}),
-    ...(patch.visibleToFirstRoundReviewer !== undefined
-      ? { visibleToFirstRoundReviewer: patch.visibleToFirstRoundReviewer }
+    ...(patch.isReviewerVisible !== undefined
+      ? { isReviewerVisible: patch.isReviewerVisible }
       : {}),
   };
 
@@ -451,8 +456,7 @@ export async function setGroupRoundSettings(
           entityId: groupId,
           previousValue: {
             isIncluded: group.isIncluded,
-            visibleToWrittenReviewer: group.visibleToWrittenReviewer,
-            visibleToFirstRoundReviewer: group.visibleToFirstRoundReviewer,
+            isReviewerVisible: group.isReviewerVisible,
           },
         },
       });

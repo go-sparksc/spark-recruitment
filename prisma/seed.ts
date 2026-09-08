@@ -137,6 +137,7 @@ async function main() {
             category: ETHNICITY_GROUP.category,
             isMultiSelect: ETHNICITY_GROUP.isMultiSelect,
             isIncluded: ETHNICITY_GROUP.isIncluded,
+            isReviewerVisible: ETHNICITY_GROUP.isReviewerVisible,
             // Sorts where its first member sits.
             ordinal: ethnicityGroupOrdinal,
           },
@@ -153,6 +154,7 @@ async function main() {
           groupId: spec.groupKey === null ? null : ETHNICITY_GROUP_ID,
           groupRole: spec.groupRole,
           isIncluded: spec.isIncluded,
+          isReviewerVisible: spec.isReviewerVisible,
           ordinal: spec.ordinal,
         })),
       },

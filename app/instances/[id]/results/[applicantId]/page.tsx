@@ -83,8 +83,7 @@ export default async function ApplicantResultPage({
         isIncluded: true,
         groupId: true,
         groupRole: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -94,8 +93,7 @@ export default async function ApplicantResultPage({
         displayName: true,
         category: true,
         isIncluded: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
     prisma.rubricCategory.findMany({

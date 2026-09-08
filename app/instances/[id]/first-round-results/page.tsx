@@ -55,8 +55,7 @@ export default async function FirstRoundResultsPage({
         isIncluded: true,
         groupId: true,
         groupRole: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -68,8 +67,7 @@ export default async function FirstRoundResultsPage({
         ordinal: true,
         category: true,
         isIncluded: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
   ]);

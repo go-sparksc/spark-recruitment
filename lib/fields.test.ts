@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { FieldCategory, FieldGroupRole } from "@/generated/prisma/enums";
+import { FieldCategory, FieldGroupRole, PromotedRole } from "@/generated/prisma/enums";
 import {
   cleanHeader,
+  groupMustChooseVisibility,
+  mustChooseVisibility,
   projectApplicantData,
   resolveField,
   resolvePromoted,
   slugify,
   uniqueSlug,
   visibleFieldIds,
+  type ChoosableFieldLike,
   type FieldGroupLike,
   type FieldLike,
   type Viewer,
@@ -21,15 +24,17 @@ const VIEWERS: Viewer[] = [
   "ADMIN",
 ];
 
-function field(overrides: Partial<FieldLike> = {}): FieldLike {
+const REVIEWERS: Viewer[] = ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"];
+
+function field(overrides: Partial<ChoosableFieldLike> = {}): ChoosableFieldLike {
   return {
     id: "f1",
     category: FieldCategory.OTHER,
     isIncluded: true,
     groupId: null,
     groupRole: null,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    promotedRole: null,
+    isReviewerVisible: null,
     ...overrides,
   };
 }
@@ -39,57 +44,116 @@ function group(overrides: Partial<FieldGroupLike> = {}): FieldGroupLike {
     id: "g1",
     category: FieldCategory.OTHER,
     isIncluded: true,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    isReviewerVisible: null,
     ...overrides,
   };
 }
 
-describe("resolveField — the §6 matrix with no overrides", () => {
-  // The table in PRD §6, transcribed. If this disagrees with the PRD, the PRD
-  // is right and this is the bug.
-  const expected: Record<FieldCategory, Record<Viewer, boolean>> = {
-    [FieldCategory.DEMOGRAPHIC]: {
-      WRITTEN_REVIEWER: false,
-      FIRST_ROUND_REVIEWER: false,
-      SECOND_ROUND_REVIEWER: true,
-      ADMIN: true,
-    },
-    [FieldCategory.RESPONSE]: {
-      WRITTEN_REVIEWER: true,
-      FIRST_ROUND_REVIEWER: false,
-      SECOND_ROUND_REVIEWER: true,
-      ADMIN: true,
-    },
-    [FieldCategory.OTHER]: {
-      WRITTEN_REVIEWER: false,
-      FIRST_ROUND_REVIEWER: false,
-      SECOND_ROUND_REVIEWER: true,
-      ADMIN: true,
-    },
-  };
+describe("resolveField — §6's binary flag", () => {
+  // Decision 108: one flag, no per-round distinction. If this disagrees with
+  // the PRD, the PRD is right and this is the bug.
 
   for (const category of Object.values(FieldCategory)) {
-    for (const viewer of VIEWERS) {
-      it(`${category} is ${expected[category][viewer] ? "visible" : "hidden"} to ${viewer}`, () => {
-        expect(resolveField(field({ category }), null, viewer).isVisible).toBe(
-          expected[category][viewer],
-        );
-      });
-    }
+    const locked = category === FieldCategory.DEMOGRAPHIC;
+
+    it(`${category} with the flag set is ${locked ? "still hidden" : "visible"} to every reviewer round`, () => {
+      const f = field({ category, isReviewerVisible: true });
+      for (const viewer of REVIEWERS) {
+        expect(resolveField(f, null, viewer).isVisible).toBe(!locked);
+      }
+    });
+
+    it(`${category} with the flag unset is hidden from every reviewer round`, () => {
+      const f = field({ category });
+      for (const viewer of REVIEWERS) {
+        expect(resolveField(f, null, viewer).isVisible).toBe(false);
+      }
+    });
+
+    it(`${category} is visible to ADMIN`, () => {
+      expect(resolveField(field({ category }), null, "ADMIN").isVisible).toBe(true);
+    });
   }
 
-  it("hides demographics from written and first-round reviewers — the bias control", () => {
-    const demographic = field({ category: FieldCategory.DEMOGRAPHIC });
-    expect(resolveField(demographic, null, "WRITTEN_REVIEWER").isVisible).toBe(false);
-    expect(resolveField(demographic, null, "FIRST_ROUND_REVIEWER").isVisible).toBe(false);
+  it("resolves the same for all three reviewer rounds — there is no per-round rule", () => {
+    for (const isReviewerVisible of [true, false, null]) {
+      const resolved = REVIEWERS.map(
+        (viewer) => resolveField(field({ isReviewerVisible }), null, viewer).isVisible,
+      );
+      expect(new Set(resolved).size).toBe(1);
+    }
   });
 
-  it("hides written responses from first-round reviewers", () => {
+  it("shows written responses to first-round reviewers — decision 108's first reversal", () => {
+    // The old matrix hid RESPONSE from this round specifically. It no longer does.
     expect(
-      resolveField(field({ category: FieldCategory.RESPONSE }), null, "FIRST_ROUND_REVIEWER")
+      resolveField(
+        field({ category: FieldCategory.RESPONSE, isReviewerVisible: true }),
+        null,
+        "FIRST_ROUND_REVIEWER",
+      ).isVisible,
+    ).toBe(true);
+  });
+
+  it("hides demographics from second-round reviewers — decision 108's second reversal", () => {
+    // The old matrix showed DEMOGRAPHIC to this round. FR-16's "complete
+    // applicant profile" no longer includes it.
+    expect(
+      resolveField(
+        field({ category: FieldCategory.DEMOGRAPHIC }),
+        null,
+        "SECOND_ROUND_REVIEWER",
+      ).isVisible,
+    ).toBe(false);
+  });
+
+  it("hides an OTHER column from second-round reviewers unless it is ticked", () => {
+    // Decision 108's third change: OTHER used to be unconditionally visible to
+    // this round. Now it is one tick like anything else.
+    expect(
+      resolveField(field({ category: FieldCategory.OTHER }), null, "SECOND_ROUND_REVIEWER")
         .isVisible,
     ).toBe(false);
+    expect(
+      resolveField(
+        field({ category: FieldCategory.OTHER, isReviewerVisible: true }),
+        null,
+        "SECOND_ROUND_REVIEWER",
+      ).isVisible,
+    ).toBe(true);
+  });
+});
+
+describe("resolveField — the DEMOGRAPHIC lock", () => {
+  it("ignores a stored true on a DEMOGRAPHIC field, for every reviewer round", () => {
+    // The lock lives in the resolver, not only in the mapping UI, so a value
+    // that arrives some other way is inert. Decision 18's property, carried
+    // into the binary model by decision 108. This is the bias control.
+    const f = field({ category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: true });
+
+    for (const viewer of REVIEWERS) {
+      expect(resolveField(f, null, viewer).isVisible).toBe(false);
+    }
+  });
+
+  it("ignores a stored true on a DEMOGRAPHIC group, for every reviewer round", () => {
+    const member = field({ groupId: "g1", groupRole: FieldGroupRole.OPTION });
+    const g = group({ category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: true });
+
+    for (const viewer of REVIEWERS) {
+      expect(resolveField(member, g, viewer).isVisible).toBe(false);
+    }
+  });
+
+  it("still shows a locked demographic field to ADMIN", () => {
+    // Locked out of the reviewer rounds, not out of FR-10 and FR-19.
+    expect(
+      resolveField(
+        field({ category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: true }),
+        null,
+        "ADMIN",
+      ).isVisible,
+    ).toBe(true);
   });
 });
 
@@ -123,17 +187,24 @@ describe("resolveField — the group wins over the member", () => {
     expect(resolved.isVisible).toBe(false);
   });
 
-  it("ignores a member's own per-round override when grouped", () => {
-    // Member tries to make itself visible to written reviewers; the group is
-    // silent, so the §6 default applies and the member's value is not read.
+  it("ignores a member's own visibility flag when grouped", () => {
+    // Member tries to make itself visible; the group has not been chosen, so
+    // the column stays hidden and the member's value is never read.
     const member = field({
       category: FieldCategory.OTHER,
       groupId: "g1",
       groupRole: FieldGroupRole.OPTION,
-      visibleToWrittenReviewer: true,
+      isReviewerVisible: true,
     });
 
     expect(resolveField(member, group(), "WRITTEN_REVIEWER").isVisible).toBe(false);
+  });
+
+  it("takes the group's visibility even when the member is silent", () => {
+    const member = field({ groupId: "g1", groupRole: FieldGroupRole.OPTION });
+    const g = group({ isReviewerVisible: true });
+
+    expect(resolveField(member, g, "WRITTEN_REVIEWER").isVisible).toBe(true);
   });
 
   it("throws when a grouped field is resolved without its group", () => {
@@ -162,11 +233,11 @@ describe("resolveField — exclusion beats everything", () => {
     }
   });
 
-  it("hides an excluded field even with an explicit visible override", () => {
+  it("hides an excluded field even with the visibility flag set", () => {
     const excluded = field({
       category: FieldCategory.OTHER,
       isIncluded: false,
-      visibleToWrittenReviewer: true,
+      isReviewerVisible: true,
     });
 
     expect(resolveField(excluded, null, "WRITTEN_REVIEWER").isVisible).toBe(false);
@@ -175,7 +246,7 @@ describe("resolveField — exclusion beats everything", () => {
   it("hides an excluded RESPONSE from a written reviewer who would otherwise see it", () => {
     expect(
       resolveField(
-        field({ category: FieldCategory.RESPONSE, isIncluded: false }),
+        field({ category: FieldCategory.RESPONSE, isIncluded: false, isReviewerVisible: true }),
         null,
         "WRITTEN_REVIEWER",
       ).isVisible,
@@ -183,107 +254,103 @@ describe("resolveField — exclusion beats everything", () => {
   });
 });
 
-describe("resolveField — per-round overrides", () => {
-  it("honours an override on OTHER for the written round", () => {
-    expect(
-      resolveField(
-        field({ category: FieldCategory.OTHER, visibleToWrittenReviewer: true }),
-        null,
-        "WRITTEN_REVIEWER",
-      ).isVisible,
-    ).toBe(true);
+describe("mustChooseVisibility — FR-2's no-default rule", () => {
+  it("asks for a choice on an included, ungrouped, non-demographic column", () => {
+    expect(mustChooseVisibility(field(), null)).toBe(true);
   });
 
-  it("honours an override on OTHER for the first round, independently", () => {
-    const f = field({
-      category: FieldCategory.OTHER,
-      visibleToWrittenReviewer: true,
-      visibleToFirstRoundReviewer: false,
-    });
-
-    expect(resolveField(f, null, "WRITTEN_REVIEWER").isVisible).toBe(true);
-    expect(resolveField(f, null, "FIRST_ROUND_REVIEWER").isVisible).toBe(false);
+  it("stops asking once either state has been chosen", () => {
+    expect(mustChooseVisibility(field({ isReviewerVisible: true }), null)).toBe(false);
+    expect(mustChooseVisibility(field({ isReviewerVisible: false }), null)).toBe(false);
   });
 
-  it("ignores an override on DEMOGRAPHIC — §6 makes only OTHER configurable", () => {
-    // Otherwise this is a route to showing ethnicity to written reviewers, which
-    // no requirement asks for and goal 3 argues against. See PRD decision 18.
-    const f = field({
-      category: FieldCategory.DEMOGRAPHIC,
-      visibleToWrittenReviewer: true,
-      visibleToFirstRoundReviewer: true,
-    });
-
-    expect(resolveField(f, null, "WRITTEN_REVIEWER").isVisible).toBe(false);
-    expect(resolveField(f, null, "FIRST_ROUND_REVIEWER").isVisible).toBe(false);
+  it("does not ask about a grouped member — the choice belongs to the group", () => {
+    const member = field({ groupId: "g1", groupRole: FieldGroupRole.OPTION });
+    expect(mustChooseVisibility(member, group())).toBe(false);
   });
 
-  it("ignores an override on RESPONSE", () => {
-    const f = field({
-      category: FieldCategory.RESPONSE,
-      visibleToWrittenReviewer: false,
-      visibleToFirstRoundReviewer: true,
-    });
-
-    expect(resolveField(f, null, "WRITTEN_REVIEWER").isVisible).toBe(true);
-    expect(resolveField(f, null, "FIRST_ROUND_REVIEWER").isVisible).toBe(false);
+  it("does not ask about a DEMOGRAPHIC column — §6 locks it", () => {
+    expect(mustChooseVisibility(field({ category: FieldCategory.DEMOGRAPHIC }), null)).toBe(false);
   });
 
-  it("has no override path for second-round reviewers or admins", () => {
-    const f = field({
-      category: FieldCategory.OTHER,
-      visibleToWrittenReviewer: false,
-      visibleToFirstRoundReviewer: false,
-    });
-
-    expect(resolveField(f, null, "SECOND_ROUND_REVIEWER").isVisible).toBe(true);
-    expect(resolveField(f, null, "ADMIN").isVisible).toBe(true);
+  it("does not ask about an excluded column", () => {
+    expect(mustChooseVisibility(field({ isIncluded: false }), null)).toBe(false);
   });
 
-  it("falls through to the §6 default when the override is null", () => {
-    expect(
-      resolveField(field({ category: FieldCategory.OTHER }), null, "WRITTEN_REVIEWER").isVisible,
-    ).toBe(false);
+  it("does not ask about a promoted column — its Field row is deleted at commit", () => {
+    expect(mustChooseVisibility(field({ promotedRole: PromotedRole.EMAIL }), null)).toBe(false);
+    expect(mustChooseVisibility(field({ promotedRole: PromotedRole.NAME }), null)).toBe(false);
+  });
+
+  it("asks about a RESPONSE column like any other — it is a blocker, not a lock", () => {
+    // FR-3 refuses the commit if this one is answered "Backend only", but the
+    // question is still asked rather than answered for the admin.
+    expect(mustChooseVisibility(field({ category: FieldCategory.RESPONSE }), null)).toBe(true);
+  });
+
+  it("asks about an included non-demographic group, and not otherwise", () => {
+    expect(groupMustChooseVisibility(group())).toBe(true);
+    expect(groupMustChooseVisibility(group({ isReviewerVisible: false }))).toBe(false);
+    expect(groupMustChooseVisibility(group({ isIncluded: false }))).toBe(false);
+    expect(groupMustChooseVisibility(group({ category: FieldCategory.DEMOGRAPHIC }))).toBe(false);
+  });
+
+  it("an unchosen column resolves hidden while it waits to be decided", () => {
+    // The no-default rule is a gate, not a leak: unset is not a third visible
+    // state, so an instance that has not answered yet still shows nothing.
+    const unchosen = field();
+    expect(mustChooseVisibility(unchosen, null)).toBe(true);
+    for (const viewer of REVIEWERS) {
+      expect(resolveField(unchosen, null, viewer).isVisible).toBe(false);
+    }
   });
 });
 
 describe("visibleFieldIds and projectApplicantData", () => {
   const fields: FieldLike[] = [
-    field({ id: "essay", category: FieldCategory.RESPONSE }),
-    field({ id: "pronouns", category: FieldCategory.DEMOGRAPHIC }),
-    field({ id: "junk", category: FieldCategory.OTHER, isIncluded: false }),
+    field({ id: "essay", category: FieldCategory.RESPONSE, isReviewerVisible: true }),
+    field({ id: "major", category: FieldCategory.OTHER, isReviewerVisible: true }),
+    field({ id: "unchosen", category: FieldCategory.OTHER }),
+    field({ id: "pronouns", category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: true }),
+    field({
+      id: "junk",
+      category: FieldCategory.OTHER,
+      isIncluded: false,
+      isReviewerVisible: true,
+    }),
     field({
       id: "eth1",
       category: FieldCategory.RESPONSE, // deliberately wrong; the group overrides it
       groupId: "g1",
       groupRole: FieldGroupRole.OPTION,
+      isReviewerVisible: true,
     }),
     field({
       id: "writein",
       category: FieldCategory.RESPONSE,
       groupId: "g1",
       groupRole: FieldGroupRole.FREE_TEXT,
+      isReviewerVisible: true,
     }),
   ];
   const groups: FieldGroupLike[] = [group({ id: "g1", category: FieldCategory.DEMOGRAPHIC })];
 
-  it("gives a written reviewer the responses and nothing else", () => {
-    expect(visibleFieldIds(fields, groups, "WRITTEN_REVIEWER")).toEqual(new Set(["essay"]));
+  it("gives every reviewer round the same set", () => {
+    // The heart of decision 108: the round no longer changes the answer.
+    const sets = REVIEWERS.map((viewer) => [...visibleFieldIds(fields, groups, viewer)].sort());
+    expect(sets[0]).toEqual(["essay", "major"]);
+    expect(sets[1]).toEqual(sets[0]);
+    expect(sets[2]).toEqual(sets[0]);
   });
 
-  it("gives a first-round reviewer nothing from the applicant profile", () => {
-    // §6 hides both demographics and written responses from this round.
-    expect(visibleFieldIds(fields, groups, "FIRST_ROUND_REVIEWER")).toEqual(new Set());
-  });
-
-  it("gives a second-round reviewer everything except the excluded column", () => {
-    expect(visibleFieldIds(fields, groups, "SECOND_ROUND_REVIEWER")).toEqual(
-      new Set(["essay", "pronouns", "eth1", "writein"]),
+  it("gives an admin everything except the excluded column", () => {
+    expect(visibleFieldIds(fields, groups, "ADMIN")).toEqual(
+      new Set(["essay", "major", "unchosen", "pronouns", "eth1", "writein"]),
     );
   });
 
-  it("keeps a grouped member hidden from written reviewers despite its own RESPONSE category", () => {
-    const visible = visibleFieldIds(fields, groups, "WRITTEN_REVIEWER");
+  it("keeps a grouped member hidden behind its DEMOGRAPHIC group, despite its own flag", () => {
+    const visible = visibleFieldIds(fields, groups, "SECOND_ROUND_REVIEWER");
     expect(visible.has("eth1")).toBe(false);
     expect(visible.has("writein")).toBe(false);
   });
@@ -291,11 +358,18 @@ describe("visibleFieldIds and projectApplicantData", () => {
   it("drops hidden keys from the data rather than blanking them", () => {
     // §6: a hidden field returns no data. An empty string in the payload still
     // tells the client the field exists.
-    const data = { essay: "an answer", pronouns: "she/her", junk: "NET-1000", eth1: "White" };
+    const data = {
+      essay: "an answer",
+      pronouns: "she/her",
+      junk: "NET-1000",
+      eth1: "White",
+      unchosen: "Fall 2027",
+    };
     const projected = projectApplicantData(data, visibleFieldIds(fields, groups, "WRITTEN_REVIEWER"));
 
     expect(projected).toEqual({ essay: "an answer" });
     expect(Object.keys(projected)).not.toContain("pronouns");
+    expect(Object.keys(projected)).not.toContain("unchosen");
   });
 });
 

@@ -147,8 +147,7 @@ function field(overrides: Partial<DemographicField> = {}): DemographicField {
     isIncluded: true,
     groupId: null,
     groupRole: null,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    isReviewerVisible: null,
     ...overrides,
   };
 }
@@ -160,8 +159,7 @@ function group(overrides: Partial<DemographicGroup> = {}): DemographicGroup {
     ordinal: 0,
     category: FieldCategory.DEMOGRAPHIC,
     isIncluded: true,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    isReviewerVisible: null,
     ...overrides,
   };
 }

@@ -10,7 +10,7 @@
 // narrower than the Prisma models so this is testable against plain objects,
 // and so a caller cannot accidentally pass a half-loaded row.
 
-import { FieldCategory, FieldGroupRole } from "@/generated/prisma/enums";
+import { FieldCategory, FieldGroupRole, PromotedRole } from "@/generated/prisma/enums";
 
 /// Who is asking. Not the same as `Round`: ADMIN is not a round, and a viewer
 /// is a role rather than a stage of the cycle.
@@ -26,16 +26,21 @@ export interface FieldLike {
   isIncluded: boolean;
   groupId: string | null;
   groupRole: FieldGroupRole | null;
-  visibleToWrittenReviewer: boolean | null;
-  visibleToFirstRoundReviewer: boolean | null;
+  isReviewerVisible: boolean | null;
+}
+
+/// `FieldLike` plus the one column only `mustChooseVisibility` needs. Kept
+/// separate so the eight reviewer-facing selects that feed `resolveField` do not
+/// have to fetch a promotion flag they never read.
+export interface ChoosableFieldLike extends FieldLike {
+  promotedRole: PromotedRole | null;
 }
 
 export interface FieldGroupLike {
   id: string;
   category: FieldCategory;
   isIncluded: boolean;
-  visibleToWrittenReviewer: boolean | null;
-  visibleToFirstRoundReviewer: boolean | null;
+  isReviewerVisible: boolean | null;
 }
 
 export interface ResolvedField {
@@ -48,52 +53,15 @@ export interface ResolvedField {
   inheritedFromGroup: boolean;
 }
 
-/// The §6 matrix for the three categories, as data rather than as branches.
-/// OTHER's reviewer-round entries are the default that a non-null override
-/// replaces; DEMOGRAPHIC's and RESPONSE's are fixed. See `overridable` below.
-const CATEGORY_DEFAULTS: Record<FieldCategory, Record<Viewer, boolean>> = {
-  [FieldCategory.DEMOGRAPHIC]: {
-    WRITTEN_REVIEWER: false,
-    FIRST_ROUND_REVIEWER: false,
-    SECOND_ROUND_REVIEWER: true,
-    ADMIN: true,
-  },
-  [FieldCategory.RESPONSE]: {
-    WRITTEN_REVIEWER: true,
-    FIRST_ROUND_REVIEWER: false,
-    SECOND_ROUND_REVIEWER: true,
-    ADMIN: true,
-  },
-  [FieldCategory.OTHER]: {
-    WRITTEN_REVIEWER: false,
-    FIRST_ROUND_REVIEWER: false,
-    SECOND_ROUND_REVIEWER: true,
-    ADMIN: true,
-  },
-};
-
-/// Only OTHER is configurable per round. §6 spells DEMOGRAPHIC and RESPONSE as
-/// flat "Hidden" and "Visible" while OTHER alone reads "Configurable, default
-/// hidden", and goal 3 puts the bias controls in the system rather than in an
-/// admin remembering. Honouring an override on a DEMOGRAPHIC field would be a
-/// path to showing ethnicity to written reviewers that no requirement asks for.
-///
-/// The mapping table only offers the toggles on OTHER, so a stored override on
-/// another category is unreachable through the UI; this makes it inert if it
-/// arrives some other way. See PRD open decision 18.
-function overridable(category: FieldCategory): boolean {
-  return category === FieldCategory.OTHER;
-}
-
-/// Only the reviewer rounds have override columns. Second-round reviewers and
-/// admins see every category under §6, so there is nothing to configure.
-function overrideFor(
-  source: { visibleToWrittenReviewer: boolean | null; visibleToFirstRoundReviewer: boolean | null },
-  viewer: Viewer,
-): boolean | null {
-  if (viewer === "WRITTEN_REVIEWER") return source.visibleToWrittenReviewer;
-  if (viewer === "FIRST_ROUND_REVIEWER") return source.visibleToFirstRoundReviewer;
-  return null;
+/// DEMOGRAPHIC is hidden from every reviewer round and cannot be configured
+/// otherwise. This is the one place `category` still decides visibility, and it
+/// is deliberate: goal 3 puts the bias controls in the system rather than in an
+/// admin remembering. Enforcing it here rather than only in the mapping UI is
+/// what makes a stored `true` inert if it ever arrives some other way — the
+/// property decision 18 gave the old per-round override columns, carried into
+/// the binary model by decision 108.
+function lockedHidden(category: FieldCategory): boolean {
+  return category === FieldCategory.DEMOGRAPHIC;
 }
 
 /// Resolve one field for one viewer.
@@ -104,8 +72,13 @@ function overrideFor(
 ///      impossible to leave half hidden and half visible, and it is why §10.7's
 ///      1/n can never run over a partially excluded set.
 ///   2. Not included → invisible to everyone, whatever else is set.
-///   3. A non-null per-round override, but only where the category allows one.
-///   4. The §6 category default.
+///   3. ADMIN sees everything that survives step 2.
+///   4. DEMOGRAPHIC → hidden from every reviewer round, whatever is stored.
+///   5. `isReviewerVisible === true` → visible to all three reviewer rounds.
+///      `false` and `null` are both hidden; null means "not yet chosen", which
+///      FR-2 requires an admin to resolve and FR-3 blocks the commit over.
+///      Resolving it hidden is what keeps an unchosen column from leaking
+///      while it waits to be decided.
 ///
 /// `group` must be the group named by `field.groupId`. Passing a mismatched
 /// group throws rather than silently resolving against the wrong rules — a
@@ -143,11 +116,53 @@ export function resolveField(
     return { category, isIncluded, isVisible: false, inheritedFromGroup };
   }
 
-  // 3. Override, where the category permits one.
-  const override = overridable(category) ? overrideFor(source, viewer) : null;
-  const isVisible = override ?? CATEGORY_DEFAULTS[category][viewer];
+  // 3. Admin sees everything that is included. §6's admin column is flat.
+  if (viewer === "ADMIN") {
+    return { category, isIncluded, isVisible: true, inheritedFromGroup };
+  }
+
+  // 4-5. The lock, then the flag. No per-round distinction: decision 108.
+  const isVisible = lockedHidden(category) ? false : source.isReviewerVisible === true;
 
   return { category, isIncluded, isVisible, inheritedFromGroup };
+}
+
+/// Does this column still need an explicit Reviewer-visible / Backend only?
+///
+/// FR-2 gives visibility no default, and FR-3 blocks the commit until every
+/// eligible column has one. "Eligible" excludes four cases, each for its own
+/// reason rather than as a convenience:
+///
+///   - **Grouped members.** The choice belongs to the group, which is asked
+///     separately. Asking the member too would let a group be half decided.
+///   - **DEMOGRAPHIC.** Locked hidden by §6, so there is nothing to choose.
+///   - **Excluded columns.** Invisible to everyone including ADMIN already. The
+///     flag stays editable, so re-including one later is where its choice is
+///     made — and the mapping table asks for it then, on both a draft and a
+///     committed instance.
+///   - **Promoted columns.** Their Field rows are deleted at commit, when the
+///     values become Applicant.email and Applicant.displayName.
+///
+/// Callers pass a `Field`; a `FieldGroup` is asked about through
+/// `groupMustChooseVisibility` below, since a group has no groupId or
+/// promotedRole to test.
+export function mustChooseVisibility(
+  field: ChoosableFieldLike,
+  group: FieldGroupLike | null,
+): boolean {
+  if (field.groupId !== null || group !== null) return false;
+  if (field.promotedRole !== null) return false;
+  if (!field.isIncluded) return false;
+  if (lockedHidden(field.category)) return false;
+  return field.isReviewerVisible === null;
+}
+
+/// The group half of `mustChooseVisibility`. Same rules, minus the two that
+/// cannot apply to a group.
+export function groupMustChooseVisibility(group: FieldGroupLike): boolean {
+  if (!group.isIncluded) return false;
+  if (lockedHidden(group.category)) return false;
+  return group.isReviewerVisible === null;
 }
 
 /// The ids a viewer may see. Every reviewer-facing query selects through this

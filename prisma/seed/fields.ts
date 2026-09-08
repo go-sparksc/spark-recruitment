@@ -5,8 +5,8 @@ import { readSourceHeaders } from "./headers";
 export const ETHNICITY_GROUP_KEY = "ethnicity";
 
 /// The group's own row. PRD v1.2 moved category, inclusion and the section 6
-/// visibility toggles off the members and onto the group, so a group cannot end
-/// up half hidden and half visible and the 10.7 counting can never run over a
+/// visibility flag off the members and onto the group, so a group cannot end up
+/// half hidden and half visible and the 10.7 counting can never run over a
 /// partially excluded set.
 ///
 /// `key` is immutable once assigned; `displayName` is what a rename changes.
@@ -16,6 +16,10 @@ export const ETHNICITY_GROUP = {
   category: FieldCategory.DEMOGRAPHIC,
   isMultiSelect: true,
   isIncluded: true,
+  // Locked by section 6 regardless, but written explicitly: decision 108
+  // removed the category default this used to fall through to, and a seed that
+  // relies on a fallthrough that no longer exists is how a fixture drifts.
+  isReviewerVisible: false,
 } as const;
 
 /// Column indexes promoted out of `data` into first-class Applicant columns.
@@ -79,6 +83,10 @@ export interface FieldSpec {
   /// enforces that pairing at the database.
   groupRole: FieldGroupRole | null;
   isIncluded: boolean;
+  /// Section 6's binary flag. Never null in the seed: decision 108 gives it no
+  /// default, and a seeded instance is meant to look like one an admin has
+  /// finished configuring.
+  isReviewerVisible: boolean;
   ordinal: number;
   /// Set only on the ten one-hot ethnicity columns: the value written when checked.
   optionLabel?: string;
@@ -215,6 +223,11 @@ export function buildFieldSpecs(): FieldSpec[] {
       groupKey: entry.groupKey ?? null,
       groupRole: entry.groupRole ?? null,
       isIncluded: entry.isIncluded ?? true,
+      // Decision 108: no default, so the seed states it. The essays are what
+      // reviewers read; everything else is administrative or demographic and
+      // stays backend-only. This reproduces exactly where the migration's
+      // backfill lands the pre-108 seed, so a reseed and an upgrade agree.
+      isReviewerVisible: entry.category === FieldCategory.RESPONSE,
       ordinal,
       // Only the OPTION members carry a label to write when checked. The
       // FREE_TEXT member holds whatever the applicant typed.

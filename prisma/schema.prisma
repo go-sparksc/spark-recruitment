@@ -239,8 +239,8 @@ model Instance {
 /// Several CSV columns forming one logical question — the ten one-hot ethnicity
 /// columns are one question, not ten.
 ///
-/// Category, inclusion and the §6 visibility toggles live here rather than on
-/// the members, so a group cannot end up half hidden and half visible, and the
+/// Category, inclusion and the §6 visibility flag live here rather than on the
+/// members, so a group cannot end up half hidden and half visible, and the
 /// §10.7 1/n counting can never run over a partially excluded set. The member's
 /// own values are never read when it is grouped.
 model FieldGroup {
@@ -264,10 +264,14 @@ model FieldGroup {
   isIncluded    Boolean @default(true)
   ordinal       Int
 
-  /// Null means "use the §6 category default for that round". Resolved by the
-  /// one shared helper in lib/fields.ts, never re-derived per surface.
-  visibleToWrittenReviewer    Boolean?
-  visibleToFirstRoundReviewer Boolean?
+  /// §6's binary flag. True = visible to all three reviewer rounds, false = to
+  /// none of them, NULL = not yet chosen. There is no default: FR-2 requires an
+  /// explicit choice and FR-3 blocks the commit until every eligible column has
+  /// one. NULL resolves hidden, so an unchosen column cannot leak while it
+  /// waits. Forced hidden where category is DEMOGRAPHIC, whatever is stored.
+  /// Resolved by the one shared helper in lib/fields.ts, never re-derived per
+  /// surface. Decision 108.
+  isReviewerVisible Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -326,10 +330,10 @@ model Field {
 
   /// The FieldGroup this column belongs to. Null for standalone columns.
   ///
-  /// When set, the GROUP's category, isIncluded and visibility win over the
-  /// columns below — they are kept on this row only so that ungrouping restores
-  /// a sensible standalone state, and lib/fields.ts never reads them while
-  /// groupId is set.
+  /// When set, the GROUP's category, isIncluded and isReviewerVisible win over
+  /// the columns below — they are kept on this row only so that ungrouping
+  /// restores a sensible standalone state, and lib/fields.ts never reads them
+  /// while groupId is set.
   groupId   String?
   group     FieldGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
   /// Set only when groupId is set, and cleared together with it. Enforced by a
@@ -349,11 +353,14 @@ model Field {
   /// presentation decision, not a lossy one, so it stays reversible without re-import.
   isIncluded Boolean @default(true)
 
-  /// Per-round overrides for OTHER fields, which PRD section 6 makes configurable.
-  /// Null means "use the category default for that round". Server-side enforcement
-  /// reads these; the client is never trusted to hide anything.
-  visibleToWrittenReviewer    Boolean?
-  visibleToFirstRoundReviewer Boolean?
+  /// PRD section 6's binary flag. True = visible to all three reviewer rounds,
+  /// false = to none, NULL = not yet chosen. No default: FR-2 requires an
+  /// explicit choice and FR-3 blocks the commit until every eligible column has
+  /// one. NULL resolves hidden, so an unchosen column cannot leak while it
+  /// waits. Forced hidden where category is DEMOGRAPHIC, whatever is stored.
+  /// Server-side enforcement reads this; the client is never trusted to hide
+  /// anything. Decision 108.
+  isReviewerVisible Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

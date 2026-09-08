@@ -5,7 +5,13 @@
 // and starting again, so everything worth catching has to surface here.
 
 import { FieldCategory } from "@/generated/prisma/enums";
-import { resolveField, type FieldGroupLike, type FieldLike } from "@/lib/fields";
+import {
+  groupMustChooseVisibility,
+  mustChooseVisibility,
+  resolveField,
+  type ChoosableFieldLike,
+  type FieldGroupLike,
+} from "@/lib/fields";
 
 /// Trim, NFC, lowercase. Blank becomes null.
 ///
@@ -62,6 +68,19 @@ export interface PreviewFindings {
   /// Reported. The value is trimmed on import and the admin is told so.
   paddedEmailRowIndexes: number[];
 
+  /// Blocking, both from decision 108's visibility model.
+  ///
+  /// `unchosenVisibilityCount` is FR-2's no-default rule enforced: an admin who
+  /// has decided nothing would otherwise commit an instance where every profile
+  /// is empty and nothing says why.
+  ///
+  /// `hiddenResponseCount` is §6's protection for RESPONSE, which is a blocker
+  /// rather than a lock because category freezes at commit while visibility does
+  /// not — see decision 108. Counts included Response columns and groups that
+  /// resolve Backend only.
+  unchosenVisibilityCount: number;
+  hiddenResponseCount: number;
+
   /// Warnings. Each describes a plausible instance the system should not
   /// overrule, so neither blocks. See FR-3.
   unconfirmedProposalCount: number;
@@ -74,7 +93,9 @@ export interface PreviewFindings {
 
 export interface PreviewInput {
   rows: PreviewRowInput[];
-  fields: FieldLike[];
+  /// `ChoosableFieldLike` rather than `FieldLike`: the visibility blockers need
+  /// `promotedRole` to know which columns are exempt from FR-2's choice.
+  fields: ChoosableFieldLike[];
   groups: FieldGroupLike[];
   unconfirmedProposalCount: number;
   /// Null when the admin has not designated an email column yet.
@@ -126,7 +147,42 @@ export function buildPreview(input: PreviewInput): PreviewFindings {
     return resolved.isIncluded && resolved.category === FieldCategory.RESPONSE;
   });
 
+  // Decision 108's two gates. Both resolve through the shared helpers rather
+  // than re-deriving the rules here, so the preview cannot disagree with what
+  // the mapping table asks for or with what a reviewer actually gets.
+  const unchosenVisibilityCount =
+    input.fields.filter((field) => {
+      const group = field.groupId === null ? null : (groupsById.get(field.groupId) ?? null);
+      return mustChooseVisibility(field, group);
+    }).length + input.groups.filter(groupMustChooseVisibility).length;
+
+  const hiddenResponseCount =
+    input.fields.filter((field) => {
+      if (field.groupId !== null) return false;
+      const resolved = resolveField(field, null, "WRITTEN_REVIEWER");
+      return resolved.isIncluded && resolved.category === FieldCategory.RESPONSE && !resolved.isVisible;
+    }).length +
+    input.groups.filter(
+      (group) =>
+        group.isIncluded &&
+        group.category === FieldCategory.RESPONSE &&
+        group.isReviewerVisible !== true,
+    ).length;
+
   const blockers: string[] = [];
+  if (unchosenVisibilityCount > 0) {
+    blockers.push(
+      `${unchosenVisibilityCount} column${unchosenVisibilityCount === 1 ? "" : "s"} ` +
+        `${unchosenVisibilityCount === 1 ? "has" : "have"} no visibility set. ` +
+        `Choose Reviewer-visible or Backend only for each on the columns screen.`,
+    );
+  }
+  if (hiddenResponseCount > 0) {
+    blockers.push(
+      `${hiddenResponseCount} Response column${hiddenResponseCount === 1 ? " is" : "s are"} ` +
+        `set to Backend only. Reviewers would not see the essays.`,
+    );
+  }
   if (!input.hasEmailColumn) {
     blockers.push("No email column is designated. It is the join key for the first-round imports.");
   }
@@ -158,9 +214,12 @@ export function buildPreview(input: PreviewInput): PreviewFindings {
     );
   }
   if (!hasIncludedResponseField) {
+    // Still a warning, not a blocker: the blocker above cannot fire when there
+    // is no Response column to be set wrongly, and an instance whose profile is
+    // built from Other columns is unusual rather than wrong.
     warnings.push(
-      "No column is categorised as a Response. Written reviewers see only Response fields (§6), " +
-        "so every profile in the written round will be empty.",
+      "No column is categorised as a Response. Nothing marks the essays, so reviewer profiles " +
+        "will show only whatever Other columns you set to Reviewer-visible.",
     );
   }
   if (blankEmailRowIndexes.length > 0) {
@@ -184,6 +243,8 @@ export function buildPreview(input: PreviewInput): PreviewFindings {
     blankNameRowIndexes,
     blankEmailRowIndexes,
     paddedEmailRowIndexes,
+    unchosenVisibilityCount,
+    hiddenResponseCount,
     unconfirmedProposalCount: input.unconfirmedProposalCount,
     hasIncludedResponseField,
     blockers,

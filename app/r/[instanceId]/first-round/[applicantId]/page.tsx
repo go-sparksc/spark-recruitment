@@ -65,8 +65,7 @@ export default async function FirstRoundApplicantPage({
         isIncluded: true,
         groupId: true,
         groupRole: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -78,8 +77,7 @@ export default async function FirstRoundApplicantPage({
         ordinal: true,
         category: true,
         isIncluded: true,
-        visibleToWrittenReviewer: true,
-        visibleToFirstRoundReviewer: true,
+        isReviewerVisible: true,
       },
     }),
     // Clause 14e: the category count follows the configured rows. Nothing here

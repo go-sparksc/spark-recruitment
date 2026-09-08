@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FieldCategory } from "@/generated/prisma/enums";
-import type { FieldGroupLike, FieldLike } from "@/lib/fields";
+import type { ChoosableFieldLike, FieldGroupLike } from "@/lib/fields";
 import { parseCsv } from "@/lib/import/parse-csv";
 import { buildPreview, normalizeEmail, type PreviewRowInput } from "@/lib/import/preview";
 
@@ -26,14 +26,17 @@ function fixtureRows(overrides: { discard?: number[] } = {}): PreviewRowInput[] 
   }));
 }
 
-const field = (overrides: Partial<FieldLike> = {}): FieldLike => ({
+const field = (overrides: Partial<ChoosableFieldLike> = {}): ChoosableFieldLike => ({
   id: "f1",
   category: FieldCategory.OTHER,
   isIncluded: true,
   groupId: null,
   groupRole: null,
-  visibleToWrittenReviewer: null,
-  visibleToFirstRoundReviewer: null,
+  promotedRole: null,
+  // A column whose visibility the admin has already decided. The tests about
+  // FR-2's no-default rule set this to null explicitly; everything else in this
+  // file is about rows and emails and would otherwise trip that blocker.
+  isReviewerVisible: true,
   ...overrides,
 });
 
@@ -199,6 +202,101 @@ describe("blockers", () => {
   });
 });
 
+describe("blockers — decision 108's visibility gates", () => {
+  const rows: PreviewRowInput[] = [
+    { rowIndex: 1, discarded: false, rawEmail: "a@example.com", rawNameParts: ["Ada"] },
+  ];
+
+  it("blocks a commit while any eligible column has no visibility chosen", () => {
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [
+        field({ id: "essay", category: FieldCategory.RESPONSE }),
+        field({ id: "major", category: FieldCategory.OTHER, isReviewerVisible: null }),
+      ],
+    });
+
+    expect(findings.unchosenVisibilityCount).toBe(1);
+    expect(findings.blockers.join(" ")).toMatch(/no visibility set/i);
+    expect(findings.canCommit).toBe(false);
+  });
+
+  it("does not ask about demographic, excluded, promoted or grouped columns", () => {
+    // Each exemption has its own reason in mustChooseVisibility; this is the
+    // assertion that the preview reads that helper rather than its own rules.
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [
+        field({ id: "essay", category: FieldCategory.RESPONSE }),
+        field({ id: "eth", category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: null }),
+        field({ id: "junk", isIncluded: false, isReviewerVisible: null }),
+        field({ id: "email", promotedRole: "EMAIL", isReviewerVisible: null }),
+        field({ id: "m", groupId: "g1", groupRole: "OPTION", isReviewerVisible: null }),
+      ],
+      groups: [
+        { id: "g1", category: FieldCategory.DEMOGRAPHIC, isIncluded: true, isReviewerVisible: null },
+      ],
+    });
+
+    expect(findings.unchosenVisibilityCount).toBe(0);
+    expect(findings.canCommit).toBe(true);
+  });
+
+  it("blocks a commit where an included Response column is Backend only", () => {
+    // §6 protects Responses with a blocker rather than a lock: the state is
+    // reachable, and this is what refuses it.
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [field({ id: "essay", category: FieldCategory.RESPONSE, isReviewerVisible: false })],
+    });
+
+    expect(findings.hiddenResponseCount).toBe(1);
+    expect(findings.blockers.join(" ")).toMatch(/backend only/i);
+    expect(findings.canCommit).toBe(false);
+  });
+
+  it("catches a Backend-only Response GROUP, not just an ungrouped column", () => {
+    // The group/column split is where this bug would hide — the same shape the
+    // hasIncludedResponseField suite below already guards.
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [
+        field({ id: "essay", category: FieldCategory.RESPONSE }),
+        field({ id: "m", groupId: "g1", groupRole: "OPTION", isReviewerVisible: null }),
+      ],
+      groups: [
+        { id: "g1", category: FieldCategory.RESPONSE, isIncluded: true, isReviewerVisible: false },
+      ],
+    });
+
+    expect(findings.hiddenResponseCount).toBe(1);
+    expect(findings.canCommit).toBe(false);
+  });
+
+  it("does not block an EXCLUDED Response column set Backend only", () => {
+    const findings = buildPreview({
+      ...base,
+      rows,
+      fields: [
+        field({ id: "essay", category: FieldCategory.RESPONSE }),
+        field({
+          id: "old",
+          category: FieldCategory.RESPONSE,
+          isIncluded: false,
+          isReviewerVisible: false,
+        }),
+      ],
+    });
+
+    expect(findings.hiddenResponseCount).toBe(0);
+    expect(findings.canCommit).toBe(true);
+  });
+});
+
 describe("warnings — plausible instances the system should not overrule", () => {
   const rows: PreviewRowInput[] = [
     { rowIndex: 1, discarded: false, rawEmail: "a@example.com", rawNameParts: ["Ada"] },
@@ -212,7 +310,7 @@ describe("warnings — plausible instances the system should not overrule", () =
     });
 
     expect(findings.hasIncludedResponseField).toBe(false);
-    expect(findings.warnings.join(" ")).toMatch(/every profile in the written round will be empty/i);
+    expect(findings.warnings.join(" ")).toMatch(/no column is categorised as a response/i);
     expect(findings.canCommit).toBe(true);
   });
 
@@ -228,8 +326,7 @@ describe("warnings — plausible instances the system should not overrule", () =
           id: "g1",
           category: FieldCategory.RESPONSE,
           isIncluded: true,
-          visibleToWrittenReviewer: null,
-          visibleToFirstRoundReviewer: null,
+          isReviewerVisible: null,
         },
       ],
     });

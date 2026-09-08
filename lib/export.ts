@@ -60,8 +60,8 @@ export interface TableManifest {
 /// rather than exporting as an empty array.
 export const EXPORT_TABLES = [
   { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "archivedAt", "archiveSummary", "importCommittedAt", "importProposals"] },
-  { table: "FieldGroup", columns: ["id", "instanceId", "key", "displayName", "category", "isMultiSelect", "isIncluded", "ordinal", "visibleToWrittenReviewer", "visibleToFirstRoundReviewer", "createdAt", "updatedAt"] },
-  { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "visibleToWrittenReviewer", "visibleToFirstRoundReviewer", "createdAt", "updatedAt"] },
+  { table: "FieldGroup", columns: ["id", "instanceId", "key", "displayName", "category", "isMultiSelect", "isIncluded", "ordinal", "isReviewerVisible", "createdAt", "updatedAt"] },
+  { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "isReviewerVisible", "createdAt", "updatedAt"] },
   { table: "ImportRow", columns: ["id", "instanceId", "rowIndex", "cells", "discarded", "createdAt"] },
   { table: "RubricCategory", columns: ["id", "instanceId", "name", "maxPoints", "ordinal", "minPoints", "description", "createdAt", "updatedAt"] },
   { table: "InterviewCategory", columns: ["id", "instanceId", "name", "maxPoints", "ordinal", "createdAt", "updatedAt"] },

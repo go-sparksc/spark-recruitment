@@ -25,8 +25,10 @@ function field(overrides: Partial<ReviewFieldLike> = {}): ReviewFieldLike {
     isIncluded: true,
     groupId: null,
     groupRole: null,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    // The ordinary case under decision 108: an admin has answered FR-2's
+    // question and said reviewers may see this column. Tests about hiding set
+    // it to false or null explicitly.
+    isReviewerVisible: true,
     ...overrides,
   };
 }
@@ -37,8 +39,7 @@ function group(overrides: Partial<ReviewFieldGroupLike> = {}): ReviewFieldGroupL
     displayName: "Ethnicity",
     category: FieldCategory.DEMOGRAPHIC,
     isIncluded: true,
-    visibleToWrittenReviewer: null,
-    visibleToFirstRoundReviewer: null,
+    isReviewerVisible: null,
     ...overrides,
   };
 }
@@ -488,34 +489,46 @@ describe("buildApplicantView — what a written reviewer gets", () => {
 });
 
 describe("buildApplicantView — the §6 boundary, per field", () => {
-  it("shows an OTHER field toggled visible for written and hides it from first round", () => {
-    // The first case in the brief's visibility block: enforcement is per field,
-    // not per category.
+  it("shows a reviewer-visible OTHER field to every reviewer round alike", () => {
+    // Decision 108: enforcement is per field, and the round no longer changes
+    // the answer. This test used to assert the opposite for the first round.
     const other = field({
       id: "other",
       displayName: "Graduation year",
       category: FieldCategory.OTHER,
-      visibleToWrittenReviewer: true,
-      visibleToFirstRoundReviewer: false,
+      isReviewerVisible: true,
     });
     const source = applicant({ data: { other: "2028" } });
 
+    for (const viewer of ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"] as const) {
+      expect(buildApplicantView(source, [other], [], viewer).fields.map((f) => f.fieldId)).toEqual([
+        "other",
+      ]);
+    }
+  });
+
+  it("hides an OTHER field nobody has chosen a state for", () => {
+    // FR-2 gives visibility no default; unset resolves hidden while it waits.
+    const unchosen = field({
+      id: "other",
+      category: FieldCategory.OTHER,
+      isReviewerVisible: null,
+    });
+
     expect(
-      buildApplicantView(source, [other], [], "WRITTEN_REVIEWER").fields.map((f) => f.fieldId),
-    ).toEqual(["other"]);
-    expect(
-      buildApplicantView(source, [other], [], "FIRST_ROUND_REVIEWER").fields,
+      buildApplicantView(applicant({ data: { other: "2028" } }), [unchosen], [], "WRITTEN_REVIEWER")
+        .fields,
     ).toEqual([]);
   });
 
-  it("excludes an isIncluded: false field whatever its visibility toggle says", () => {
+  it("excludes an isIncluded: false field whatever its visibility flag says", () => {
     // isIncluded wins, consistent with §5's excluded-fields-are-retained-but-
     // excluded-from-review-surfaces.
     const excluded = field({
       id: "junk",
       category: FieldCategory.OTHER,
       isIncluded: false,
-      visibleToWrittenReviewer: true,
+      isReviewerVisible: true,
     });
 
     expect(
@@ -524,31 +537,31 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     ).toEqual([]);
   });
 
-  it("shows a RESPONSE field with no explicit override", () => {
-    // §6's flat default. Decision 18 means no toggle is offered for it in any
-    // admin UI, which the FR-2 mapping table already honours.
+  it("shows a reviewer-visible RESPONSE field to a first-round reviewer", () => {
+    // Decision 108's first reversal, asserted on the surface that renders it:
+    // the old matrix hid every RESPONSE field from this round.
     const response = field({ id: "essay", category: FieldCategory.RESPONSE });
 
     expect(
-      buildApplicantView(applicant({ data: { essay: "words" } }), [response], [], "WRITTEN_REVIEWER")
+      buildApplicantView(applicant({ data: { essay: "words" } }), [response], [], "FIRST_ROUND_REVIEWER")
         .fields.map((f) => f.fieldId),
     ).toEqual(["essay"]);
   });
 
-  it("hides a DEMOGRAPHIC field even when it carries a written-visible override", () => {
-    // Decision 18: the override columns exist on every row but are read only
-    // where the resolved category is OTHER. This is the surface that rule
-    // protects, so it is asserted here as well as in lib/fields.test.ts.
+  it("hides a DEMOGRAPHIC field from a second-round reviewer even with the flag set", () => {
+    // Decision 108's second reversal plus the lock, on the surface that used to
+    // be the one place demographics reached a reviewer. The stored true is
+    // deliberate: the lock lives in the resolver, not only in the mapping UI.
     const demographic = field({
       id: "eth",
       category: FieldCategory.DEMOGRAPHIC,
-      visibleToWrittenReviewer: true,
+      isReviewerVisible: true,
     });
+    const source = applicant({ data: { eth: "White" } });
 
-    expect(
-      buildApplicantView(applicant({ data: { eth: "White" } }), [demographic], [], "WRITTEN_REVIEWER")
-        .fields,
-    ).toEqual([]);
+    for (const viewer of ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"] as const) {
+      expect(buildApplicantView(source, [demographic], [], viewer).fields).toEqual([]);
+    }
   });
 
   it("takes a grouped member's visibility from its group, not from itself", () => {
@@ -579,7 +592,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
       id: "g2",
       displayName: "How did you hear about us?",
       category: FieldCategory.OTHER,
-      visibleToWrittenReviewer: true,
+      isReviewerVisible: true,
     });
 
     const view = buildApplicantView(
@@ -607,14 +620,16 @@ describe("buildApplicantView — the other viewers", () => {
   ];
   const data = { essay: "words", eth: "White" };
 
-  it("gives a second-round reviewer the name, the email and both categories", () => {
+  it("gives a second-round reviewer the name, the email and the responses — but not demographics", () => {
+    // FR-16 used to call this "the complete applicant profile" and mean it
+    // literally. Decision 108 took demographics out of that list.
     const view = buildApplicantView(applicant({ data }), fields, [], "SECOND_ROUND_REVIEWER");
 
     expect(view.identified).toBe(true);
     if (!view.identified) throw new Error("unreachable");
     expect(view.displayName).toBe("Quinn Spacey");
     expect(view.email).toBe("quinn.spacey@usc.edu");
-    expect(view.fields.map((f) => f.fieldId)).toEqual(["essay", "eth"]);
+    expect(view.fields.map((f) => f.fieldId)).toEqual(["essay"]);
   });
 
   it("gives an admin the same, and still supplies the label", () => {
@@ -626,12 +641,13 @@ describe("buildApplicantView — the other viewers", () => {
     expect(view.identified).toBe(true);
   });
 
-  it("gives a first-round reviewer the identity but neither category", () => {
-    // §6 hides demographics AND written responses from this round.
+  it("gives a first-round reviewer the identity and the responses, but not demographics", () => {
+    // The mirror of the second-round case above, and the shape decision 108
+    // gives every reviewer round: same fields, different evidence around them.
     const view = buildApplicantView(applicant({ data }), fields, [], "FIRST_ROUND_REVIEWER");
 
     expect(view.identified).toBe(true);
-    expect(view.fields).toEqual([]);
+    expect(view.fields.map((f) => f.fieldId)).toEqual(["essay"]);
   });
 
   it("carries a null email through rather than inventing one", () => {

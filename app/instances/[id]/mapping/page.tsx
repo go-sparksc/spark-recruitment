@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { PromotedRole } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
-import { resolveField } from "@/lib/fields";
+import { groupMustChooseVisibility, mustChooseVisibility, resolveField } from "@/lib/fields";
 import type { GroupProposal } from "@/lib/import/detect-groups";
 import { duplicateHeaders } from "@/lib/import/parse-csv";
 import { prisma } from "@/lib/prisma";
@@ -83,11 +83,11 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
       groupId: field.groupId,
       groupRole: field.groupRole,
       promotedRole: field.promotedRole,
-      visibleToWrittenReviewer: field.visibleToWrittenReviewer,
-      visibleToFirstRoundReviewer: field.visibleToFirstRoundReviewer,
+      isReviewerVisible: field.isReviewerVisible,
       effectiveCategory: resolved.category,
       effectiveIncluded: resolved.isIncluded,
       inheritedFromGroup: resolved.inheritedFromGroup,
+      needsVisibilityChoice: mustChooseVisibility(field, group),
     };
   });
 
@@ -98,8 +98,8 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
     category: group.category,
     isIncluded: group.isIncluded,
     isMultiSelect: group.isMultiSelect,
-    visibleToWrittenReviewer: group.visibleToWrittenReviewer,
-    visibleToFirstRoundReviewer: group.visibleToFirstRoundReviewer,
+    isReviewerVisible: group.isReviewerVisible,
+    needsVisibilityChoice: groupMustChooseVisibility(group),
     members: instance.fields
       .filter((f) => f.groupId === group.id)
       .map((f) => ({ id: f.id, displayName: f.displayName, groupRole: f.groupRole })),
@@ -107,10 +107,27 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
 
   const groupOptions = groups.map((g) => ({ id: g.id, displayName: g.displayName }));
 
+  // FR-2 gives visibility no default, so this is a real outstanding item rather
+  // than a nag. It is counted separately from the list below because it is the
+  // one item that can also apply AFTER commit: decision 108's migration leaves
+  // an ambiguous row unchosen rather than guessing, and no commit gate remains
+  // behind a committed instance to catch it. Those columns resolve hidden
+  // meanwhile, so the cost of not surfacing it is silent, which is exactly the
+  // kind of thing that goes unnoticed for a cycle.
+  const unchosenCount =
+    columns.filter((c) => c.needsVisibilityChoice).length +
+    groups.filter((g) => g.needsVisibilityChoice).length;
+  const unchosenItem =
+    unchosenCount > 0
+      ? `${unchosenCount} column${unchosenCount === 1 ? "" : "s"} still ` +
+        `${unchosenCount === 1 ? "needs" : "need"} Reviewer-visible or Backend only chosen.`
+      : null;
+
   // FR-2: both designations are required and neither column can be excluded.
   const emailColumn = instance.fields.find((f) => f.promotedRole === PromotedRole.EMAIL);
   const nameColumns = instance.fields.filter((f) => f.promotedRole === PromotedRole.NAME);
   const outstanding = [
+    unchosenItem,
     emailColumn ? null : "Designate the email column — it is the join key for the first-round imports.",
     nameColumns.length > 0
       ? null
@@ -170,6 +187,27 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
                 <li key={item}>· {item}</li>
               ))}
             </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* The same list, on an instance that has already committed. Only the
+          visibility item can reach this state — the designations and the group
+          proposals are all settled by commit — so the copy says what the
+          consequence is rather than what is blocked, because nothing is. */}
+      {committed && unchosenItem !== null ? (
+        <Card className="mt-8 border-amber-500/40">
+          <CardHeader>
+            <CardTitle className="text-base">
+              {unchosenCount} column{unchosenCount === 1 ? "" : "s"} need
+              {unchosenCount === 1 ? "s" : ""} a visibility choice
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm">
+              These columns are hidden from every reviewer until you choose Reviewer-visible or
+              Backend only for them. Nothing else is blocked.
+            </p>
           </CardContent>
         </Card>
       ) : null}

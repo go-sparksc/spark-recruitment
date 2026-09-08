@@ -228,11 +228,11 @@ async function funnelBeforePurge(): Promise<Funnel> {
     prisma.field.findMany({
       where: { instanceId: INSTANCE },
       orderBy: { ordinal: "asc" },
-      select: { id: true, displayName: true, ordinal: true, category: true, isIncluded: true, groupId: true, groupRole: true, visibleToWrittenReviewer: true, visibleToFirstRoundReviewer: true },
+      select: { id: true, displayName: true, ordinal: true, category: true, isIncluded: true, groupId: true, groupRole: true, isReviewerVisible: true },
     }),
     prisma.fieldGroup.findMany({
       where: { instanceId: INSTANCE },
-      select: { id: true, displayName: true, ordinal: true, category: true, isIncluded: true, visibleToWrittenReviewer: true, visibleToFirstRoundReviewer: true },
+      select: { id: true, displayName: true, ordinal: true, category: true, isIncluded: true, isReviewerVisible: true },
     }),
   ]);
 
