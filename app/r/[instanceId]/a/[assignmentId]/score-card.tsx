@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 
-import { saveAiFlagForm, saveNote, saveNoteForm, saveScore, saveScoreForm } from "../../actions";
+import {
+  saveAiFlag,
+  saveAiFlagForm,
+  saveNote,
+  saveNoteForm,
+  saveScore,
+  saveScoreForm,
+} from "../../actions";
 import { readDraft } from "./draft-store";
 import { useAutosave } from "./use-autosave";
 import { type DraftValue, type SaveStatus } from "@/lib/autosave";
@@ -657,6 +664,23 @@ function NoteField({
 /// below is the pre-hydration fallback on exactly the note field's terms:
 /// present while the page cannot submit for you, gone once it can.
 ///
+/// **`intercept` is what stops the box unticking itself, and it is not optional.**
+/// React 19 requests a form reset whenever a form with a *function* action is
+/// submitted — `requestFormReset(formFiber); return action(formData)` in
+/// react-dom-client. The reset lands when the action's transition completes and
+/// restores every uncontrolled field to the `defaultChecked` of the committed
+/// render. `saveAiFlagForm` deliberately never revalidates, so no corrected
+/// value ever arrives: the write succeeds, the box springs back, and the screen
+/// then disagrees with the database until the page is reloaded. Measured at
+/// ~1.3s after the tap on a local server, which is why it reads as intermittent
+/// rather than as a control that plainly does not work.
+///
+/// `preventDefault` first, exactly as `ScoreField` and `NoteField` do it — that
+/// is why neither of them has ever shown this, and why the note textarea would
+/// start clearing itself mid-sentence if anyone removed the interceptor there
+/// as redundant. The native POST is untouched: before hydration React has
+/// attached no handler, so the fallback button still submits for real.
+///
 /// **The wording is load-bearing.** "Looks AI-written to me" rather than "AI
 /// detected" — nothing detects anything, §11 keeps that out of scope, and the
 /// label must not let a reviewer believe the system agreed with them. The line
@@ -673,9 +697,21 @@ function AiFlagField({
 }) {
   const hydrated = useHydrated();
   const formRef = useRef<HTMLFormElement>(null);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function intercept(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const data = new FormData(event.currentTarget);
+    start(async () => {
+      const result = await saveAiFlag(data);
+      setError(result.ok ? null : (result.error ?? "Could not save. Try again."));
+    });
+  }
 
   return (
-    <form ref={formRef} action={saveAiFlagForm}>
+    <form ref={formRef} action={saveAiFlagForm} onSubmit={intercept}>
       <input type="hidden" name="instanceId" value={instanceId} />
       <input type="hidden" name="assignmentId" value={assignmentId} />
 
@@ -684,6 +720,7 @@ function AiFlagField({
           type="checkbox"
           name="suspectedAiUse"
           defaultChecked={flagged}
+          disabled={pending}
           onChange={() => formRef.current?.requestSubmit()}
           className="mt-0.5 size-4 shrink-0"
         />
@@ -700,6 +737,15 @@ function AiFlagField({
         <button type="submit" className="hover:bg-muted mt-2 h-11 rounded-md border px-3 text-sm">
           Save flag
         </button>
+      ) : null}
+
+      {/* Silent failure is the one outcome this control must not have: the
+          reviewer has no other signal that their read was recorded, and the
+          form-action version surfaced a refusal as a thrown error boundary. */}
+      {error !== null ? (
+        <p role="alert" className="text-destructive mt-2 text-sm">
+          {error}
+        </p>
       ) : null}
     </form>
   );
