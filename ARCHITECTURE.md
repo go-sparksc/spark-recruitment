@@ -148,6 +148,32 @@ npx prisma generate
 
 Prisma 7 renamed the diff flags; `--from-schema-datasource` is gone.
 
+**`npm run build` is deliberately not what Vercel runs.** `vercel.json` sets the
+build command to `prisma migrate deploy && next build`, so the deploy that needs
+a migration is the one that applies it, against that environment's own
+`DATABASE_URL`, and a failed migration fails the build instead of shipping code
+to a schema that cannot serve it. Putting `migrate deploy` in the `build` script
+instead would mean every local typecheck silently migrated your development
+database.
+
+Three things follow. **`vercel.json` beats the dashboard** — a Build Command set
+in Vercel's project settings is overridden by this file, which is the point: the
+deployment recipe belongs in the repository where it can be reviewed. If the
+build log shows a different command, the file is not being picked up. **Every
+build migrates, including preview builds**, so a push to any branch migrates
+whatever database that environment holds — scope `DATABASE_URL` to Production
+only, or give Preview its own Neon branch. And **set `DIRECT_URL` if a deploy
+ever fails on advisory locks**: Neon's pooled endpoint cannot hold the session
+lock the migration engine takes.
+
+This exists because production ran five weeks behind its schema. Migrations had
+been applied by hand once, in early August 2026, and then never again, so the app
+served code expecting a table added three weeks later and crashed at sign-in.
+**The failure mode was not a forgotten command, it was an unowned step** — any
+deployment step a human has to remember is one that eventually stops happening,
+and the gap surfaces as a runtime crash in the one environment nobody develops
+against.
+
 **Restart `next dev` after any `prisma generate` or `prisma migrate`.** The
 generated client is rewritten on disk, but a running dev server keeps the old one
 in memory — so it serves a client that does not know the column you just added
@@ -256,7 +282,7 @@ different matter and are still pruned, on every successful admin sign-in.
 
 ## Where the reasoning is written down
 
-- **`PRD.md` §10** — 109 numbered decisions, each recording what was chosen, what
+- **`PRD.md` §10** — 118 numbered decisions, each recording what was chosen, what
   was rejected, and why. When something looks arbitrary, it is usually in here.
 - **`plans/phase-N.md`** — the design history, one file per build phase,
   including what each gate found.
