@@ -61,6 +61,14 @@ Scale: 160+ applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
   **So: run `npm run build` before calling a slice done whenever it touched a file carrying a directive, added a client component, or changed what crosses that boundary** — not only when it touched an actions file. It takes a few seconds and is the only thing that checks any of this.
 
+- **React 19 resets a `<form action={fn}>` after the action runs, and `verify` cannot see it.** `react-dom-client` does `requestFormReset(formFiber); return action(formData)` on submit, so every *uncontrolled* field in that form is restored to the committed render's `defaultValue`/`defaultChecked` when the action's transition completes. Typecheck, lint and all 903 tests stay green; the defect exists only in a browser, roughly a second after a tap.
+
+  It bites wherever a field's value is meant to **survive** the submit rather than be cleared — an edit-in-place control, not a create-and-clear form. Phase 9's AI flag was exactly that: the write succeeded, the checkbox sprang back to unticked, the action deliberately never revalidated so no corrected value ever followed, and the screen then disagreed with the database until reload. Worse than a control that plainly does not work, because the reviewer's obvious next move — press it again — sent the opposite value and silently retracted their own flag.
+
+  **`ScoreField` and `NoteField` are immune only because their `onSubmit={intercept}` calls `preventDefault()` first, and that is load-bearing rather than duplicated guard-work.** Its comment explains the double-dispatch it prevents; suppressing this reset is a second job it does silently. **Do not "clean it up" as redundant** — the note textarea would begin wiping itself back to the last server-rendered body while a reviewer is mid-sentence, which is this bug on the field where it costs the most. If you ever remove an interceptor, the field it guards must become controlled in the same change.
+
+  Native `method="get"` forms are unaffected: React's action path never runs for them.
+
 - **Restart `next dev` after any `prisma generate` or `prisma migrate`.** The generated client is regenerated on disk, but a running dev server keeps the old one in memory — so the server serves a client that does not know the column you just added, and fails with `Unknown field 'x' for select statement on model 'Y'` at runtime. Nothing in the toolchain warns you: `npm run verify` reads the new client from disk and passes completely, so typecheck, lint and every test go green while the app is broken. This cost a full round of misdiagnosis in Phase 3 — the owner found it from a browser error overlay after being sent to look at the network, because the reachability checks had probed routes that did not touch the new column.
 
   Two corollaries worth having in front of you. **Check the route that is actually failing, not a neighbouring one**: a 200 from a page that avoids the new column proves nothing about the page that uses it. And **read the dev server log before theorising** — the untruncated Prisma error names the exact field, and it is in `next dev`'s output the whole time.
@@ -94,14 +102,26 @@ Three things about that, learned the hard way in Phase 9:
   migrates production — so scope the variable to Production only, or give
   Preview its own Neon branch. Check this before the first push, not after.
 
-**The production database was never migrated before 2026-09-09** — it was found
-serving an app that crashed on a missing `RateLimitBucket`, twelve migrations
-into an eighteen-migration history. If `migrate deploy` reports **P3005** ("the
-database schema is not empty"), that is this: tables that exist without a
-`_prisma_migrations` row to explain them, almost certainly from a `prisma db
-push`. Baseline it with `prisma migrate resolve --applied <name>` for each
-migration already reflected in the schema, or — while no real cycle has run —
-drop and recreate the database and let the deploy build it from nothing.
+**Production was five weeks stale on 2026-09-09**, which is what this fixes and
+what it is worth understanding precisely. `_prisma_migrations` held rows through
+`20260809200000_import_row_discarded` and nothing after: migrations had been run
+by hand once, in early August, and then never again. So production served code
+expecting `RateLimitBucket` — added 2026-08-30 — against a schema frozen on
+2026-08-09, and crashed on the missing table at sign-in. The first automated
+deploy applied the 13 pending migrations in one go, cleanly, through Neon's
+pooled endpoint.
+
+**The failure mode was not a forgotten command, it was an unowned step**, and
+that is the general form: any deployment step a human has to remember is a step
+that eventually stops happening, and the gap only shows up as a runtime crash
+weeks later in the one environment nobody develops against. Two guesses made
+while diagnosing it were both wrong and are recorded so the next reader does not
+repeat them — that production had *never* been migrated, and that `migrate
+deploy` would therefore refuse with **P3005** ("the database schema is not
+empty", the signature of tables created by `prisma db push`). Neither held: a
+partially-migrated database is not an unexplained one, and `migrate deploy`
+simply applies what is pending. The tell was in the log — `18 migrations found`
+against 13 applied.
 
 ## Testing
 

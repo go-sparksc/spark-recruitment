@@ -450,7 +450,7 @@ forget. This is where step 4's writing does its work: what you wrote for a 3 is
 what stands between thirty people scoring the same thing and thirty people
 scoring thirty things.
 
-They also get one checkbox per applicant: **This looks AI-written to me.** It is
+They also get one button per applicant: **This looks AI-written to me.** It is
 their own read, no other reviewer sees it, and it reaches you and nobody else —
 on the results table's **AI?** column and on the applicant's page. See step 8.
 

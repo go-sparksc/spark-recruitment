@@ -65,16 +65,18 @@ it is what gets read when two reviewers disagree about someone.
 
 ### If the writing looks AI-generated
 
-At the bottom of the card there is one checkbox: **This looks AI-written to me.**
+At the bottom of the card there is one button: **This looks AI-written to me.**
 
-Tick it if that is your honest read. It goes to the admin running recruitment
-with your name on it, no other reviewer sees it, and **nothing is decided by it
-on its own** — three reviewers disagreeing about one application is exactly the
-signal it exists to surface. Nothing in the tool detects anything; this is your
-judgement, recorded, and it is a reason for someone to read the application
-again rather than a verdict.
+Press it if that is your honest read. It fills in dark to show it is on, the same
+way a score button does, and pressing it again turns it off.
 
-Leave it alone if you are unsure. An unticked box says nothing about you.
+It goes to the admin running recruitment with your name on it, no other reviewer
+sees it, and **nothing is decided by it on its own** — three reviewers
+disagreeing about one application is exactly the signal it exists to surface.
+Nothing in the tool detects anything; this is your judgement, recorded, and it is
+a reason for someone to read the application again rather than a verdict.
+
+Leave it alone if you are unsure. A button you never pressed says nothing about you.
 
 Then go back and pick the next one. You do not have to do them all at once.
 
@@ -209,7 +211,7 @@ applicant and the vote is at the bottom of their page.
 
 **I ticked "this looks AI-written" — what happens?** It reaches the admin
 running recruitment, with your name. No other reviewer sees it, and nothing is
-decided by it alone. Untick it if you change your mind.
+decided by it alone. Press it again if you change your mind.
 
 **I closed the tab halfway through — did I lose it?** No. Everything saved as you
 tapped.

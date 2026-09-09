@@ -655,37 +655,46 @@ function NoteField({
 /// **Not on the autosave queue, unlike the scores and the note, and that is a
 /// decision rather than an omission.** The queue exists for work built up over
 /// many edits — a note typed a word at a time, a score changed twice — where
-/// losing the last keystroke costs real thinking. A checkbox is one deliberate
-/// act with two states, so a form posting on change is both simpler and strictly
-/// more reliable: it works before hydration, with JavaScript off, and needs no
-/// draft mirror to survive the tab being killed.
+/// losing the last keystroke costs real thinking. This is one deliberate act
+/// with two states, so a form posting on press is both simpler and strictly more
+/// reliable: it works before hydration, with JavaScript off, and needs no draft
+/// mirror to survive the tab being killed.
 ///
-/// `requestSubmit()` on change, so ticking is the whole interaction. The button
-/// below is the pre-hydration fallback on exactly the note field's terms:
-/// present while the page cannot submit for you, gone once it can.
+/// **A pressed button rather than a checkbox**, in the segmented family the
+/// score row uses, because it is the same kind of act: one tap, two states, a
+/// 44px target, and a control whose state is legible from across the room rather
+/// than from a 16px box. `aria-pressed` is what carries that to a screen reader,
+/// which is the half a styled checkbox would have lost.
 ///
-/// **`intercept` is what stops the box unticking itself, and it is not optional.**
-/// React 19 requests a form reset whenever a form with a *function* action is
-/// submitted — `requestFormReset(formFiber); return action(formData)` in
-/// react-dom-client. The reset lands when the action's transition completes and
-/// restores every uncontrolled field to the `defaultChecked` of the committed
-/// render. `saveAiFlagForm` deliberately never revalidates, so no corrected
-/// value ever arrives: the write succeeds, the box springs back, and the screen
-/// then disagrees with the database until the page is reloaded. Measured at
-/// ~1.3s after the tap on a local server, which is why it reads as intermittent
-/// rather than as a control that plainly does not work.
+/// **The single button is also what makes one tap a toggle without JavaScript.**
+/// It carries `name="suspectedAiUse"` only while the flag is *off*: pressing it
+/// then submits the field and the action stores true, and pressing it while on
+/// submits a form with no such field, which `applyAiFlag` reads as false. So the
+/// no-JS path toggles correctly on its own, and there is no separate save button
+/// to explain — the control and its submitter are the same thing.
+///
+/// **`intercept` is what stops the flag reverting after it saves, and it is not
+/// optional.** React 19 requests a form reset whenever a form with a *function*
+/// action is submitted — `requestFormReset(formFiber); return action(formData)`
+/// in react-dom-client. The reset lands when the action's transition completes
+/// and restores uncontrolled fields to the committed render's values.
+/// `saveAiFlagForm` deliberately never revalidates, so no corrected value ever
+/// arrives: the write succeeded, the control sprang back, and the screen then
+/// disagreed with the database until reload. Measured at ~1.3s after the tap,
+/// which is why it read as intermittent rather than plainly broken.
 ///
 /// `preventDefault` first, exactly as `ScoreField` and `NoteField` do it — that
 /// is why neither of them has ever shown this, and why the note textarea would
-/// start clearing itself mid-sentence if anyone removed the interceptor there
-/// as redundant. The native POST is untouched: before hydration React has
-/// attached no handler, so the fallback button still submits for real.
+/// start clearing itself mid-sentence if anyone removed the interceptor there as
+/// redundant. The native POST is untouched: before hydration React has attached
+/// no handler, so a press still submits for real.
 ///
 /// **The wording is load-bearing.** "Looks AI-written to me" rather than "AI
 /// detected" — nothing detects anything, §11 keeps that out of scope, and the
-/// label must not let a reviewer believe the system agreed with them. The line
-/// underneath says where it goes, because someone filing an unverified claim
-/// about a person is entitled to know who reads it.
+/// label must not let a reviewer believe the system agreed with them. Where it
+/// goes is answered in REVIEWER_GUIDE.md rather than under the control: a line
+/// of consequences under a button an anxious reviewer is deciding whether to
+/// press argues them out of pressing it, and §6 already guarantees the answer.
 function AiFlagField({
   instanceId,
   assignmentId,
@@ -695,49 +704,60 @@ function AiFlagField({
   assignmentId: string;
   flagged: boolean;
 }) {
-  const hydrated = useHydrated();
-  const formRef = useRef<HTMLFormElement>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Optimistic, because nothing re-renders this subtree: the action does not
+  // revalidate, on purpose. `flagged` is therefore the value from page load and
+  // this is the live one. If a `revalidatePath` is ever added to the action,
+  // resync on the prop rather than leaving the two to drift.
+  const [on, setOn] = useState(flagged);
 
   function intercept(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const data = new FormData(event.currentTarget);
+    // The submitter decides what is sent, so it also decides what was meant:
+    // carrying the name means "turning it on". Read from the event rather than
+    // from `on`, so the optimistic state can never disagree with the request.
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const next = submitter?.name === "suspectedAiUse";
+    const data = new FormData(event.currentTarget, submitter);
+
+    setOn(next);
     start(async () => {
       const result = await saveAiFlag(data);
-      setError(result.ok ? null : (result.error ?? "Could not save. Try again."));
+      if (result.ok) {
+        setError(null);
+        return;
+      }
+      // Put it back. A control that stays pressed after a failed write is the
+      // same lie the reset bug told, in the other direction.
+      setOn(!next);
+      setError(result.error ?? "Could not save. Try again.");
     });
   }
 
   return (
-    <form ref={formRef} action={saveAiFlagForm} onSubmit={intercept}>
+    <form action={saveAiFlagForm} onSubmit={intercept}>
       <input type="hidden" name="instanceId" value={instanceId} />
       <input type="hidden" name="assignmentId" value={assignmentId} />
 
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          name="suspectedAiUse"
-          defaultChecked={flagged}
-          disabled={pending}
-          onChange={() => formRef.current?.requestSubmit()}
-          className="mt-0.5 size-4 shrink-0"
-        />
-        <span>
-          This looks AI-written to me
-          <span className="text-muted-foreground block text-xs">
-            Goes to the admin running recruitment, with your name. No other reviewer sees it, and
-            nothing is decided by it on its own.
-          </span>
-        </span>
-      </label>
-
-      {!hydrated ? (
-        <button type="submit" className="hover:bg-muted mt-2 h-11 rounded-md border px-3 text-sm">
-          Save flag
-        </button>
-      ) : null}
+      <button
+        type="submit"
+        // Present only while off, which is what makes one press a toggle. See
+        // the block comment above.
+        {...(on ? {} : { name: "suspectedAiUse", value: "on" })}
+        aria-pressed={on}
+        disabled={pending}
+        className={
+          "h-11 shrink-0 rounded-md border px-3 text-sm transition-colors " +
+          (on
+            ? "border-foreground bg-foreground text-background font-medium"
+            : "hover:bg-muted")
+        }
+      >
+        This looks AI-written to me
+      </button>
 
       {/* Silent failure is the one outcome this control must not have: the
           reviewer has no other signal that their read was recorded, and the
