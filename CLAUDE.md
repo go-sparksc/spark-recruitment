@@ -67,6 +67,42 @@ Scale: 160+ applicants, ~30 reviewers, one cycle per semester. This is not a hig
 
   **Restarting it is not the same as stopping it, and a failed stop is the signal.** Stopping the background task can kill the `npm` wrapper while leaving the underlying Next process alive and still bound to port 3000 — still serving the stale client, which is the exact state the restart existed to clear. The replacement `npm run dev` does not fail loudly: it prints `Port 3000 is in use ... using available port 3001 instead`, reports `Ready`, then exits 1 with `Another next dev server is already running` and the old PID. So the browser keeps talking to the old server on 3000, and `npm run verify` is green throughout — the Phase 3 trap, one layer further down. This happened during decision 109's migration and needed `taskkill /PID <pid> /F` (its output names the PID) to actually free the port. **Treat a dev server that did not respond to a normal stop as a thing to check, not a thing to retry:** confirm the port is free, or that the process is gone, before assuming the restart took. Re-running the start command on top of it reproduces the confusion rather than resolving it.
 
+## Deployment
+
+Vercel, on push to `origin/main`. **`vercel.json` sets the build command to
+`prisma migrate deploy && next build`**, so migrations are applied by the deploy
+that needs them, against Vercel's own `DATABASE_URL`, and a failed migration
+fails the build instead of shipping code to a schema that cannot serve it.
+
+Three things about that, learned the hard way in Phase 9:
+
+- **`npm run build` is deliberately *not* the thing Vercel runs.** Adding
+  `migrate deploy` to the `build` script would mean every local build silently
+  migrates the development database — a schema change as a side effect of a
+  typecheck. `vercel.json` keeps the two apart.
+- **`vercel.json` beats the dashboard.** A Build Command set in Vercel's project
+  settings is overridden by this file, which is the point: the deployment recipe
+  belongs in the repository where it can be reviewed, not in a web form nobody
+  reads. If the build log shows a different command than the one above, the file
+  is not being picked up — check that it is committed and at the repo root.
+- **Set `DIRECT_URL` in Vercel** if a deploy fails on advisory locks. Neon's
+  pooled endpoint cannot hold the session lock the migration engine takes;
+  `prisma.config.ts` uses `DIRECT_URL` for migrations whenever it is set.
+- **Every build migrates, including preview builds.** A push to any branch runs
+  this command against whatever `DATABASE_URL` that environment holds. If the
+  Preview environment's `DATABASE_URL` is the production one, a branch push
+  migrates production — so scope the variable to Production only, or give
+  Preview its own Neon branch. Check this before the first push, not after.
+
+**The production database was never migrated before 2026-09-09** — it was found
+serving an app that crashed on a missing `RateLimitBucket`, twelve migrations
+into an eighteen-migration history. If `migrate deploy` reports **P3005** ("the
+database schema is not empty"), that is this: tables that exist without a
+`_prisma_migrations` row to explain them, almost certainly from a `prisma db
+push`. Baseline it with `prisma migrate resolve --applied <name>` for each
+migration already reflected in the schema, or — while no real cycle has run —
+drop and recreate the database and let the deploy build it from nothing.
+
 ## Testing
 
 Four things get real tests:
