@@ -334,7 +334,75 @@ the same file.
 
 ---
 
-## Slices 9.4 – 9.5
+## Slice 9.4 — roster and pool
 
-Scope is in `BUILD_PLAN.md`'s Phase 9 section; each is written up here as it is
-built.
+Decisions 115 (a later round is staffed from the earlier round's roster) and 117
+(an admin can return an assignment to the pool).
+
+**Decision 115's rule lives in a new `lib/rounds.ts`, and the two rejected homes
+are the interesting part.** It started inside the roster's server actions, where
+it could not be tested — a `"use server"` module may only export async functions.
+Moving it to `lib/roster.ts` looked obvious and was wrong: that module's own
+comment states it is "free of the Round enum and of any opinion about which round
+is being staffed", and this rule is nothing *but* an opinion about which round is
+being staffed, so putting it there would have quietly broken an invariant its
+author had written down. Its own module keeps both properties intact and made
+nine tests possible.
+
+**115 and 84 are two guards, checked in that order, and the page now says so
+too.** 84 is a time lock (the roster freezes once a pass exists); 115 is a
+membership rule (holds from the start, applies to the first round as well). The
+actions check 84 first, because a frozen roster makes eligibility moot.
+
+**117 extends FR-9's return path rather than adding a verb.** Same
+`RETURNED_TO_POOL` row, `returnReason = OTHER`, note required — reusing
+`validateReturn` so the two paths cannot disagree about what a return needs.
+`unassignReviewer` stays and is deliberately different: it deletes the row and
+its scores, so generation may re-pair; a return preserves the scores and writes
+decision 23's permanent exclusion. The audit payload names `keptScoreCount` where
+unassign's names `deletedScoreCount`, so an admin reading the log can see at a
+glance which verb destroyed work.
+
+### What the gate found
+
+**A build error `npm run verify` cannot see.** `ROUND_PREREQUISITES` was exported
+from a `"use server"` module, which is legal TypeScript and an illegal Next
+build — typecheck, lint and 878 tests were green while `next build` would have
+failed. Caught by running the build, now recorded in `CLAUDE.md` beside the
+dev-server trap, which is the same shape one layer earlier.
+
+**A prose version of offered-and-refused.** On `demo_reference`'s second-round
+tab — locked by decision 84, since it has a pass — both banners rendered: 84's
+"this roster is fixed" and then 115's "tick them into this round on the grid
+below". The second instructs an admin to do something the first has just
+forbidden. Suppressed when `rosterFixed`, mirroring the action ordering. Found by
+opening the tab, not by reading the diff.
+
+**A test that was wrong about its own contract.** `prerequisiteBlock([SECOND_ROUND],
+SECOND_ROUND)` was asserted to return null; it returns a refusal, because the
+prerequisites really are missing. `addRound` never asks — it returns early on
+`rounds.includes(round)` — so the caller owns that case. The test was corrected
+to the real contract rather than the function bent to fit it.
+
+**Gate — PASSED for what is reachable.**
+
+- [x] The written tab keeps its add form and paste box.
+- [x] The first-round tab has neither, and explains where reviewers come from.
+- [x] A locked second-round tab shows decision 84's banner only.
+- [x] Reviewer chips render `swap · return · ×`, with distinct aria-labels.
+- [x] The return confirm names the pairing and all three consequences.
+- [x] Submit stays disabled while the note is empty — the note is required.
+- [x] `prerequisiteBlock`, nine cases, including the ordering of the named fix.
+- [ ] **The refusal itself was not clicked.** No reviewer in any instance lacks
+      `WRITTEN` — the seed always creates them into it — so the state cannot be
+      reached without writing one, and the only unlocked instance is the
+      reference demo. Covered by unit test rather than by eye.
+- [ ] **The return was not executed.** Writing it puts a permanent decision-23
+      exclusion on the reference instance; the panel was opened and cancelled.
+
+---
+
+## Slice 9.5
+
+Scope is in `BUILD_PLAN.md`'s Phase 9 section, and now carries decision 110 and
+the AI-flag tooltip as well.

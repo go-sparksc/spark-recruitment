@@ -146,7 +146,16 @@ export default async function ReviewersPage({
         </p>
       ) : null}
 
-      <RosterControls instanceId={id} round={round} reviewers={rows} />
+      {/* `rosterFixed` is passed so decision 115's "add them on the written tab
+          and tick them in here" explanation can stay quiet when decision 84 has
+          frozen the grid it points at. The two guards are checked in that order
+          in the actions; the page says so too. */}
+      <RosterControls
+        instanceId={id}
+        round={round}
+        reviewers={rows}
+        rosterFixed={rosterFixed}
+      />
     </main>
   );
 }

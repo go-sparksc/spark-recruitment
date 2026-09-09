@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { Prisma } from "@/generated/prisma/client";
-import { AssignmentOrigin, AssignmentStatus, Round } from "@/generated/prisma/enums";
+import { AssignmentOrigin, AssignmentStatus, ReturnReason, Round } from "@/generated/prisma/enums";
 import {
   checkFeasibility,
   generateAssignments,
@@ -14,6 +14,7 @@ import {
 import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { validateReturn } from "@/lib/review";
 
 export interface ActionState {
   error?: string;
@@ -500,6 +501,113 @@ export async function swapReviewer(
 }
 
 /// Remove one reviewer from one applicant. Audited with what it removed, per §8.
+/// PRD decision 117. FR-8's fourth verb: put a reviewer's slot back in the pool
+/// on their behalf, for the non-responsive reviewer the reviewer-facing control
+/// was never going to be used by.
+///
+/// **Extends FR-9's path rather than adding a mechanism.** It writes the same
+/// `RETURNED_TO_POOL` row `returnToPool` writes, so `openPoolFor` sees the
+/// applicant as short a reviewer, any reviewer can claim the slot, and
+/// generation treats the pair as decision 23's exclusion. A second verb with
+/// the same effect and a different row shape would mean `lib/assignment.ts`
+/// knowing about both, which is how two definitions of "is this slot open" come
+/// to disagree.
+///
+/// **`unassignReviewer` below is a different verb and stays.** It *deletes* the
+/// row, so generation may re-pair that reviewer with that applicant, and it
+/// destroys any scores on it. That is right for "this pairing was a mistake" and
+/// wrong for "this reviewer is not coming back": a return preserves the scores
+/// and permanently excludes the pair, which is what a ghosting reviewer calls
+/// for. The asymmetry predates this decision and was incidental; 117 is where it
+/// becomes deliberate.
+///
+/// **Reason is always `OTHER` and the note is required**, amending decision 27.
+/// A reviewer's `CONFLICT_OF_INTEREST` explains itself; an admin acting on
+/// someone else's behalf has no reason category doing that work, so the note is
+/// the entire record of what happened and why.
+///
+/// Audited, unlike the reviewer's own return: §8 logs admin overrides.
+export async function returnAssignmentToPool(
+  instanceId: string,
+  round: Round,
+  applicantId: string,
+  reviewerId: string,
+  note: string,
+): Promise<ActionState> {
+  const session = await requireInstance(instanceId, path(instanceId));
+
+  // The same validator FR-9's control runs, so the two paths cannot disagree
+  // about what a return needs. `OTHER` is fixed here rather than accepted from
+  // the caller: an admin is not in a position to assert somebody else's
+  // conflict of interest, and recording one as though the reviewer had declared
+  // it would put words in their mouth on a row that outlives the round.
+  const verdict = validateReturn(ReturnReason.OTHER, note);
+  if (!verdict.ok) return { error: verdict.error };
+  if (verdict.note === null) {
+    return { error: "Say why this slot is going back to the pool. It is the only record of it." };
+  }
+
+  const assignment = await prisma.assignment.findFirst({
+    // ACTIVE only: a row already returned is the state this produces, so
+    // running it twice is a no-op rather than an overwrite that moves
+    // `returnedAt` and loses when it actually happened.
+    where: { instanceId, round, applicantId, reviewerId, status: AssignmentStatus.ACTIVE },
+    select: {
+      id: true,
+      origin: true,
+      _count: { select: { scores: true } },
+      reviewer: { select: { firstName: true, lastName: true } },
+    },
+  });
+
+  if (!assignment) {
+    return { error: "That reviewer is not actively assigned to this applicant." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        ...auditActor(session),
+        action: "RETURN_ASSIGNMENT_TO_POOL",
+        entityType: "Applicant",
+        entityId: applicantId,
+        previousValue: {
+          round,
+          reviewerId,
+          origin: assignment.origin,
+          // Named `keptScoreCount`, not `deletedScoreCount`. The unassign row
+          // beside it in the log uses the latter, and an admin reading the two
+          // together should be able to see at a glance which verb destroyed
+          // work and which did not.
+          keptScoreCount: assignment._count.scores,
+          note: verdict.note,
+        },
+      },
+    });
+    await tx.assignment.update({
+      where: { id: assignment.id },
+      data: {
+        status: AssignmentStatus.RETURNED_TO_POOL,
+        returnReason: verdict.reason,
+        returnNote: verdict.note,
+        returnedAt: new Date(),
+      },
+    });
+  });
+
+  revalidatePath(path(instanceId));
+  return {
+    message:
+      `${assignment.reviewer.firstName} ${assignment.reviewer.lastName}'s slot is back in the ` +
+      `pool for anyone to claim.` +
+      (assignment._count.scores > 0
+        ? ` Their ${assignment._count.scores} score${assignment._count.scores === 1 ? "" : "s"} ` +
+          `stayed.`
+        : ""),
+  };
+}
+
 export async function unassignReviewer(
   instanceId: string,
   round: Round,

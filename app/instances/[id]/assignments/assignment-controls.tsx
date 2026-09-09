@@ -6,6 +6,7 @@ import {
   assignReviewer,
   generate,
   swapReviewer,
+  returnAssignmentToPool,
   unassignReviewer,
   type ActionState,
   type GenerateResult,
@@ -299,11 +300,28 @@ export function OverridePanel({
   const [find, setFind] = useState("");
   const [pending, start] = useTransition();
 
+  /// Decision 117's confirm panel. Holds the pairing being returned plus the
+  /// note, which is required — the reason is always OTHER, so the note is the
+  /// entire record of why the slot went back.
+  ///
+  /// Carries the names rather than looking them up on render: this panel is the
+  /// only place an admin reads which pairing they are about to change, and a
+  /// lookup that misses after a revalidate would leave it confirming a blank.
+  const [returning, setReturning] = useState<{
+    applicantId: string;
+    reviewerId: string;
+    reviewerName: string;
+    applicantLabel: string;
+  } | null>(null);
+  const [returnNote, setReturnNote] = useState("");
+
   const act = (fn: () => Promise<ActionState>) =>
     start(async () => {
       setState(await fn());
       setPicker(null);
       setFind("");
+      setReturning(null);
+      setReturnNote("");
     });
 
   const href = (over: Partial<{ page: number; q: string; only: string }>) => {
@@ -370,6 +388,81 @@ export function OverridePanel({
       ) : null}
       {state.message ? <p className="text-sm text-emerald-600">{state.message}</p> : null}
 
+      {/* Decision 117's confirm. A panel rather than a bare click, because the
+          note is required and because this is the one FR-8 verb whose effect is
+          permanent in a way the others are not: decision 23 forbids generation
+          from ever re-creating the pair, so an admin should read that sentence
+          before the row is written. */}
+      {returning ? (
+        <div className="space-y-3 rounded-md border p-4">
+          <p className="text-sm font-medium">
+            Return {returning.reviewerName}&rsquo;s slot on {returning.applicantLabel} to the pool?
+          </p>
+          <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
+            <li>The slot opens for any reviewer to claim.</li>
+            <li>
+              Any scores {returning.reviewerName} already submitted stay. Unassigning would delete
+              them.
+            </li>
+            <li>
+              Regenerating will never pair them with this applicant again. Putting them back is the
+              assign control above.
+            </li>
+          </ul>
+
+          <div className="space-y-1.5">
+            <label htmlFor="return-note" className="text-xs font-medium">
+              Why is it going back?
+            </label>
+            <input
+              id="return-note"
+              value={returnNote}
+              onChange={(event) => setReturnNote(event.target.value)}
+              disabled={pending}
+              placeholder="e.g. no reply on Slack for two weeks"
+              className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+            />
+            {/* Required here where FR-9 makes it optional: the reviewer's own
+                return carries a reason enum that explains itself, and this one
+                is always OTHER, so the note is the whole record. */}
+            <p className="text-muted-foreground text-xs">
+              Recorded in the audit log. This is the only record of why.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={pending || returnNote.trim() === ""}
+              onClick={() =>
+                act(() =>
+                  returnAssignmentToPool(
+                    instanceId,
+                    round,
+                    returning.applicantId,
+                    returning.reviewerId,
+                    returnNote,
+                  ),
+                )
+              }
+            >
+              {pending ? "Returning…" : "Return to pool"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => {
+                setReturning(null);
+                setReturnNote("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {applicants.length === 0 ? (
         <p className="text-muted-foreground rounded-md border p-4 text-sm">
           No applicant matches. {paging.shortOnly ? "Every applicant has a full set of reviewers." : "Try a different name or number."}
@@ -413,6 +506,27 @@ export function OverridePanel({
                       }}
                     >
                       swap
+                    </button>
+                    {/* Decision 117, beside unassign rather than instead of it.
+                        The two read almost the same and do opposite things to a
+                        reviewer's work, so the words carry the difference:
+                        "return" puts the slot back and keeps the scores,
+                        "×" deletes the row and the scores with it. */}
+                    <button
+                      type="button"
+                      aria-label={`Return ${reviewer.name}'s slot on ${applicant.label} to the pool`}
+                      disabled={pending}
+                      className="underline opacity-60 hover:opacity-100"
+                      onClick={() =>
+                        setReturning({
+                          applicantId: applicant.id,
+                          reviewerId: reviewer.id,
+                          reviewerName: reviewer.name,
+                          applicantLabel: applicant.label,
+                        })
+                      }
+                    >
+                      return
                     </button>
                     <button
                       type="button"

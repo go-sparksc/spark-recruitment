@@ -7,6 +7,7 @@ import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { ADD_WRONG_ROUND, prerequisiteBlock } from "@/lib/rounds";
 import {
   checkReviewerName,
   checkReviewerRemoval,
@@ -94,6 +95,13 @@ function rosterFixedRemove(round: Round | null): string {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Decision 115 — a later round is staffed from the earlier round's roster
+// ---------------------------------------------------------------------------
+
+/// What a reviewer must already hold before they can hold `round`.
+///
+/// Written round: nothing. First round: the written. Second round: both.
 /// Every reviewer on the INSTANCE, with round membership flattened for the round
 /// being staffed. Instance-scoped per PRD decision 22: a reviewer serving
 /// another round is the same person, not a new one.
@@ -159,6 +167,14 @@ export async function commitPaste(
   // than half of it.
   if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
     return { error: ROSTER_FIXED_ADD };
+  }
+
+  // Decision 115, and the whole commit is refused for the same reason decision
+  // 66's guard refuses it whole: a paste's CREATE half makes reviewers whose
+  // `rounds` is `[round]`, which for a later round would be a roster row that
+  // could never have been reached one checkbox at a time.
+  if (round !== Round.WRITTEN) {
+    return { error: ADD_WRONG_ROUND };
   }
 
   // The client is not trusted to have cleared the queue, and the queue's two
@@ -264,6 +280,14 @@ export async function addReviewer(
   // form: a server action is a POST endpoint reachable without it.
   if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
     return { error: ROSTER_FIXED_ADD };
+  }
+
+  // Decision 115. A brand-new reviewer holds no rounds, so they can only ever be
+  // created into the written one — this form is now written-round-only, and the
+  // page hides it elsewhere. Checked here too for the same reason as above: the
+  // page hiding a control is not what makes it unreachable.
+  if (round !== Round.WRITTEN) {
+    return { error: ADD_WRONG_ROUND };
   }
 
   const verdict = checkReviewerName(input, await existingReviewers(instanceId, round));
@@ -549,10 +573,17 @@ export async function addRound(
   if (!reviewer) return { error: "That reviewer no longer exists." };
   if (reviewer.rounds.includes(round)) return ok;
 
-  // Decision 66 again, on the grid's own path into the same change.
+  // Decision 66 again, on the grid's own path into the same change. Checked
+  // before decision 115's eligibility for the reason `prerequisiteBlock`
+  // states: a frozen roster makes eligibility moot.
   if (round === Round.SECOND_ROUND && (await secondRoundRosterIsFixed(instanceId))) {
     return { error: ROSTER_FIXED_ADD };
   }
+
+  // Decision 115. The grid's checkbox is the only way into a later round now,
+  // so this is the guard that carries the rule.
+  const ineligible = prerequisiteBlock(reviewer.rounds, round);
+  if (ineligible) return { error: ineligible };
 
   await prisma.reviewer.update({
     where: { id: reviewerId },

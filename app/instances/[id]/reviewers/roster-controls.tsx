@@ -52,10 +52,15 @@ export function RosterControls({
   instanceId,
   round,
   reviewers,
+  rosterFixed,
 }: {
   instanceId: string;
   round: Round;
   reviewers: ReviewerRow[];
+  /// Decision 84: the second-round roster is frozen because a pass exists. Only
+  /// used to suppress decision 115's explanation, which points at a grid that is
+  /// no longer editable — the guards are enforced in the actions, not here.
+  rosterFixed: boolean;
 }) {
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<ParsedRoster | null>(null);
@@ -126,40 +131,70 @@ export function RosterControls({
   const update = (index: number, patch: Partial<QueueItem>) =>
     setQueue((current) => current.map((item, i) => (i === index ? { ...item, ...patch } : item)));
 
+  // Decision 115. Both routes that CREATE a reviewer live on the written round's
+  // tab and nowhere else; a later round is staffed by ticking the grid below.
+  // The actions refuse the other rounds independently — the page hiding a
+  // control has never been what makes it unreachable — but a control that is
+  // present and always refuses is the offered-and-refused shape decision 100
+  // exists to prevent, so it is absent rather than disabled.
+  const canCreateReviewers = round === Round.WRITTEN;
+
   return (
     <div className="space-y-10">
-      <AddReviewerForm instanceId={instanceId} round={round} roundLabel={roundLabel(round)} />
+      {canCreateReviewers ? (
+        <AddReviewerForm instanceId={instanceId} round={round} roundLabel={roundLabel(round)} />
+      ) : rosterFixed ? (
+        // Decision 84 has already said this roster cannot change at all, in its
+        // own banner above. Repeating decision 115's "tick them in on the grid
+        // below" here would point an admin at a grid that will refuse them —
+        // the offered-and-refused shape in prose rather than in a control.
+        // Found by opening the second-round tab on an instance with a pass.
+        null
+      ) : (
+        <p className="text-muted-foreground rounded-md border p-4 text-sm">
+          Reviewers are added on the <strong className="font-medium">written round</strong> tab,
+          then ticked into this round on the grid below. That way anyone here has already read the
+          written applications, and one person never becomes two roster rows.
+        </p>
+      )}
 
-      <section className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="paste">Or paste names, one per line</Label>
-          <p className="text-muted-foreground text-sm">
-            Everyone pasted joins the {roundLabel(round).toLowerCase()} as a non-Sparklet. Set the
-            Sparklet flag and any other rounds in the grid below.
-          </p>
-        </div>
-        <textarea
-          id="paste"
-          value={text}
-          disabled={pending}
-          onChange={(e) => setText(e.target.value)}
-          rows={8}
-          className="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
-          placeholder={"Mary Anne Chen\nAlex Kim"}
-        />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="outline" disabled={pending || text.trim() === ""} onClick={preview}>
-            {pending ? "Checking…" : "Check this paste"}
-          </Button>
-          {parsed !== null ? (
-            <span className="text-muted-foreground text-sm">
-              {parsed.ready.length} ready · {parsed.needsConfirmation.length} need confirming ·{" "}
-              {parsed.droppedLineCount} blank line
-              {parsed.droppedLineCount === 1 ? "" : "s"} ignored
-            </span>
-          ) : null}
-        </div>
-      </section>
+      {canCreateReviewers ? (
+        <section className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="paste">Or paste names, one per line</Label>
+            <p className="text-muted-foreground text-sm">
+              Everyone pasted joins the {roundLabel(round).toLowerCase()} as a non-Sparklet. Set the
+              Sparklet flag and any other rounds in the grid below.
+            </p>
+          </div>
+          <textarea
+            id="paste"
+            value={text}
+            disabled={pending}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            className="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+            placeholder={"Mary Anne Chen\nAlex Kim"}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || text.trim() === ""}
+              onClick={preview}
+            >
+              {pending ? "Checking…" : "Check this paste"}
+            </Button>
+            {parsed !== null ? (
+              <span className="text-muted-foreground text-sm">
+                {parsed.ready.length} ready · {parsed.needsConfirmation.length} need confirming ·{" "}
+                {parsed.droppedLineCount} blank line
+                {parsed.droppedLineCount === 1 ? "" : "s"} ignored
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {parsed !== null && parsed.needsConfirmation.length > 0 ? (
         <section className="space-y-4">
