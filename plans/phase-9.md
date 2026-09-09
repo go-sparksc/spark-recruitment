@@ -320,6 +320,18 @@ is where the AI checkbox lands — `elementFromPoint` is what identified it.
       confirmed.** Both are behind the app-level password, which I will not type.
       Built, typechecked and lint-clean; they need an eye on them.
 
+**One follow-up, deferred to 9.5 rather than done here.** The FR-10 column renders
+a bare count (`⚑ 2`), and the row carries no denominator — so it does not
+distinguish *one of three reviewers suspected* from *the only reviewer who has
+read it suspected*, which are very different signals. The fix is the tooltip, not
+a fraction in the cell: the honest denominator is **completed reviews**, not
+assigned reviewers, because `suspectedAiUse` defaults to false and a reviewer who
+never opened the application reads identically to one who read it and did not
+suspect. Decision 116 now records that reasoning so a successor does not "fix"
+the cell into `1/3`. `row.completedCount` is already in scope at that render
+site, so it is a one-line change — folded into 9.5 because three other items open
+the same file.
+
 ---
 
 ## Slices 9.4 – 9.5
