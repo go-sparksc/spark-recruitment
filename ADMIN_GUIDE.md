@@ -68,6 +68,22 @@ file, and you can change anything on it until you commit.
 The banner at the top lists what still needs doing before you can continue. Work
 down it.
 
+Each column is three rows of controls, in the order the questions actually come:
+
+1. **What is this column** — its display name, and whether it is the email or
+   name column.
+2. **What kind of thing is it, and who sees it** — category, include, and the
+   two visibility checkboxes.
+3. **Is it part of a bigger question** — its group, and its role in that group.
+
+Grouping reads last because it *overrides* the two rows above it: category,
+inclusion and visibility are set on the group and apply to every column in it.
+
+> The screenshot above is from a cycle that has already committed, which is why
+> its display names, designations, categories and grouping are greyed. On a fresh
+> import every one of those is editable — only include and the visibility choice
+> stay editable afterwards.
+
 ### Detected groups
 
 Some questions arrive as several columns rather than one. Ethnicity is the usual
@@ -138,15 +154,26 @@ next section, and it is a separate decision.
 ### Who sees each column
 
 Every column has two checkboxes: **Reviewer-visible** and **Backend only**. They
-are mutually exclusive, and **neither is ticked to begin with**. There is no
-default and the tool will not pick one for you, because the wrong silent default
-is either an empty round or a leak.
+are mutually exclusive.
 
 - **Reviewer-visible** — every reviewer sees it, in all three rounds.
 - **Backend only** — no reviewer sees it, in any round. You still see it.
 
-Work down the table and answer for each column. A column you have not answered
-shows **not set** in amber, and the banner at the top counts them.
+**Nothing is ticked to begin with, with one exception.** The moment you set a
+column's category to `Responses`, it ticks **Reviewer-visible** for you. That is
+not the tool guessing: an essay that reviewers cannot read is refused at commit
+anyway (see the note at the end of this section), so Reviewer-visible was the
+only answer you were ever going to be allowed to give. Ticking it saves you the
+click rather than deciding anything.
+
+For **Other** and **Demographics** it still refuses to choose, because for those
+both answers are real and mean different things.
+
+You can override it. Tick **Backend only** on a Responses column and it will
+stay ticked — and the commit will then refuse, which is the point.
+
+Work down the table and answer for each remaining column. A column you have not
+answered shows **not set** in amber, and the banner at the top counts them.
 
 ![Columns with visibility set, and one still unanswered](docs/img/02b-column-visibility.jpg)
 
@@ -235,21 +262,38 @@ This is what a written reviewer scores each applicant against. Nothing assumes a
 particular number of categories or a particular scale — both change between
 cycles, and both are yours to set.
 
-For each category: a **name**, a **lowest** and **highest** score, and optionally
-a line saying **what reviewers should look for**. Write that last one. It appears
-beside the reviewer's score box, and it is the difference between thirty people
-scoring the same thing and thirty people scoring thirty things.
+For each category: a **name**, a **lowest** and **highest** score, and then one
+line per score under **What each score means**. A 1–4 category gives you four
+boxes; change the range and the boxes follow it.
 
-> Once anyone has scored an applicant, the rubric locks. You cannot add a
-> category halfway through a round and leave the earlier scores meaning something
-> different from the later ones.
+**Write them.** They appear above the reviewer's score buttons, and they are the
+difference between thirty people scoring the same thing and thirty people scoring
+thirty things. A category used to take one paragraph describing itself, which
+sounds like the same thing and is not: the paragraph said what the category was
+*about* and left every reviewer to invent privately where a 2 stopped and a 3
+began. **The boundaries are where reviewers actually disagree**, and they are what
+FR-10's variance column ends up reporting two steps later.
+
+Each line is optional and an empty one simply renders nothing — but a category
+with no lines at all is a name and some buttons, which is the state this replaced.
+
+> **Write the middle ones, not just the ends.** "A 4 did X, a 1 did nothing" is
+> the easy half and leaves the two scores most applicants get undefined.
+
+> A very wide scale cannot carry per-score guidance — the screen says so and asks
+> you to narrow the range. Ten values is the limit, and a rubric wider than that
+> is almost always a typo rather than a plan.
+
+> Once anyone has scored an applicant, the rubric locks — names, ranges and these
+> lines alike. You cannot add a category halfway through a round and leave the
+> earlier scores meaning something different from the later ones.
 
 ---
 
 ## 5. Add the reviewers
 
-**Reviewers.** Three tabs across the top, one per round — a person can be on any
-combination, and the rounds have separate rosters on purpose.
+**Reviewers.** Three tabs across the top, one per round. The rounds have separate
+rosters, and **everyone starts on the written round**.
 
 ![The reviewer roster](docs/img/06-reviewers.jpg)
 
@@ -262,6 +306,36 @@ It splits each line at the **last space**, so "Mary Anne Chen" becomes Mary Anne
 roster, is held back for you to confirm rather than guessed at — re-pasting the
 same Slack message is the likeliest accident, and it will not silently create
 everyone twice.
+
+### Staffing the later rounds
+
+**On the First round and Second round tabs there is nothing to type into.** No
+add form, no paste box — just the code, a line explaining why, and the grid.
+
+![The first-round tab: no add form, only the grid](docs/img/06b-reviewers-later-round.jpg)
+
+**Tick the round's column in the grid** to put someone on it. Every row has all
+three, so one person's three rounds are one row and one set of ticks.
+
+Two things follow from that, and both are the point of it:
+
+- **Holding a later round requires holding the earlier ones.** First round
+  requires written; second round requires both. Tick one out of order and that
+  row refuses, saying which round is missing. Somebody deliberating in the second
+  round without having read a single application is deliberating without the
+  evidence the earlier rounds produced.
+- **One human is one row.** Typing "Alex Kim" into a first-round box was the last
+  way left to create a *second* Alex Kim — same person, two roster rows, two
+  half-finished sets of assignments. There is no box to type it into now.
+
+If you genuinely need someone on the first round who did not do the written round
+— a new officer, someone who joined late — put them on **written** first. They do
+not have to be assigned any applicants there.
+
+> **The rule is checked when you tick, not held forever.** Removing someone from
+> the written round while they still hold the first round is allowed, and leaves
+> a row that could not have been created that way. If a roster looks impossible,
+> that is how. Put them back on written, or take the later round off first.
 
 ### Sparklets
 
@@ -313,10 +387,34 @@ reviewers, or take some off this round.
 
 ### Changing an assignment by hand
 
-You can assign, unassign or swap any individual pairing, and each change is
-recorded with your name against it. **Regenerating keeps manual changes** — it
-works around them rather than discarding them — but it will tell you how many it
-is carrying before you confirm.
+You can **assign**, **unassign**, **swap** or **return to pool** any individual
+pairing, and each change is recorded with your name against it. **Regenerating
+keeps manual changes** — it works around them rather than discarding them — but
+it will tell you how many it is carrying before you confirm.
+
+**Unassign and Return to pool are not the same thing**, and picking the wrong one
+is the mistake worth avoiding here:
+
+| | Use it when | What happens |
+|---|---|---|
+| **Unassign** | the pairing was a mistake | the pairing is deleted, **any scores go with it**, and regenerating may pair them again |
+| **Return to pool** | the reviewer is not coming back | their scores stay, the slot opens for anyone to claim, and regenerating will **never** pair them again |
+
+The second is the one you want for a reviewer who has gone quiet: it is the same
+thing the reviewer's own **Return to pool** does, written the same way, so it
+lands in the same pool that **Claim from pool** draws from. Doing it for them is
+the only difference.
+
+It asks you to confirm, and it **requires a note** — "no reply on Slack for two
+weeks". A reviewer returning a slot themselves picks a reason from a list, which
+explains itself; an admin return is always "other", so the note is the entire
+record of why. It goes to the audit log with your name.
+
+> **Regenerating will never re-create that pairing.** That is the point of it
+> rather than a side effect — a reviewer who has stopped responding should not be
+> handed the same applicant again by the next generation. If you do want them
+> back on that applicant, assign them by hand; that reactivates the slot and the
+> scores are still there.
 
 ---
 
@@ -346,8 +444,15 @@ enforced by the tool, not by people remembering.
 The name and email rule is specific to this round: reviewers see both from the
 first round onwards. The ethnicity rule is not — it holds in every round.
 
-They score against your rubric, with your guidance text beside each box, and
-scores **save as they tap** — there is no submit button to forget.
+They score against your rubric, reading **your line for each score value** above
+the buttons, and scores **save as they tap** — there is no submit button to
+forget. This is where step 4's writing does its work: what you wrote for a 3 is
+what stands between thirty people scoring the same thing and thirty people
+scoring thirty things.
+
+They also get one checkbox per applicant: **This looks AI-written to me.** It is
+their own read, no other reviewer sees it, and it reaches you and nobody else —
+on the results table's **AI?** column and on the applicant's page. See step 8.
 
 ### The pool
 
@@ -358,25 +463,110 @@ that gap is the buffer those returns land in.
 
 ---
 
+> ## About the screenshots from here on
+>
+> Steps 1–7 were photographed while importing the 25-applicant training file, so
+> what you see is what you get.
+>
+> **This step and everything after it are photographed at full size instead** —
+> 158 applicants, 30 reviewers, 7 new Sparklets. A composition panel over 25
+> people, and an AI column nobody has ticked, show the layout and none of the
+> point; and getting a practice cycle as far as step 12 by hand would mean twelve
+> people signing in to vote and two interview spreadsheets to build, which is not
+> a reasonable thing to ask of someone learning the tool. The reference cycle
+> exists already finished for that reason.
+>
+> **Your numbers will be much smaller than the ones in these pictures.** A
+> first-round list of 8 rather than 48 is not a sign you have done something
+> wrong. The screens are the same; only the scale differs.
+
+---
+
 ## 8. Written results, and closing the round
 
 **Written results.**
 
-![Written results, with the composition panel](docs/img/08-results.jpg)
+![The results table](docs/img/08c-results-table.jpg)
 
 The table ranks everyone by average score, with **variance** beside it — a high
 variance means reviewers disagreed, which is worth a second look before you cut
 someone. **Reviews** shows how many of the three are in; anyone under 3/3 is
 marked.
 
-Tick the applicants who advance. As you do, the **composition panel** at the top
-updates live: your selection against the whole pool, broken down by ethnicity.
+Above the table: **Incomplete** narrows to the applicants still short a review,
+**Variance at least** takes a number, and **Clear filters** puts it all back.
+Every filter is in the address bar, so a filtered table is a link you can send
+someone.
 
-> **It is there to be looked at while you choose, not audited afterwards.** The
-> weighted column follows the club's counting rule — someone who selected three
-> options contributes a third to each, so the column sums to the number of
-> people rather than the number of boxes ticked. The headcount beside it counts
-> every person who selected that option.
+### The AI? column
+
+A flag and a number — **⚑ 2** — is **how many reviewers ticked "this looks
+AI-written to me"** on their own copy of that application. A dash means nobody
+did.
+
+**It is a count, not a fraction, and hovering gives you the denominator** —
+*"2 of 3 completed reviews thought the writing looked AI-generated."* The
+denominator is completed reviews rather than assigned ones, because a reviewer
+who has not read the application has not declined to flag it.
+
+> **Nothing is decided by this, and nothing detected it.** It is the manual
+> column the club already kept in the spreadsheet, moved into the tool. Three
+> reviewers disagreeing about one application is the signal it exists for — a 1
+> is one person's read, a 3 is worth reading the application yourself.
+
+Reviewers cannot see it, and neither can the second round. Open the applicant to
+see **which** reviewers ticked it; the count on the row deliberately does not say.
+
+### Ethnicity in the table
+
+Multi-select answers **wrap onto two lines** rather than being cut off with an
+ellipsis. An applicant who ticked three options used to read as *"Black, Middle
+Eastern…"* with the rest reachable only by hovering, which on a phone or a
+trackpad-less laptop meant not at all.
+
+### The composition panel
+
+Tick the applicants who advance. As you do, the **composition panel** at the top
+updates live: your selection against the whole pool.
+
+![The composition panel, mid-selection](docs/img/08-results.jpg)
+
+Two columns: **Selected** and **Pool**. Each is a fraction over *its own* size —
+`0.5/6` against six selected, `9.0/158` against the whole cohort — so the two are
+directly comparable without doing any arithmetic in your head.
+
+Every row now prints the denominator it is counted against:
+
+- **Ethnicity and other multi-select questions** read `9.0/158 (12)` — a weighted
+  9.0 out of the 158-applicant pool, ticked by 12 people.
+- **First-generation, pronouns, and anything else with one answer each** read
+  plainly: `Yes 45/158`, `No 113/158`. There is no bracketed count because it
+  would repeat the number in front of it.
+
+> **The weighted number is the club's counting rule, and the denominator is what
+> makes it readable.** Someone who selected three options contributes a third to
+> each, so the weighted column sums to the number of *people* — 158 here, the
+> number now printed beside every row. The bracketed number counts every person
+> who ticked that option, and those add up to more than 158, which is correct and
+> is why both are shown. Somebody who answered nothing is a whole person under
+> **Not specified**.
+
+> Every value gets its own line, in order. The tool is not told which answer
+> means yes — guessing that out of a CSV is exactly the inference it refuses to
+> make about categories back in step 2.
+
+**It is there to be looked at while you choose, not audited afterwards.**
+
+### An applicant's own page
+
+Click any name for the full picture: every review with the reviewer's name on it,
+their per-category scores, their note, and their AI flag if they set one.
+
+![One applicant's reviews](docs/img/08b-applicant-profile.jpg)
+
+**← Back to results** returns you to the table — with your filters still on,
+which the breadcrumb above it does not do. The breadcrumb goes to the cycle's
+home page; this goes back where you came from.
 
 ### Finalising
 
@@ -399,23 +589,6 @@ genuinely are out of time, but it will not let you do it without knowing.
 
 Finalising writes a decision for **every** applicant, advancing or rejecting, and
 the screen becomes read-only.
-
----
-
-> ## About the screenshots from here on
->
-> Steps 1–8 above were photographed while importing the 25-applicant training
-> file, so what you see is what you get.
->
-> **Steps 9–13 are photographed from the finished reference cycle instead**, at
-> full size: 158 applicants, 30 reviewers, 7 new Sparklets. Getting a practice
-> cycle this far by hand would mean twelve people signing in to vote and two
-> interview spreadsheets to build, which is not a reasonable thing to ask of
-> someone learning the tool — so the reference cycle exists already finished.
->
-> **Your numbers will be much smaller than the ones in these pictures.** A
-> first-round list of 8 rather than 48 is not a sign you have done something
-> wrong. The screens are the same; only the scale differs.
 
 ---
 
@@ -479,7 +652,9 @@ that happened and does not count.
 ## 11. The first-round vote and its results
 
 Reviewers on the first round read the interview scores and notes and vote yes or
-no on each applicant. **First round results** ranks the outcome.
+no on each applicant. Their list is a way of **finding** people — it carries a
+search box and nothing to vote with; the vote is on the applicant's own page,
+under the evidence. **First round results** ranks the outcome.
 
 ![First round results](docs/img/11-first-round-results.jpg)
 
@@ -493,6 +668,19 @@ Select who advances and finalise, exactly as in step 8. Afterwards the page
 stays as a read-only record:
 
 > *The first round has been finalized. These results stay here for reference.*
+
+### Show only who moved on
+
+Once a round is finalised, both results pages grow a **Moved on** button above
+the table. Press it and the table narrows to the people who advanced, with the
+count beside it — *"30 of 48 advanced to the second round"*.
+
+It is the answer to "who is actually in the next round", which before meant
+reading a list of 48 and remembering which ticks you had made an hour ago. It
+appears **only after finalising**, because until then nobody has moved on and the
+button would empty the table.
+
+The written results page has the same button, on the same terms.
 
 ---
 
@@ -517,6 +705,33 @@ that moment. Each applicant in a pass resolves one of three ways:
 That is why there is more than one pass: the summary above reads *"6 sparklet · 5
 rejected · 16 carried"* on pass 1, and pass 2 opens with those carried applicants
 plus anyone still unresolved.
+
+Open a pass and the grid **colours its outcomes** — green for a new Sparklet, red
+for a rejection, and nothing for carried or needs-an-admin, which are not
+outcomes yet.
+
+> **Each pass's grid shows what happened in that pass**, not where the applicant
+> ended up. Someone carried by pass 1 and admitted in pass 2 stays uncoloured on
+> pass 1's grid. That is the pass being a record of a sitting rather than a live
+> status board.
+
+### What the room can see
+
+Second-round reviewers see **the same red and green**, on their list and on each
+profile: this applicant is now a Sparklet, this one was rejected. Everyone who
+reached the round stays on their list for the whole of it — nobody vanishes when
+they are decided.
+
+**They still never see votes.** Not a tally, not a count, not who voted which
+way, in any pass, open or closed. You are the only person who sees those, here.
+
+> That is a deliberate trade and worth knowing about, because it cuts both ways.
+> An applicant resolves only when everyone eligible has voted, so a green badge
+> does tell the last person to vote how the others voted. It was accepted because
+> the second round is one room in one sitting where the outcome is said out loud
+> anyway, and because the alternative — people silently disappearing off the list
+> — left reviewers unable to tell what had happened to someone they had just
+> spent ten minutes arguing about.
 
 ### Conflicts of interest
 

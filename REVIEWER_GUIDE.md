@@ -47,9 +47,14 @@ Tap one to open it.
 
 You get their written answers, then the scoring boxes underneath.
 
-**Tap a number for each category.** Beside each one is a line explaining what
-that category means and what a high or low score looks like — read it the first
-time, it is what keeps thirty people scoring the same thing.
+**Tap a number for each category.** Above the buttons is a line for *every score
+the category offers* — what a 1 looks like, what a 2 looks like, and so on. Read
+them the first time. They are the difference between thirty people scoring the
+same thing and thirty people scoring thirty things, and the boundary between a 2
+and a 3 is where reviewers most often quietly disagree.
+
+> If a category shows only its name and buttons, nobody wrote the guidance. Score
+> it as you read it and say so in your note.
 
 **Your scores save as you tap.** There is no submit button and nothing to lose if
 your phone dies or you close the tab. The score turns dark and the word *Saved*
@@ -57,6 +62,19 @@ appears next to it.
 
 Leave a **note** if there is something the number does not capture. Optional, but
 it is what gets read when two reviewers disagree about someone.
+
+### If the writing looks AI-generated
+
+At the bottom of the card there is one checkbox: **This looks AI-written to me.**
+
+Tick it if that is your honest read. It goes to the admin running recruitment
+with your name on it, no other reviewer sees it, and **nothing is decided by it
+on its own** — three reviewers disagreeing about one application is exactly the
+signal it exists to surface. Nothing in the tool detects anything; this is your
+judgement, recorded, and it is a reason for someone to read the application
+again rather than a verdict.
+
+Leave it alone if you are unsure. An unticked box says nothing about you.
 
 Then go back and pick the next one. You do not have to do them all at once.
 
@@ -87,17 +105,32 @@ instead of numbers you give **one vote, yes or no**.
 Names are visible from here on. The written round hid them; the first and second
 rounds do not.
 
-Every row on the list carries the vote — tap **Yes** or **No** right there. The
-counter at the top says how many you have voted on. Tap a name to see the whole
-picture: one score per interviewer, the per-category breakdown folded underneath,
-the interviewer's notes, and the application they wrote. The same two buttons are
-at the bottom.
+**The list is for finding people, not for voting.** Every row shows the name, the
+applicant's number, and how much interview data has arrived. **Tap a name to
+open them** — the vote is on their page and nowhere else.
+
+That changed deliberately. The row never showed the interview scores themselves,
+only whether they existed, so a vote cast from the list was a vote cast on a name
+and a count. You now see the evidence before you can register an opinion about
+it.
+
+**Find by name or number**, in the box above the list. Useful more often than it
+sounds: two applicants can share a name, which is why every row carries
+"Applicant 61" beside it. Type a number to go straight to one.
+
+The counter at the top says how many of the round you have voted on, and rows you
+have already decided say **You voted yes** or **You voted no** underneath. That
+is your own vote only — you never see anyone else's, in any round.
+
+![An applicant in the first round](docs/img/r5-first-round-applicant.jpg)
+
+Their page gives you one score per interviewer, the per-category breakdown folded
+underneath, the interviewer's notes, and the application they wrote. **Yes** and
+**No** are at the bottom.
 
 > **The written answers are here too.** They used to be hidden in this round, on
 > the theory that the interview was what you were judging. They are not any more:
 > if you want to check what someone wrote against how they interviewed, you can.
-
-![An applicant in the first round](docs/img/r5-first-round-applicant.jpg)
 
 **A vote saves the moment you tap it**, and you can change it any time until the
 round is finalised — tap the other button. There is no way to take a vote back
@@ -115,6 +148,18 @@ pool" here. A blank counts as a skip and does not count against them.
 The second round is a room, not a queue: everyone still in is discussed
 together, in one or more **passes** that an admin opens. Until a pass is open the
 list is there to read — the line under the heading tells you which.
+
+**Everyone who reached this round stays on your list for the whole of it**, and
+the ones the round has finished with say so: a green **Sparklet** or a red
+**Rejected** beside the name. The heading counts both — *"30 applicants in the
+round · 20 still to decide"* — so you can see what is left without counting.
+
+> **Why you can see the outcome but never the votes.** A decided applicant is a
+> settled fact that gets said out loud in the room anyway, and a list that
+> silently dropped people left you unable to tell whether the person you had just
+> spent ten minutes arguing about got in. What you still never see is *how anyone
+> voted* — no tallies, no names against a yes or a no, in any pass, open or
+> closed.
 
 Tap a name for the full profile: the interview scores and notes, every written
 review with the reviewer's name on it, and the application itself.
@@ -135,17 +180,36 @@ else's vote, during the pass or after it closes.
 Unanimous yes makes them a Sparklet, unanimous no rejects them, and anything
 mixed carries them into the next pass.
 
+**Once a pass has finished with someone, their page says so and the buttons are
+gone.** A decided applicant reads *"This applicant is now a Sparklet"* or *"This
+applicant was rejected"*; one the pass carried forward says only that it has
+finished with them for now, without saying which way anything went, because
+nothing went either way yet.
+
+![An applicant the round has decided](docs/img/r9-second-round-outcome.jpg)
+
 **If you know the applicant, flag a conflict of interest** — from the row on
 your list, or from the bottom of their profile. You are recorded as skipping
 them, which does not count against them. Two things to know before you tap it:
 it deletes any vote you have already cast on them, and it sticks for the whole
 round, every pass. Only an admin can undo it, so you are never asked twice.
 
+You will not find that control on someone already decided. There is nothing left
+for a conflict to bear on, so it is not offered rather than offered and refused.
+
 ---
 
 ## Common questions
 
 **Can I change a score after I set it?** Yes. Tap a different number.
+
+**Why can't I vote from the first-round list any more?** Because the row only
+ever showed whether interview scores existed, not what they were. Open the
+applicant and the vote is at the bottom of their page.
+
+**I ticked "this looks AI-written" — what happens?** It reaches the admin
+running recruitment, with your name. No other reviewer sees it, and nothing is
+decided by it alone. Untick it if you change your mind.
 
 **I closed the tab halfway through — did I lose it?** No. Everything saved as you
 tapped.

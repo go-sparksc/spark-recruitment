@@ -480,4 +480,49 @@ middle-clicks like a link. `fallback` is required rather than defaulted, which
 forces every caller to answer "where does this go when there is no history",
 a real case for anyone opening a link from Slack.
 
-**Gate:** not yet run.
+**Gate — PASSED.** Run in the browser and confirmed by the owner: *"Phase 9 is
+fully gated and clean."*
+
+Three of its items were then re-observed on live screens during the guide
+screenshot pass below, which is where the guide's pictures come from:
+
+- [x] The panel prints its denominator — `Black 9.0/158 (12)`, and the weighted
+      column of a full breakdown summing to 158.
+- [x] First-gen reads `No 113/158` / `Yes 45/158`, no bracketed count.
+- [x] A long multi-select ethnicity wraps to two lines, fully readable, no hover.
+- [x] "Moved on" on the finalized first-round results: *"30 of 48 advanced to the
+      second round."*
+
+---
+
+## Phase 9.6 — the guides
+
+Not in the original plan. Phase 9 changed six screens the two guides describe, so
+both were re-read **against the running application** rather than against memory,
+which is the only way this kind of pass finds anything.
+
+`REVIEWER_GUIDE.md` — scoring rewritten for per-value criteria and the AI
+checkbox; the first-round section rewritten around a list that no longer votes;
+the second round gained the outcome badges and the resolved profile. Eleven
+screenshots replaced, three added.
+
+`ADMIN_GUIDE.md` — step 2's three rows of controls and decision 110's default,
+step 4's per-score criteria, step 5's later-round staffing, step 6's return-to-pool
+as a fourth verb beside unassign, step 8's AI column, wrapped ethnicity, printed
+denominators and back button, step 11's "Moved on", and step 12's coloured grid
+with what the room can and cannot see.
+
+**Three copy defects that only reading the live screen could find**, all fixed
+here rather than written around:
+
+1. The rubric builder said its criteria were "shown **beside** the reviewer's
+   score buttons". They render above them.
+2. "Joins the **written**." — grammatical while the round was a variable, a
+   fragment once decision 115 fixed it to one round. Same for the paste box's
+   "Everyone pasted joins the written". Both now say "written round", and
+   `AddReviewerForm`'s `roundLabel` prop went with them: dead configuration, the
+   `size="compact"` case from 9.2 again.
+3. The guide's own note claimed steps 1–8 were photographed from the 25-applicant
+   training file. Step 8 cannot be: a composition panel over 25 people and an AI
+   column nobody has ticked show the layout and none of the point. The note moved
+   up to sit before step 8 and now says so.
