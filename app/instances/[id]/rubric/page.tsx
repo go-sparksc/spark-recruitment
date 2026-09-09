@@ -17,7 +17,10 @@ export default async function RubricPage({ params }: { params: Promise<{ id: str
     select: {
       id: true,
       name: true,
-      rubricCategories: { orderBy: { ordinal: "asc" } },
+      rubricCategories: {
+        orderBy: { ordinal: "asc" },
+        include: { levels: { orderBy: { points: "asc" } } },
+      },
     },
   });
 
@@ -48,9 +51,11 @@ export default async function RubricPage({ params }: { params: Promise<{ id: str
               name: c.name,
               minPoints: c.minPoints,
               maxPoints: c.maxPoints,
-              // The column is nullable; the form field is a controlled textarea
-              // and must never receive null.
-              description: c.description ?? "",
+              // Decision 114. Keyed by the score value, so a criterion stays
+              // attached to the number it describes rather than to a position
+              // that shifts when the floor moves. Missing values simply have no
+              // entry; the builder renders an empty box for them.
+              levels: Object.fromEntries(c.levels.map((l) => [l.points, l.criterion])),
             }))}
             lockedByScoreCount={scoreCount}
           />

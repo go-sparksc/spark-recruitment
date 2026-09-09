@@ -159,9 +159,18 @@ async function main() {
         })),
       },
       rubricCategories: {
-        create: RUBRIC_CATEGORIES.map((category) => ({
+        // Decision 114's levels are nested rather than spread: `levels` is a
+        // relation now, not a column, and spreading it as one would be a runtime
+        // Prisma error rather than a typecheck failure.
+        create: RUBRIC_CATEGORIES.map(({ levels, ...category }) => ({
           id: seedId("rubric", category.ordinal, 1),
           ...category,
+          levels: {
+            create: Object.entries(levels).map(([points, criterion]) => ({
+              points: Number(points),
+              criterion,
+            })),
+          },
         })),
       },
       roundAccessCodes: {

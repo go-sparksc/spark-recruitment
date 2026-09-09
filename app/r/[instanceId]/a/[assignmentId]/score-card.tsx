@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { saveNote, saveNoteForm, saveScore, saveScoreForm } from "../../actions";
+import { saveAiFlagForm, saveNote, saveNoteForm, saveScore, saveScoreForm } from "../../actions";
 import { readDraft } from "./draft-store";
 import { useAutosave } from "./use-autosave";
 import { type DraftValue, type SaveStatus } from "@/lib/autosave";
 import { MAX_NOTE_LENGTH } from "@/lib/review";
+import { scaleValues } from "@/lib/rubric";
 import { Textarea } from "@/components/ui/textarea";
 
 export interface RubricRow {
@@ -17,9 +18,10 @@ export interface RubricRow {
   /// reviewer actually saw, which is what FR-10 then computes variance over.
   minPoints: number;
   maxPoints: number;
-  /// What the reviewer is actually scoring against, per PRD decision 32. Null
-  /// where the admin left it blank, which FR-4 permits.
-  description: string | null;
+  /// What the reviewer is actually scoring against, per PRD decision 114 — what
+  /// each offered value means, keyed by the value. A value the admin left blank
+  /// simply has no entry, which FR-4 permits.
+  levels: Readonly<Record<number, string>>;
   points: number | null;
 }
 
@@ -158,11 +160,15 @@ export function ScoreCard({
   assignmentId,
   rubric,
   noteBody,
+  suspectedAiUse,
 }: {
   instanceId: string;
   assignmentId: string;
   rubric: RubricRow[];
   noteBody: string;
+  /// Decision 116. This reviewer's own flag on this assignment, and nobody
+  /// else's — §6 keeps it admin-only, so no other reviewer's is loaded.
+  suspectedAiUse: boolean;
 }) {
   const [open, toggle] = useCardOpen();
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -335,6 +341,23 @@ export function ScoreCard({
             onBody={(value) => autosave.edit(NOTE_KEY, value)}
           />
         </div>
+
+        {/* PRD decision 116. Last, under the note, because it is the least
+            common thing a reviewer does here and the scores are what the screen
+            is for.
+
+            **A form bound to a server action, not an onClick.** Decision 33: a
+            `<button type="button">` is inert before hydration and says nothing,
+            while a form React ships with `method="POST"` submits natively. This
+            control is a single tap that a reviewer may make immediately, so it
+            is built the way the note and the scores are. */}
+        <div className="border-t px-4 py-3">
+          <AiFlagField
+            instanceId={instanceId}
+            assignmentId={assignmentId}
+            flagged={suspectedAiUse}
+          />
+        </div>
       </div>
     </aside>
   );
@@ -396,11 +419,29 @@ function ScoreRow({
         </div>
       </div>
 
-      {/* The rubric proper, per decision 32. Omitted rather than shown blank
-          where the admin left it empty — an empty paragraph under a heading
-          reads as guidance that failed to load. */}
-      {row.description ? (
-        <p className="text-muted-foreground mt-1 text-sm leading-snug">{row.description}</p>
+      {/* The rubric proper, per decision 114 — one line per score value rather
+          than one blurb for the category, which is what decision 32 was
+          reaching for. Values the admin left blank are omitted rather than
+          shown empty: a bare number with nothing after it reads as guidance
+          that failed to load.
+
+          Above the buttons, not beside them. A reviewer reads what the numbers
+          mean once and then taps; interleaving the prose into the segmented row
+          would push the control off a phone screen, and `overflow-x-auto` below
+          exists precisely to stop that row growing. */}
+      {scaleValues(row.minPoints, row.maxPoints).some((value) => row.levels[value]) ? (
+        <dl className="mt-1 space-y-0.5">
+          {scaleValues(row.minPoints, row.maxPoints).map((value) =>
+            row.levels[value] ? (
+              <div key={value} className="flex gap-2 text-sm leading-snug">
+                <dt className="text-foreground w-4 shrink-0 text-right font-medium tabular-nums">
+                  {value}
+                </dt>
+                <dd className="text-muted-foreground">{row.levels[value]}</dd>
+              </div>
+            ) : null,
+          )}
+        </dl>
       ) : null}
 
       {segmented ? (
@@ -592,6 +633,72 @@ function NoteField({
         >
           {/* "now", against a status line that already says "will retry". */}
           {hydrated ? "Retry now" : "Save note"}
+        </button>
+      ) : null}
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PRD decision 116 — suspected AI use
+// ---------------------------------------------------------------------------
+
+/// One reviewer's read that this application looks AI-written.
+///
+/// **Not on the autosave queue, unlike the scores and the note, and that is a
+/// decision rather than an omission.** The queue exists for work built up over
+/// many edits — a note typed a word at a time, a score changed twice — where
+/// losing the last keystroke costs real thinking. A checkbox is one deliberate
+/// act with two states, so a form posting on change is both simpler and strictly
+/// more reliable: it works before hydration, with JavaScript off, and needs no
+/// draft mirror to survive the tab being killed.
+///
+/// `requestSubmit()` on change, so ticking is the whole interaction. The button
+/// below is the pre-hydration fallback on exactly the note field's terms:
+/// present while the page cannot submit for you, gone once it can.
+///
+/// **The wording is load-bearing.** "Looks AI-written to me" rather than "AI
+/// detected" — nothing detects anything, §11 keeps that out of scope, and the
+/// label must not let a reviewer believe the system agreed with them. The line
+/// underneath says where it goes, because someone filing an unverified claim
+/// about a person is entitled to know who reads it.
+function AiFlagField({
+  instanceId,
+  assignmentId,
+  flagged,
+}: {
+  instanceId: string;
+  assignmentId: string;
+  flagged: boolean;
+}) {
+  const hydrated = useHydrated();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  return (
+    <form ref={formRef} action={saveAiFlagForm}>
+      <input type="hidden" name="instanceId" value={instanceId} />
+      <input type="hidden" name="assignmentId" value={assignmentId} />
+
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="suspectedAiUse"
+          defaultChecked={flagged}
+          onChange={() => formRef.current?.requestSubmit()}
+          className="mt-0.5 size-4 shrink-0"
+        />
+        <span>
+          This looks AI-written to me
+          <span className="text-muted-foreground block text-xs">
+            Goes to the admin running recruitment, with your name. No other reviewer sees it, and
+            nothing is decided by it on its own.
+          </span>
+        </span>
+      </label>
+
+      {!hydrated ? (
+        <button type="submit" className="hover:bg-muted mt-2 h-11 rounded-md border px-3 text-sm">
+          Save flag
         </button>
       ) : null}
     </form>

@@ -174,6 +174,35 @@ async function applyScore(formData: FormData): Promise<void> {
   });
 }
 
+/// PRD decision 116's checkbox. One reviewer's read that this application looks
+/// AI-written, stored on their own assignment.
+///
+/// **Goes through `ownedAssignmentId` like every other save on this screen**, so
+/// a forged assignment id, another reviewer's assignment, and a returned one all
+/// refuse identically. That matters more here than for a score: this is an
+/// unverified claim about a person, and the one thing worse than an unhelpful
+/// flag is a flag attributed to a reviewer who did not raise it.
+///
+/// Absent means false. An unticked checkbox sends no field at all, which is
+/// exactly the shape "no suspicion raised" should have — there is no third state
+/// to preserve, unlike `isReviewerVisible`'s unset.
+async function applyAiFlag(formData: FormData): Promise<void> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  if (instanceId === "" || assignmentId === "") {
+    refuse("Something went wrong. Reload the page and try again.");
+  }
+
+  const owned = await ownedAssignmentId(instanceId, assignmentId);
+  const flagged = formData.get("suspectedAiUse") !== null;
+
+  await prisma.assignment.update({
+    where: { id: owned },
+    data: { suspectedAiUse: flagged },
+  });
+}
+
 async function applyNote(formData: FormData): Promise<void> {
   const instanceId = String(formData.get("instanceId") ?? "");
   const assignmentId = String(formData.get("assignmentId") ?? "");
@@ -219,6 +248,10 @@ export async function saveNoteForm(formData: FormData): Promise<void> {
   await applyNote(formData);
 }
 
+export async function saveAiFlagForm(formData: FormData): Promise<void> {
+  await applyAiFlag(formData);
+}
+
 /// What the autosave queue calls once the page is interactive. Reports rather
 /// than throws, because "will retry" is a state the card has to render and an
 /// unhandled rejection is not.
@@ -234,6 +267,15 @@ export async function saveScore(formData: FormData): Promise<SaveState> {
 export async function saveNote(formData: FormData): Promise<SaveState> {
   try {
     await applyNote(formData);
+    return { ok: true, savedAt: Date.now() };
+  } catch (error) {
+    return { ok: false, error: messageOf(error) };
+  }
+}
+
+export async function saveAiFlag(formData: FormData): Promise<SaveState> {
+  try {
+    await applyAiFlag(formData);
     return { ok: true, savedAt: Date.now() };
   } catch (error) {
     return { ok: false, error: messageOf(error) };

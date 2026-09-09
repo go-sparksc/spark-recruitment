@@ -6,19 +6,32 @@ import { resetWrittenScores, saveRubric, type RubricState } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_DESCRIPTION_LENGTH, rubricRange, validateRubric } from "@/lib/rubric";
+import {
+  MAX_CRITERION_LENGTH,
+  MAX_SCALE_VALUES,
+  rubricRange,
+  scaleValues,
+  validateRubric,
+} from "@/lib/rubric";
 
 export interface RubricRow {
   name: string;
   minPoints: number;
   maxPoints: number;
-  description: string;
+  /// Decision 114, keyed by score value. A plain object rather than a Map so it
+  /// survives the server-action boundary as-is.
+  levels: Record<number, string>;
 }
 
 /// What a new category starts as, per decision 40: the 1-4 instrument, not the
 /// 0-5 one the builder used to default to. An existing rubric loaded from the
 /// database keeps whatever floor it was saved with, including 0.
-const NEW_CATEGORY: RubricRow = { name: "", minPoints: 1, maxPoints: 4, description: "" };
+///
+/// **`levels` starts empty rather than pre-filled with four blanks.** An empty
+/// map and a map of empty strings save identically — the action drops blanks —
+/// and starting empty keeps "nobody has written this yet" distinguishable from
+/// "somebody cleared it" while the form is open.
+const NEW_CATEGORY: RubricRow = { name: "", minPoints: 1, maxPoints: 4, levels: {} };
 
 export function RubricBuilder({
   instanceId,
@@ -157,31 +170,68 @@ export function RubricBuilder({
               </Button>
             </div>
 
-            {/* PRD decision 32. Optional, but prompted hard: a name and a
-                maximum are a scale, not a rubric, and this is the only guidance
-                a written reviewer ever sees. Left empty it costs nothing here
-                and surfaces two phases later as FR-10 variance nobody can
-                explain. */}
+            {/* PRD decision 114, which is decision 32 carried the rest of the
+                way. A blurb per category said what the category asked for and
+                left every reviewer to invent the boundary between a 2 and a 3
+                privately — and the boundaries are where the variance FR-10 has
+                to surface actually comes from. One line per score value states
+                the boundaries instead.
+
+                Each is optional, on decision 32's original terms: an admin
+                mid-setup should not be blocked, and a cycle that briefs its
+                reviewers elsewhere may leave them empty. */}
             <div className="space-y-1.5">
-              <Label htmlFor={`description-${index}`} className="text-xs">
-                What reviewers should look for{" "}
+              <p className="text-xs font-medium">
+                What each score means{" "}
                 <span className="text-muted-foreground font-normal">
-                  — optional, shown beside their score box
+                  — optional, shown beside the reviewer&rsquo;s score buttons
                 </span>
-              </Label>
-              <textarea
-                id={`description-${index}`}
-                value={row.description}
-                disabled={locked || pending}
-                onChange={(e) => update(index, { description: e.target.value })}
-                rows={2}
-                maxLength={MAX_DESCRIPTION_LENGTH}
-                placeholder="e.g. Evidence of starting something and seeing it through. A 4 is a project they ran end to end; a 1 is an idea never acted on."
-                className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
-              />
-              <p className="text-muted-foreground text-xs tabular-nums">
-                {row.description.length}/{MAX_DESCRIPTION_LENGTH}
               </p>
+
+              {scaleValues(row.minPoints, row.maxPoints).length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  Set a lowest and highest score first.
+                </p>
+              ) : scaleValues(row.minPoints, row.maxPoints).length > MAX_SCALE_VALUES ? (
+                // Decision 114's width cap. The control is absent rather than
+                // rendered eleven-plus times — the Slice 4 rule, that a surface
+                // explains rather than offering something that fails.
+                <p className="text-muted-foreground text-xs">
+                  This category offers {scaleValues(row.minPoints, row.maxPoints).length} different
+                  scores, which is too many to write a line about each. Narrow the range to{" "}
+                  {MAX_SCALE_VALUES} values or fewer.
+                </p>
+              ) : (
+                scaleValues(row.minPoints, row.maxPoints).map((value) => (
+                  <div key={value} className="flex items-center gap-2">
+                    <Label
+                      htmlFor={`level-${index}-${value}`}
+                      className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums"
+                    >
+                      {value}
+                    </Label>
+                    <Input
+                      id={`level-${index}-${value}`}
+                      value={row.levels[value] ?? ""}
+                      disabled={locked || pending}
+                      onChange={(e) =>
+                        update(index, {
+                          levels: { ...row.levels, [value]: e.target.value },
+                        })
+                      }
+                      maxLength={MAX_CRITERION_LENGTH}
+                      placeholder={
+                        value === row.maxPoints
+                          ? "e.g. Ran a project end to end, past the point it stopped being fun"
+                          : value === row.minPoints
+                            ? "e.g. An idea never acted on"
+                            : ""
+                      }
+                      className="h-9 flex-1"
+                    />
+                  </div>
+                ))
+              )}
             </div>
           </div>
         ))}

@@ -374,25 +374,55 @@ model RubricCategory {
   /// nothing semantically.
   minPoints Int @default(0)
 
-  /// What this category is asking for, and what the top of its scale means.
-  /// FR-9 renders it beside the score input, which is the only place a written
-  /// reviewer ever sees it — without it the "rubric" they score against is a
-  /// list of category names. See PRD decision 32.
-  ///
-  /// Nullable so an admin mid-setup is not blocked by it, and so a cycle that
-  /// briefs its reviewers elsewhere can leave it empty.
-  ///
-  /// Covered by FR-4's lock along with the rest of the rubric: once any Score
-  /// exists, changing this needs the reset that discards every score. Stated in
-  /// decision 32 rather than left to be discovered.
-  description String?
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   scores Score[]
+  levels RubricLevel[]
 
   @@unique([instanceId, ordinal])
+}
+
+/// What one score value means, in one category. PRD decision 114.
+///
+/// **Replaces `RubricCategory.description`**, which was one blurb for the whole
+/// category. Decision 32 established that a name and a maximum are a scale
+/// rather than a rubric, and that a shared definition of a 4 is the main thing
+/// standing between thirty untrained reviewers and the variance FR-10 exists to
+/// flag. A single blurb is that argument half-applied: it says what the category
+/// asks for and leaves every reviewer to invent the boundary between a 2 and a 3
+/// privately, and the boundaries are where the disagreement actually lives.
+///
+/// **A table rather than a jsonb map on the category**, for decision 40's
+/// reason: the scale is data that travels with the instance that used it, so a
+/// past cycle stays coherent when the rubric changes. The unique index below is
+/// what makes "one criterion per offered value" a database guarantee instead of
+/// a convention held in a form component.
+///
+/// Inside FR-4's lock with the rest of the rubric, on decision 32's accepted
+/// terms: once any Score exists, fixing a typo here needs the reset that
+/// discards every score.
+model RubricLevel {
+  id               String         @id @default(cuid())
+  rubricCategoryId String
+  rubricCategory   RubricCategory @relation(fields: [rubricCategoryId], references: [id], onDelete: Cascade)
+
+  /// The score value this describes. Expected to sit within its category's
+  /// `minPoints..maxPoints`, which `validateRubric` enforces — deliberately not
+  /// a CHECK, because the bounds live on another row and a constraint spanning
+  /// two tables would need a trigger.
+  points Int
+
+  /// What earns this score. Individually optional, for the reason decision 32
+  /// made the description optional: an admin mid-setup should not be blocked,
+  /// and a cycle that briefs its reviewers elsewhere may leave them empty. An
+  /// absent row renders the bare value.
+  criterion String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([rubricCategoryId, points])
 }
 
 /// Per-round reviewer access code from PRD section 8. A name dropdown alone would
@@ -517,6 +547,26 @@ model Assignment {
   returnReason ReturnReason?
   returnNote   String?
   returnedAt   DateTime?
+
+  /// One written reviewer's read that this application looks AI-written. PRD
+  /// decision 116, and FR-9's score card is where it is ticked.
+  ///
+  /// **On the assignment rather than the applicant**, for the reason the whole
+  /// data model exists: it is one person's judgment of one application, and
+  /// three reviewers disagreeing about it is itself the signal an admin wants.
+  /// Collapsing it onto the applicant would make it last-write-wins over an
+  /// unattributed accusation. It also matches what the club already does — the
+  /// S26 `Scores` sheet carries an `AI Detected?` column per reviewer row.
+  ///
+  /// **Admin-only under section 6, including the second round.** It deliberately
+  /// does NOT travel with the written scores and notes decision 77 opened up:
+  /// 77's argument is that the person who gave the 2 is in the room and can be
+  /// asked why, and a suspicion has no scale and no rationale behind it to ask
+  /// about. A reviewer sees their own and nobody else's.
+  ///
+  /// Nothing detects anything. Section 11's AI-assisted flagging stays out of
+  /// scope; this is the manual column, moved into the tool.
+  suspectedAiUse Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

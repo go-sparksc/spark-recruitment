@@ -11,17 +11,52 @@ export interface RubricCategoryInput {
   /// column existed; 1 for anything FR-4's builder creates now.
   minPoints: number;
   maxPoints: number;
-  /// What this category asks for and what the top of its scale means. Optional
-  /// per FR-4, and the only thing a written reviewer has to score against beyond
-  /// the name — see PRD decision 32.
-  description?: string | null;
+  /// What each offered score value means, per PRD decision 114 — one entry per
+  /// value from `minPoints` to `maxPoints`, keyed by the value itself.
+  ///
+  /// **A map rather than an array**, because the thing a criterion belongs to is
+  /// a score value and not a position. An array would silently re-point every
+  /// criterion at a different number the moment someone changed `minPoints`,
+  /// which is the shape of bug decision 40 already had to reason about once.
+  ///
+  /// Missing and empty are the same thing and both mean "no guidance for this
+  /// value", which decision 114 keeps optional for the reason decision 32 made
+  /// the description optional.
+  levels?: Readonly<Record<number, string>>;
 }
 
 export const MAX_CATEGORIES = 20;
 export const MAX_POINTS_CEILING = 1000;
 /// Long enough for two or three sentences of guidance, short enough that nobody
 /// pastes an essay into a card that has to fit on a phone beside a score input.
-export const MAX_DESCRIPTION_LENGTH = 400;
+export const MAX_CRITERION_LENGTH = 400;
+
+/// How many values a category may offer while carrying per-value criteria.
+///
+/// **Not a cap on `maxPoints`.** Decision 114 is explicit that `MAX_POINTS_CEILING`
+/// stays where it is: lowering it would retroactively invalidate an instance
+/// that has already run, which is decision 40's entire argument for making the
+/// scale data rather than a rule. This bounds the *rubric-writing* exercise
+/// instead — one line of guidance per value stops being a rubric somewhere well
+/// before a hundred of them, and a category that wide is a typo rather than a
+/// plan. A rubric already wider than this keeps whatever it holds; the check
+/// below only fires on a scale someone is editing now.
+export const MAX_SCALE_VALUES = 10;
+
+/// The score values a category offers, low to high.
+///
+/// One helper rather than three `for` loops: the builder renders an input per
+/// value, `validateRubric` checks a criterion per value, and the reviewer's card
+/// renders a button per value. Three separate derivations of "which values does
+/// this category have" is how one of them comes to disagree about whether the
+/// floor is included.
+export function scaleValues(minPoints: number, maxPoints: number): number[] {
+  if (!Number.isInteger(minPoints) || !Number.isInteger(maxPoints)) return [];
+  if (maxPoints < minPoints) return [];
+  const values: number[] = [];
+  for (let value = minPoints; value <= maxPoints; value += 1) values.push(value);
+  return values;
+}
 
 /// Goal 5: the rubric must be reconfigurable between cycles, so nothing here
 /// assumes four categories or any particular scale. The only limits are the
@@ -73,14 +108,41 @@ export function validateRubric(categories: readonly RubricCategoryInput[]): stri
       );
     }
 
-    // Absent is fine — FR-4 makes the description optional. Only its length is
-    // validated, because it renders inside a card that has to share a phone
-    // screen with the score input it explains.
-    if ((category.description ?? "").length > MAX_DESCRIPTION_LENGTH) {
+    // Decision 114's criteria. Absent is fine, per value and in total: FR-4
+    // keeps them optional for the reason decision 32 kept the description
+    // optional, so what is checked is width, length, and that nothing is
+    // attached to a score the category does not offer.
+    const levels = category.levels ?? {};
+    const values = scaleValues(category.minPoints, category.maxPoints);
+
+    if (values.length > MAX_SCALE_VALUES && Object.keys(levels).length > 0) {
       errors.push(
-        `Category ${position}'s description is over ${MAX_DESCRIPTION_LENGTH} characters. ` +
-          `Reviewers read this on a phone beside the score box.`,
+        `Category ${position} offers ${values.length} different scores, which is too many to ` +
+          `write a line about each. Narrow the range to ${MAX_SCALE_VALUES} values or fewer.`,
       );
+    }
+
+    for (const [key, criterion] of Object.entries(levels)) {
+      const value = Number(key);
+
+      // A criterion attached to a score nobody can give. Reachable by lowering
+      // maxPoints after writing the guidance, and it would otherwise be stored,
+      // exported, and rendered nowhere — invisible until a restore.
+      if (!values.includes(value)) {
+        errors.push(
+          `Category ${position} has guidance for a score of ${key}, which is outside its ` +
+            `${category.minPoints}–${category.maxPoints} range.`,
+        );
+        continue;
+      }
+
+      if (criterion.length > MAX_CRITERION_LENGTH) {
+        errors.push(
+          `Category ${position}'s guidance for a score of ${key} is over ` +
+            `${MAX_CRITERION_LENGTH} characters. Reviewers read this on a phone beside the ` +
+            `score box.`,
+        );
+      }
     }
   });
 

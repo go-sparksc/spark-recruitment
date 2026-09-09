@@ -27,6 +27,11 @@ export interface ResultRow {
   average: number | null;
   variance: number | null;
   completedCount: number;
+  /// How many of this applicant's reviewers ticked decision 116's box. A count
+  /// rather than a boolean: one reviewer suspecting and two not is a different
+  /// signal from all three suspecting, and collapsing them would throw away the
+  /// disagreement that makes the flag worth having.
+  aiFlagCount: number;
   /// Keyed by `DemographicColumn.key`.
   demographics: Record<string, ApplicantDemographic>;
 }
@@ -188,6 +193,11 @@ export function ResultsTable({
               <TableHead className="text-right">Average</TableHead>
               <TableHead className="text-right">Variance</TableHead>
               <TableHead className="text-right">Reviews</TableHead>
+              {/* Decision 116. Abbreviated because the column is narrow and
+                  almost always empty; the title says what it is. */}
+              <TableHead className="text-right" title="Reviewers who thought the writing looked AI-generated">
+                AI?
+              </TableHead>
               {columns.map((column) => (
                 <TableHead key={column.key}>{column.label}</TableHead>
               ))}
@@ -232,6 +242,24 @@ export function ResultsTable({
                     applicant, so "trust this number less" has to read on the
                     number. */}
                 <ReviewCountCell completedCount={row.completedCount} target={target} />
+                {/* Decision 116. On its own cell, not appended to the review
+                    count — that cell already carries FR-10's under-target
+                    marker, and two unrelated warnings sharing one number is how
+                    an admin comes to read the wrong one. Blank rather than "0",
+                    so the column reads as exceptions rather than as a statistic
+                    every applicant has. */}
+                <TableCell className="text-right tabular-nums">
+                  {row.aiFlagCount > 0 ? (
+                    <span
+                      className="text-amber-700"
+                      title={`${row.aiFlagCount} of this applicant's reviewers thought the writing looked AI-generated. Open the applicant to see who, and read the application again.`}
+                    >
+                      ⚑ {row.aiFlagCount}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 {columns.map((column) => (
                   <DemographicCell key={column.key} cell={row.demographics[column.key]} />
                 ))}

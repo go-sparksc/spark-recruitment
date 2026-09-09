@@ -18,9 +18,11 @@ const prisma = createSeedClient();
 const APPLICANT_INDEX = "Applicant_instanceId_email_key";
 const SOURCE_ROW_INDEX = "Applicant_instanceId_sourceRowIndex_key";
 const ASSIGNMENT_INDEX = "Assignment_round_applicantId_reviewerId_key";
+const LEVEL_INDEX = "RubricLevel_rubricCategoryId_points_key";
 
 const createdApplicantIds: string[] = [];
 const createdAssignmentIds: string[] = [];
+const createdLevelIds: string[] = [];
 
 let failures = 0;
 
@@ -149,10 +151,63 @@ async function main() {
     `;
     createdAssignmentIds.push(duplicateAssignmentId);
   });
+
+  // --- 4. RubricLevel (rubricCategoryId, points) ----------------------------
+  // PRD decision 114 chose a table over a jsonb map specifically so that "one
+  // criterion per offered value" is a database guarantee rather than something
+  // the form component remembers. That claim is only worth making if the index
+  // actually bites, which is what this asserts.
+  //
+  // Uses an EXISTING seeded category rather than creating one: RubricCategory
+  // is inside FR-4's lock and a probe category would be a rubric row an admin
+  // never made. The probe levels are at a deliberately out-of-range `points`
+  // (-1), so they cannot collide with, mask, or be mistaken for real criteria
+  // on that category — the fixture-values-outside-anything-real rule CLAUDE.md's
+  // security note is about.
+  const category = await prisma.rubricCategory.findFirst({
+    where: { instanceId: SEED_INSTANCE_ID },
+    select: { id: true, name: true },
+  });
+
+  if (!category) {
+    fail("RubricLevel (rubricCategoryId, points)", "no seeded rubric category to attach to");
+  } else {
+    const originalLevel = await prisma.rubricLevel.create({
+      data: {
+        id: "check_level_original",
+        rubricCategoryId: category.id,
+        points: -1,
+        criterion: "probe — not a real criterion",
+      },
+    });
+    createdLevelIds.push(originalLevel.id);
+    console.log(`Setup       created level ${originalLevel.id} on “${category.name}” to collide with`);
+    console.log("");
+
+    const duplicateLevelId = "check_duplicate_level";
+
+    await expectRejection("RubricLevel (rubricCategoryId, points)", LEVEL_INDEX, async () => {
+      await prisma.$executeRaw`
+        INSERT INTO "RubricLevel"
+          ("id", "rubricCategoryId", "points", "criterion", "updatedAt")
+        VALUES
+          (${duplicateLevelId}, ${category.id}, -1, 'probe duplicate', NOW())
+      `;
+      createdLevelIds.push(duplicateLevelId);
+    });
+  }
 }
 
 async function cleanup() {
   console.log("");
+  // Levels first: they hang off a seeded RubricCategory this script must leave
+  // exactly as it found it, so they are the rows most easily orphaned.
+  if (createdLevelIds.length > 0) {
+    const { count } = await prisma.rubricLevel.deleteMany({
+      where: { id: { in: createdLevelIds } },
+    });
+    console.log(`Cleanup     deleted ${count} rubric level(s): ${createdLevelIds.join(", ")}`);
+  }
   if (createdAssignmentIds.length > 0) {
     const { count } = await prisma.assignment.deleteMany({
       where: { id: { in: createdAssignmentIds } },
@@ -165,7 +220,11 @@ async function cleanup() {
     });
     console.log(`Cleanup     deleted ${count} applicant(s): ${createdApplicantIds.join(", ")}`);
   }
-  if (createdAssignmentIds.length === 0 && createdApplicantIds.length === 0) {
+  if (
+    createdAssignmentIds.length === 0 &&
+    createdApplicantIds.length === 0 &&
+    createdLevelIds.length === 0
+  ) {
     console.log("Cleanup     nothing to remove");
   }
 }
@@ -177,13 +236,22 @@ async function confirmRestored() {
   const leftoverAssignments = await prisma.assignment.count({
     where: { id: { in: ["check_assignment_original", "check_duplicate_assignment"] } },
   });
+  const leftoverLevels = await prisma.rubricLevel.count({
+    where: { id: { in: ["check_level_original", "check_duplicate_level"] } },
+  });
+  // Belt and braces on the seeded rubric: a probe level that escaped its id
+  // list would still be catchable by its out-of-range points, and a criterion
+  // sitting at -1 on a real category is exactly the kind of row that renders
+  // nowhere and is found years later.
+  const strayProbeLevels = await prisma.rubricLevel.count({ where: { points: -1 } });
 
-  if (leftover === 0 && leftoverAssignments === 0) {
+  if (leftover === 0 && leftoverAssignments === 0 && leftoverLevels === 0 && strayProbeLevels === 0) {
     console.log("Cleanup     verified — no probe rows remain");
   } else {
     failures += 1;
     console.log(
-      `Cleanup     FAILED — ${leftover} applicant(s) and ${leftoverAssignments} assignment(s) remain`,
+      `Cleanup     FAILED — ${leftover} applicant(s), ${leftoverAssignments} assignment(s), ` +
+        `${leftoverLevels} level(s) by id and ${strayProbeLevels} level(s) at points = -1 remain`,
     );
   }
 }

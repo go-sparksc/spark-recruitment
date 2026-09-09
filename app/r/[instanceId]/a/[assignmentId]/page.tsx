@@ -59,6 +59,10 @@ export default async function ApplicantDetailPage({
       // note and never another reviewer's — §6 keeps those hidden from each
       // other, and the relation is what enforces it rather than a filter.
       note: { select: { body: true } },
+      // Decision 116. This assignment's flag, which is this reviewer's own by
+      // construction — the row IS the pairing, so there is no other reviewer's
+      // to accidentally read here.
+      suspectedAiUse: true,
     },
   });
 
@@ -92,7 +96,15 @@ export default async function ApplicantDetailPage({
     prisma.rubricCategory.findMany({
       where: { instanceId },
       orderBy: { ordinal: "asc" },
-      select: { id: true, name: true, minPoints: true, maxPoints: true, description: true },
+      select: {
+        id: true,
+        name: true,
+        minPoints: true,
+        maxPoints: true,
+        // Decision 114. Ordered so the card renders them low to high without
+        // sorting again, which is the order a reviewer reads a scale in.
+        levels: { orderBy: { points: "asc" }, select: { points: true, criterion: true } },
+      },
     }),
     // Prev/next, so a reviewer working through fifteen never returns to the list.
     prisma.assignment.findMany({
@@ -128,7 +140,7 @@ export default async function ApplicantDetailPage({
     name: category.name,
     minPoints: category.minPoints,
     maxPoints: category.maxPoints,
-    description: category.description,
+    levels: Object.fromEntries(category.levels.map((level) => [level.points, level.criterion])),
     points: pointsByCategory.get(category.id) ?? null,
   }));
 
@@ -231,6 +243,7 @@ export default async function ApplicantDetailPage({
           assignmentId={assignment.id}
           rubric={rubric}
           noteBody={assignment.note?.body ?? ""}
+          suspectedAiUse={assignment.suspectedAiUse}
         />
       </div>
     </main>

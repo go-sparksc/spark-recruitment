@@ -69,6 +69,11 @@ export default async function ApplicantResultPage({
             reviewer: { select: { firstName: true, lastName: true, isSparklet: true } },
             scores: { select: { rubricCategoryId: true, points: true } },
             note: { select: { body: true } },
+            // Decision 116, attributed here where FR-10's row only counts it.
+            // This is the surface that answers "who thought so", beside the
+            // score and the note the same reviewer gave — which is the context
+            // that makes an unverified suspicion readable rather than damning.
+            suspectedAiUse: true,
           },
         },
       },
@@ -280,6 +285,19 @@ export default async function ApplicantResultPage({
                   ) : (
                     <p className="text-muted-foreground text-sm italic">No note.</p>
                   )}
+
+                  {/* Decision 116, and the wording matters as much here as on
+                      the reviewer's own screen. "Thought the writing looked
+                      AI-generated" attributes an impression to a person;
+                      "flagged for AI" would read as a finding the system stands
+                      behind, and §11 keeps that out of scope. Shown only when
+                      raised — an explicit "did not suspect" on every other card
+                      would turn a rare exception into a verdict everyone gets. */}
+                  {assignment.suspectedAiUse ? (
+                    <p className="rounded-md border border-amber-600/40 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      ⚑ {assignment.reviewer.firstName} thought the writing looked AI-generated.
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
             );

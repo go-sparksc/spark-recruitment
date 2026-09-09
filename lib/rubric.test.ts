@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_CATEGORIES,
-  MAX_DESCRIPTION_LENGTH,
+  MAX_CRITERION_LENGTH,
   rubricRange,
+  scaleValues,
   planInterviewRubricSave,
   validateInterviewRubric,
   validateRubric,
@@ -132,38 +133,108 @@ describe("minPoints", () => {
   });
 });
 
-describe("category descriptions — PRD decision 32", () => {
-  it("accepts a category with no description at all", () => {
-    // FR-4 makes it optional. An admin mid-setup must not be blocked by it, and
-    // a cycle that briefs reviewers elsewhere is entitled to leave it empty.
+describe("scaleValues", () => {
+  /// One helper, three readers — the builder's inputs, the validator's check and
+  /// the reviewer's buttons. Three derivations of "which values does this
+  /// category offer" is how one of them comes to disagree about the floor.
+  it("runs from the floor to the ceiling inclusive", () => {
+    expect(scaleValues(1, 4)).toEqual([1, 2, 3, 4]);
+    expect(scaleValues(0, 5)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it("is a single value where the bounds meet", () => {
+    // validateRubric rejects this as a rubric, but the helper is arithmetic and
+    // answers honestly rather than second-guessing its caller.
+    expect(scaleValues(3, 3)).toEqual([3]);
+  });
+
+  it("is empty for an inverted or non-integer range", () => {
+    expect(scaleValues(4, 1)).toEqual([]);
+    expect(scaleValues(Number.NaN, 4)).toEqual([]);
+    expect(scaleValues(1, Number.NaN)).toEqual([]);
+  });
+});
+
+describe("per-value criteria — PRD decision 114", () => {
+  it("accepts a category with no criteria at all", () => {
+    // FR-4 keeps them optional on decision 32's original terms: an admin
+    // mid-setup must not be blocked, and a cycle that briefs reviewers
+    // elsewhere is entitled to leave them empty.
     expect(validateRubric([cat({ name: "Drive" })])).toEqual([]);
+    expect(validateRubric([cat({ name: "Drive", levels: {} })])).toEqual([]);
   });
 
-  it("accepts an explicitly null or empty description", () => {
-    expect(validateRubric([cat({ name: "Drive", description: null })])).toEqual([]);
-    expect(validateRubric([cat({ name: "Drive", description: "" })])).toEqual([]);
+  it("accepts criteria on some values and not others", () => {
+    expect(
+      validateRubric([cat({ name: "Drive", minPoints: 1, maxPoints: 4, levels: { 4: "Ran it end to end" } })]),
+    ).toEqual([]);
   });
 
-  it("accepts a description at the limit", () => {
-    const atLimit = "x".repeat(MAX_DESCRIPTION_LENGTH);
-    expect(validateRubric([cat({ name: "Drive", description: atLimit })])).toEqual([]);
+  it("accepts a criterion at the limit", () => {
+    const atLimit = "x".repeat(MAX_CRITERION_LENGTH);
+    expect(
+      validateRubric([cat({ name: "Drive", minPoints: 1, maxPoints: 4, levels: { 2: atLimit } })]),
+    ).toEqual([]);
   });
 
   it("rejects one character over the limit, and says why it matters", () => {
-    // The limit is not arbitrary tidiness: this renders inside a card that has
-    // to share a phone screen with the score input it explains.
-    const tooLong = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
-    const errors = validateRubric([cat({ name: "Drive", description: tooLong })]);
+    // Not arbitrary tidiness: this renders on a card sharing a phone screen
+    // with the score buttons it explains.
+    const tooLong = "x".repeat(MAX_CRITERION_LENGTH + 1);
+    const errors = validateRubric([
+      cat({ name: "Drive", minPoints: 1, maxPoints: 4, levels: { 3: tooLong } }),
+    ]);
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/Category 1's description is over/);
+    expect(errors[0]).toMatch(/Category 1's guidance for a score of 3 is over/);
     expect(errors[0]).toMatch(/phone/);
+  });
+
+  /// **The case that would otherwise be invisible.** Reachable by writing
+  /// guidance and then lowering the ceiling: the criterion is stored, exported,
+  /// and rendered nowhere, so nobody finds out until a restore.
+  it("rejects a criterion attached to a score outside the range", () => {
+    const errors = validateRubric([
+      cat({ name: "Drive", minPoints: 1, maxPoints: 4, levels: { 7: "Unreachable" } }),
+    ]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/score of 7/);
+    expect(errors[0]).toMatch(/outside its 1–4 range/);
+  });
+
+  it("rejects a criterion below the floor as well as above the ceiling", () => {
+    // Decision 40's floor is real: a 1-4 category offers no 0, so guidance for
+    // one describes a score no reviewer can give.
+    const errors = validateRubric([
+      cat({ name: "Drive", minPoints: 1, maxPoints: 4, levels: { 0: "Nothing at all" } }),
+    ]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/score of 0/);
+  });
+
+  /// Decision 114's width cap, and the half of it that matters: it bounds the
+  /// rubric-writing exercise, NOT `maxPoints`. A wide scale with no criteria is
+  /// still legal, because lowering MAX_POINTS_CEILING would retroactively
+  /// invalidate an instance that has already run — decision 40's whole argument.
+  it("rejects criteria on a scale wider than the cap, but not the scale itself", () => {
+    const wide = cat({ name: "Drive", minPoints: 0, maxPoints: 100 });
+    expect(validateRubric([wide])).toEqual([]);
+
+    const errors = validateRubric([{ ...wide, levels: { 50: "Halfway" } }]);
+    expect(errors.some((e) => /too many to write a line about each/.test(e))).toBe(true);
   });
 
   it("names the offending category by position", () => {
     const errors = validateRubric([
       cat({ name: "A" }),
-      cat({ name: "B", description: "x".repeat(MAX_DESCRIPTION_LENGTH + 1) }),
+      cat({
+        name: "B",
+        minPoints: 1,
+        maxPoints: 4,
+        levels: { 2: "x".repeat(MAX_CRITERION_LENGTH + 1) },
+      }),
     ]);
 
     expect(errors.join(" ")).toMatch(/Category 2/);

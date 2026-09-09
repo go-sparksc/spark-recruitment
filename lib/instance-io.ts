@@ -66,6 +66,11 @@ export async function readSnapshot(
     Field: () => prisma.field.findMany({ where: byInstance }),
     ImportRow: () => prisma.importRow.findMany({ where: byInstance }),
     RubricCategory: () => prisma.rubricCategory.findMany({ where: byInstance }),
+    // Decision 114. Scoped through its category, the same way Score reaches the
+    // instance through its assignment — RubricLevel carries no instanceId, so
+    // an unscoped read here would export every instance's rubric prose into one
+    // instance's file.
+    RubricLevel: () => prisma.rubricLevel.findMany({ where: { rubricCategory: byInstance } }),
     InterviewCategory: () => prisma.interviewCategory.findMany({ where: byInstance }),
     RoundAccessCode: () => prisma.roundAccessCode.findMany({ where: byInstance }),
     Reviewer: () => prisma.reviewer.findMany({ where: byInstance }),

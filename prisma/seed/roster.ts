@@ -79,42 +79,64 @@ export function buildReviewerSpecs(rng: Rng): ReviewerSpec[] {
 /// a 5 looks like beside a control that stops at 4 is worse than no description
 /// at all.
 ///
-/// Descriptions are seeded, not left null, because they are what a written
-/// reviewer scores against (PRD decision 32) and the seed is the fixture every
-/// walkthrough runs on. A seeded rubric with empty descriptions would make the
-/// reviewer screen look finished while hiding the thing that decision exists to
-/// fix. Wording is illustrative synthetic content, not Spark SC's real rubric.
+/// Criteria are seeded on every value, not left empty, because they are what a
+/// written reviewer scores against (PRD decisions 32 and 114) and the seed is
+/// the fixture every walkthrough runs on. A seeded rubric with no criteria would
+/// make the reviewer screen look finished while hiding the thing those decisions
+/// exist to fix. Wording is illustrative synthetic content, not Spark SC's real
+/// rubric.
+///
+/// **One line per value, per decision 114.** These were four category blurbs
+/// until then, each of which named what a 4 and a 1 looked like and left 2 and 3
+/// to the reviewer — which is exactly the gap 114 closes, so the seed had to
+/// stop demonstrating the old shape.
 export const RUBRIC_CATEGORIES = [
   {
     name: "Entrepreneurial Drive",
     minPoints: 1,
     maxPoints: 4,
     ordinal: 0,
-    description:
-      "Appetite for building rather than joining. A 4 has started something unprompted and can say what it cost them; a 1 describes ambition with nothing attached to it.",
+    levels: {
+      1: "Describes ambition with nothing attached to it.",
+      2: "Has joined things others started, and speaks about them as a participant.",
+      3: "Started something, but stopped when it stopped being exciting.",
+      4: "Started something unprompted and can say what it cost them.",
+    },
   },
   {
     name: "Initiative and Follow-Through",
     minPoints: 1,
     maxPoints: 4,
     ordinal: 1,
-    description:
-      "Evidence of finishing, not just starting. A 4 ran something end to end past the point it stopped being exciting; a 1 lists projects with no outcome.",
+    levels: {
+      1: "Lists projects with no outcome.",
+      2: "Finished something small, or finished something with someone else driving it.",
+      3: "Ran something to a real end, with the hard part handed off.",
+      4: "Ran something end to end past the point it stopped being exciting.",
+    },
   },
   {
     name: "Communication and Clarity",
     minPoints: 1,
     maxPoints: 4,
     ordinal: 2,
-    description:
-      "Whether the writing makes the thinking legible. A 4 is specific and ordered and would be understood by someone outside their field; a 1 needs re-reading to extract a claim.",
+    levels: {
+      1: "Needs re-reading to extract a claim.",
+      2: "Makes a claim, but leaves the reader to supply the reasoning.",
+      3: "Clear and ordered, with jargon a reader outside the field would stumble on.",
+      4: "Specific and ordered, and would be understood by someone outside their field.",
+    },
   },
   {
     name: "Fit with Spark SC",
     minPoints: 1,
     maxPoints: 4,
     ordinal: 3,
-    description:
-      "What they would actually do here, beyond wanting to belong. A 4 names the unglamorous half of the work; a 1 could be applying to any club.",
+    levels: {
+      1: "Could be applying to any club.",
+      2: "Wants what membership provides, without saying what they would contribute.",
+      3: "Names something specific they would work on here.",
+      4: "Names the unglamorous half of the work, and wants it anyway.",
+    },
   },
 ] as const;

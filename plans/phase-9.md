@@ -238,7 +238,91 @@ beside it.
 
 ---
 
-## Slices 9.3 – 9.5
+## Slice 9.3 — two schema changes
+
+Decisions 114 (`RubricLevel`, replacing `RubricCategory.description`) and 116
+(`Assignment.suspectedAiUse`). One migration per decision rather than the single
+one `migrate diff` emitted, so each is bisectable against the decision it serves.
+
+**The generated SQL would have destroyed the prose.** `prisma migrate diff`
+emitted `DROP COLUMN "description"` with no backfill. Hand-finished so the order
+is create → carry the text into the top value's criterion → drop, which is
+decision 114's rule and the reason that decision exists as prose rather than as
+a schema diff. Verified afterwards: 17 rows moved, matching the census exactly,
+including the one row of genuinely human prose.
+
+**Scale width is capped on the criteria, not on `maxPoints`.** `MAX_SCALE_VALUES`
+bounds how many values a category may offer *while carrying* per-value guidance;
+`MAX_POINTS_CEILING` stays at 1000, because lowering it would retroactively
+invalidate an instance that has already run — decision 40's whole argument for
+making the scale data rather than a rule. `validateRubric` also rejects a
+criterion attached to a score outside the range, which is reachable by writing
+guidance and then lowering the ceiling and would otherwise be stored, exported
+and rendered nowhere.
+
+**`scaleValues` is one helper with three readers** — the builder's inputs, the
+validator's check, and the reviewer's buttons. Three derivations of "which values
+does this category offer" is how one of them comes to disagree about the floor.
+
+**The export needed three edits, not one.** `EXPORT_TABLES` (both the new table
+and `Assignment`'s new column), `DATE_COLUMNS`, and `readSnapshot`'s reader map —
+the last scoped through `rubricCategory`, since `RubricLevel` carries no
+`instanceId` and an unscoped read would put every instance's rubric prose into
+one instance's file. The bidirectional `EXPORT_TABLES` assertion is what forced
+the first; the exhaustive `TableReader` type forced the third.
+
+**`prisma/checks/unique-constraints.ts` gained a fourth case.** Decision 114 chose
+a table over a jsonb map *specifically* so that one-criterion-per-value is a
+database guarantee, and that claim is only worth making if the index bites — so
+it is now asserted the way the other three are, through raw SQL, against SQLSTATE
+23505 naming the index. Probe rows sit at `points = -1`, deliberately outside any
+real scale, so they cannot collide with or be mistaken for real criteria on the
+seeded category they attach to; cleanup checks for strays by that value as well
+as by id, which is CLAUDE.md's security note applied rather than quoted.
+
+**The dev-server trap fired exactly as documented.** Stopping the background task
+killed the `npm` wrapper and left the Next process bound to port 3000, still
+serving the pre-`generate` client. `netstat` showed it; `taskkill` needed `//PID`
+in Git Bash and was done through PowerShell instead; the port was confirmed free
+before restarting. Worth recording that the check is what caught it — nothing
+else would have, since `npm run verify` reads the new client from disk and was
+green throughout.
+
+### What the gate found
+
+**Nothing wrong with the product, and one thing wrong with my instrumentation.**
+Mid-gate I reported the AI flag as a real server-side bug: the action ran, the
+form demonstrably serialized `suspectedAiUse: "on"`, and the database still read
+false. It was not a bug. The probe script used `findFirst` with **no `orderBy`**,
+so Postgres returned an arbitrary assignment — and once updates moved rows
+around, it returned a different one than the browser was showing. Reading the
+assignment by id showed the flag set correctly, on exactly one row, the one that
+was clicked. Recorded because the wrong conclusion was stated out loud before the
+right one, and because an unordered `findFirst` in a verification script is a
+trap that will look exactly like a product defect the next time too.
+
+Two harness artifacts, neither a product issue: `computer` clicks are in
+**screenshot** coordinates, which are ~1.33× the viewport here, so several
+"missed" clicks were simply aimed at the wrong place; and Next's dev-overlay
+badge (`NEXTJS-PORTAL`) sits on top of the bottom-left corner of the page, which
+is where the AI checkbox lands — `elementFromPoint` is what identified it.
+
+**Gate — PASSED, with one item not reachable.**
+
+- [x] Migrations apply, and `migrate diff` afterwards reports an empty diff.
+- [x] The backfill carried all 17 descriptions to the top value; census matches.
+- [x] `npm run check:round-trip` clean — 25 tables now, `RubricLevel` among them
+      with rows, so it was compared rather than waved through as empty.
+- [x] `prisma/checks/unique-constraints.ts` — the new index bites, cleanup verified.
+- [x] The reviewer's card renders one criterion per value, above the buttons.
+- [x] The AI checkbox writes, and writes to the right assignment.
+- [ ] **FR-10's flag column and the profile's attributed flag — not visually
+      confirmed.** Both are behind the app-level password, which I will not type.
+      Built, typechecked and lint-clean; they need an eye on them.
+
+---
+
+## Slices 9.4 – 9.5
 
 Scope is in `BUILD_PLAN.md`'s Phase 9 section; each is written up here as it is
 built.

@@ -97,7 +97,10 @@ export default async function ResultsPage({
         stageReached: true,
         assignments: {
           where: { round: ROUND, status: AssignmentStatus.ACTIVE },
-          select: { scores: { select: { points: true } } },
+          // Decision 116: the flag rides along with the scores it was ticked
+          // beside. Counted rather than attributed here — naming the reviewer
+          // belongs on the profile, next to the score and note they also gave.
+          select: { scores: { select: { points: true } }, suspectedAiUse: true },
         },
       },
     }),
@@ -148,6 +151,11 @@ export default async function ResultsPage({
       sourceRowIndex: applicant.sourceRowIndex,
       displayName: applicant.displayName,
       ...scoreSummary(averages),
+      // Decision 116. A count, because the flag is one reviewer's judgment and
+      // three reviewers disagreeing is the thing an admin wants to see. Not a
+      // sort key and not a filter — it is a reason to read the application
+      // again, not a rank.
+      aiFlagCount: applicant.assignments.filter((a) => a.suspectedAiUse).length,
       demographics: applicantDemographics(applicant.data as ApplicantData, columns),
     };
   });
