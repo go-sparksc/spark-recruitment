@@ -181,6 +181,8 @@ describe("filterFirstRoundRows", () => {
 const ETHNICITY: DemographicColumn = {
   key: "ethnicity",
   label: "Ethnicity",
+  // The ethnicity group is the multi-select case §10.7 exists for.
+  isMultiSelect: true,
   // GroupMember is { id, displayName, groupRole } — read from the real type
   // rather than invented, which is what the first draft of this fixture got
   // wrong. OPTION members are the one-hot columns §10.7 counts.

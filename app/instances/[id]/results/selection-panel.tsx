@@ -6,6 +6,7 @@ import { finalizeWritten, type FinalizeState } from "./actions";
 import { Button } from "@/components/ui/button";
 import {
   NOT_SPECIFIED,
+  formatTally,
   tallySelections,
   type DemographicTally,
 } from "@/lib/demographics";
@@ -26,6 +27,10 @@ export interface SelectionColumn {
   /// Fixes the order and keeps unselected options visible, so the selection
   /// panel and the pool panel are the same shape and can be read side by side.
   labels: string[];
+  /// Decision 118. Carried from `DemographicColumn` rather than inferred from
+  /// the tallies, so the format cannot change between two cohorts of the same
+  /// column.
+  isMultiSelect: boolean;
 }
 
 /// FR-11. The checkbox column lives on the ranked table; this is everything
@@ -126,15 +131,22 @@ export function SelectionPanel({
               applicants.map((a) => a.selections[column.key] ?? []),
               column.labels,
             )}
+            selectionSize={chosen.length}
+            poolSize={applicants.length}
+            isMultiSelect={column.isMultiSelect}
           />
         ))}
       </div>
 
+      {/* Decision 118 shortened this. It used to explain the whole 1/n rule,
+          because the panel printed a fractional person with no denominator and
+          the arithmetic was otherwise unreadable. Now the denominator is on
+          every row, so the note only has to say what the third number is. */}
       <p className="text-muted-foreground text-xs">
-        Weighted counts follow PRD §10.7: an applicant selecting <em>n</em> options contributes
-        1/<em>n</em> to each, and one who selected none counts as a whole person under “
-        {NOT_SPECIFIED}”. The weighted column therefore sums to the number of applicants, while the
-        headcount beside it counts every person who selected that option.
+        Per PRD §10.7, an applicant selecting <em>n</em> options contributes 1/<em>n</em> to each,
+        so the left number of a multi-select row sums to the size of the group it is over; the
+        bracketed number counts every person who selected that option. Someone who selected nothing
+        counts as a whole person under “{NOT_SPECIFIED}”.
       </p>
 
       {state.error ? (
@@ -225,10 +237,20 @@ export function Breakdown({
   label,
   selection,
   pool,
+  selectionSize,
+  poolSize,
+  isMultiSelect,
 }: {
   label: string;
   selection: readonly DemographicTally[];
   pool: readonly DemographicTally[];
+  /// Decision 118's denominators. Each column gets the size of the set IT was
+  /// computed over — the selection's own size on the left, the pool's on the
+  /// right — because a shared denominator would belong to one of them and
+  /// silently misdescribe the other.
+  selectionSize: number;
+  poolSize: number;
+  isMultiSelect: boolean;
 }) {
   const poolByLabel = new Map(pool.map((row) => [row.label, row]));
   // Union, ordered by the pool — the selection can only ever contain labels the
@@ -259,13 +281,15 @@ export function Breakdown({
           {rows.map((row) => (
             <tr key={row.label} className="border-b last:border-0">
               <td className="py-0.5 pr-2">{row.label}</td>
+              {/* Decision 118. `weighted/poolSize (headcount)` for a
+                  multi-select column, `applicable/total` for a single-select
+                  one — where the second is the first with two of its three
+                  numbers coinciding, not a special case. */}
               <td className="py-0.5 pl-2 text-right tabular-nums">
-                {row.selection.weighted.toFixed(1)}
-                <span className="text-muted-foreground text-xs"> / {row.selection.headcount}</span>
+                {formatTally(row.selection, selectionSize, isMultiSelect)}
               </td>
               <td className="text-muted-foreground py-0.5 pl-2 text-right tabular-nums">
-                {row.pool.weighted.toFixed(1)}
-                <span className="text-xs"> / {row.pool.headcount}</span>
+                {formatTally(row.pool, poolSize, isMultiSelect)}
               </td>
             </tr>
           ))}

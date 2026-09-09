@@ -135,6 +135,15 @@ export interface ResultFilters {
   /// Null means the filter is off, which is FR-10's default. The threshold is
   /// admin-set at view time and never persisted.
   minVariance: number | null;
+  /// Only the applicants this round advanced. Offered once the round is
+  /// finalized and meaningless before — nobody has moved on yet, so the page
+  /// hides the control rather than showing one that empties the table.
+  ///
+  /// **Read off `stageReached`, not off a `Decision` row.** FR-11's finalize
+  /// writes a decision for every applicant either way, so the decision's
+  /// existence says only that the round was finalized; `stageReached` is what
+  /// moved, and it is the same field FR-15's own pool predicate reads.
+  advancedOnly: boolean;
 }
 
 /// Both filters, composed with AND — they are independent controls and both
@@ -148,7 +157,7 @@ export interface ResultFilters {
 /// applicant nobody reviewed is not a low-variance applicant and is not a
 /// high-variance one; they are found by `incompleteOnly`, which is the filter
 /// that is actually about them.
-export function applyResultFilters<T extends RankableApplicant>(
+export function applyResultFilters<T extends RankableApplicant & { advanced?: boolean }>(
   rows: readonly T[],
   filters: ResultFilters,
   target: number,
@@ -159,6 +168,10 @@ export function applyResultFilters<T extends RankableApplicant>(
       if (row.variance === null) return false;
       if (row.variance < filters.minVariance) return false;
     }
+    // Composed with the other two by AND, like they are with each other. An
+    // admin who wants "who moved on, of the high-variance ones" is asking a
+    // real question and should not have to pick one filter.
+    if (filters.advancedOnly && row.advanced !== true) return false;
     return true;
   });
 }

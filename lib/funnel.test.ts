@@ -31,6 +31,7 @@ import {
 const ethnicity: DemographicColumn = {
   key: "grp",
   label: "Ethnicity",
+  isMultiSelect: true,
   members: [
     { id: "east-asian", displayName: "East Asian", groupRole: FieldGroupRole.OPTION },
     { id: "white", displayName: "White", groupRole: FieldGroupRole.OPTION },

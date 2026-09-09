@@ -6,7 +6,7 @@ import { Round } from "@/generated/prisma/enums";
 import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
-import { buildApplicantView } from "@/lib/review";
+import { applicantLabel, buildApplicantView } from "@/lib/review";
 
 export const metadata = { title: "Applicant — Spark SC" };
 
@@ -112,7 +112,16 @@ export default async function FirstRoundApplicantPage({
         ← First round
       </Link>
 
-      <h1 className="mt-3 text-xl font-semibold tracking-tight">{applicant.displayName}</h1>
+      {/* The handle beside the name, matching the list that links here and the
+          second round's profile. Two applicants share a name in the seed, and a
+          reviewer arriving from a search for one of them needs "am I on the
+          right Diego Hoffmann" answerable without reading the email. */}
+      <h1 className="mt-3 text-xl font-semibold tracking-tight">
+        {applicant.displayName}
+        <span className="text-muted-foreground ml-2 text-sm font-normal">
+          {applicantLabel(applicant.sourceRowIndex)}
+        </span>
+      </h1>
 
       {/* Clause 14b. The averages are the headline — largest type on the page,
           one line per interviewer, above everything else. */}

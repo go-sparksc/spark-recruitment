@@ -157,6 +157,9 @@ export interface FirstRoundResultRow {
   /// the round has already decided — the page ranks them for reference, but the
   /// checkbox column does not apply.
   inPool: boolean;
+  /// Whether this round advanced them to the second. Drives the "moved on"
+  /// filter, offered once the round is finalized.
+  advanced: boolean;
 }
 
 /// Rank and shape the first-round results.
@@ -190,6 +193,11 @@ export function buildFirstRoundResultRows(
     inPool:
       applicant.status === FIRST_ROUND_POOL.status &&
       applicant.stageReached === FIRST_ROUND_POOL.stageReached,
+    /// "Moved on" for this round: FR-15's finalize advances `stageReached` to
+    /// SECOND_ROUND on the applicants it selected and leaves it at FIRST_ROUND
+    /// on the rest, so this is the same field `inPool` reads, asked forward
+    /// instead of at the present.
+    advanced: applicant.stageReached === Round.SECOND_ROUND,
   }));
 
   // Rank the whole cohort, then number. The rank a row carries is its place

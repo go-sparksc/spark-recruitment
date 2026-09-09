@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { FieldCategory, FieldGroupRole, PromotedRole } from "@/generated/prisma/enums";
 import { auditActor } from "@/lib/audit";
 import { requireInstance } from "@/lib/auth";
-import { uniqueSlug } from "@/lib/fields";
+import { shouldDefaultReviewerVisible, uniqueSlug } from "@/lib/fields";
 import { prisma } from "@/lib/prisma";
 import type { GroupProposal } from "@/lib/import/detect-groups";
 
@@ -107,7 +107,14 @@ export async function updateField(
 
   const field = await prisma.field.findFirst({
     where: { id: fieldId, instanceId },
-    select: { groupId: true, promotedRole: true },
+    // `isIncluded` and `isReviewerVisible` are selected for decision 110's
+    // default below, which needs the state the column is in before this write.
+    select: {
+      groupId: true,
+      promotedRole: true,
+      isIncluded: true,
+      isReviewerVisible: true,
+    },
   });
   if (!field) return { error: "No such column." };
 
@@ -122,11 +129,23 @@ export async function updateField(
     return { error: "A display name cannot be empty." };
   }
 
+  // Decision 110. Applied where the category is chosen, because that is the only
+  // moment a column becomes RESPONSE — FR-2's importer never guesses a category,
+  // so every Responses column is reached by a person clicking this control.
+  const defaultsVisible =
+    patch.category !== undefined &&
+    shouldDefaultReviewerVisible({
+      category: patch.category,
+      isIncluded: field.isIncluded,
+      isReviewerVisible: field.isReviewerVisible,
+    });
+
   await prisma.field.update({
     where: { id: fieldId },
     data: {
       ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() } : {}),
       ...(patch.category !== undefined ? { category: patch.category } : {}),
+      ...(defaultsVisible ? { isReviewerVisible: true } : {}),
     },
   });
 
@@ -382,13 +401,26 @@ export async function updateGroup(
 
   const group = await prisma.fieldGroup.findFirst({
     where: { id: groupId, instanceId },
-    select: { id: true },
+    // Decision 110 needs the pre-write state, as in `updateField`.
+    select: { id: true, isIncluded: true, isReviewerVisible: true },
   });
   if (!group) return { error: "No such group." };
 
   if (patch.displayName !== undefined && patch.displayName.trim() === "") {
     return { error: "A group name cannot be empty." };
   }
+
+  // Decision 110, the group half. A grouped column inherits the group's
+  // visibility, so the choice is made once here and the default belongs here
+  // too — defaulting members individually would write values §5 says nothing
+  // reads.
+  const defaultsVisible =
+    patch.category !== undefined &&
+    shouldDefaultReviewerVisible({
+      category: patch.category,
+      isIncluded: group.isIncluded,
+      isReviewerVisible: group.isReviewerVisible,
+    });
 
   await prisma.fieldGroup.update({
     where: { id: groupId },
@@ -398,6 +430,7 @@ export async function updateGroup(
       ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() } : {}),
       ...(patch.category !== undefined ? { category: patch.category } : {}),
       ...(patch.isMultiSelect !== undefined ? { isMultiSelect: patch.isMultiSelect } : {}),
+      ...(defaultsVisible ? { isReviewerVisible: true } : {}),
     },
   });
 

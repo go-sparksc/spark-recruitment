@@ -8,6 +8,7 @@ import {
   projectApplicantData,
   resolveField,
   resolvePromoted,
+  shouldDefaultReviewerVisible,
   slugify,
   uniqueSlug,
   visibleFieldIds,
@@ -444,5 +445,75 @@ describe("cleanHeader", () => {
     expect(cleanHeader("What’s one experience — a “failure” — that changed you?")).toBe(
       "What’s one experience — a “failure” — that changed you?",
     );
+  });
+});
+
+describe("shouldDefaultReviewerVisible — PRD decision 110", () => {
+  const source = (over: Partial<Parameters<typeof shouldDefaultReviewerVisible>[0]> = {}) => ({
+    category: FieldCategory.RESPONSE,
+    isIncluded: true,
+    isReviewerVisible: null as boolean | null,
+    ...over,
+  });
+
+  it("defaults an included, unset Responses column", () => {
+    // FR-3's two blockers leave Reviewer-visible as the only committable answer,
+    // so the tick was buying nothing.
+    expect(shouldDefaultReviewerVisible(source())).toBe(true);
+  });
+
+  /// The half that keeps decision 108 intact. These are the categories where
+  /// both states are genuinely available and mean different things.
+  it("leaves OTHER and DEMOGRAPHIC unset", () => {
+    expect(shouldDefaultReviewerVisible(source({ category: FieldCategory.OTHER }))).toBe(false);
+    expect(shouldDefaultReviewerVisible(source({ category: FieldCategory.DEMOGRAPHIC }))).toBe(
+      false,
+    );
+  });
+
+  /// **Never overwrites a decision.** An admin who deliberately ticks Backend
+  /// only on a Responses column keeps that false and is refused at commit —
+  /// which is 108's gate working, not this default failing.
+  it("does not overwrite an explicit Backend only", () => {
+    expect(shouldDefaultReviewerVisible(source({ isReviewerVisible: false }))).toBe(false);
+  });
+
+  it("does not re-fire on a column already visible", () => {
+    expect(shouldDefaultReviewerVisible(source({ isReviewerVisible: true }))).toBe(false);
+  });
+
+  /// An excluded column resolves hidden and blocks no commit either way, so
+  /// defaulting it would write a choice nobody is being asked for — and it would
+  /// then survive being re-included, which is the one path by which this could
+  /// hand out visibility unasked.
+  it("leaves an excluded column alone even when it is a Responses column", () => {
+    expect(shouldDefaultReviewerVisible(source({ isIncluded: false }))).toBe(false);
+  });
+
+  /// Decision 110 says the flag survives a later move to Other. This predicate
+  /// is the reason: it is asked only about the category being written, and by
+  /// then the column already holds `true`, so nothing here un-sets it.
+  it("has nothing to say about a column moved away from Responses", () => {
+    expect(
+      shouldDefaultReviewerVisible(source({ category: FieldCategory.OTHER, isReviewerVisible: true })),
+    ).toBe(false);
+  });
+
+  /// Cross-check against the rule it exists beside: a column this defaults is
+  /// exactly one `mustChooseVisibility` would otherwise have reported as
+  /// outstanding. If those two ever disagree, FR-3's blocker and this default
+  /// are describing different sets and one of them is wrong.
+  it("covers a column that would otherwise be outstanding at commit", () => {
+    const field: ChoosableFieldLike = {
+      id: "f1",
+      category: FieldCategory.RESPONSE,
+      isIncluded: true,
+      isReviewerVisible: null,
+      groupId: null,
+      groupRole: null,
+      promotedRole: null,
+    };
+    expect(mustChooseVisibility(field, null)).toBe(true);
+    expect(shouldDefaultReviewerVisible(field)).toBe(true);
   });
 });

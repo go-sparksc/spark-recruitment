@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { InstanceCrumbs } from "../../instance-crumbs";
+import { BackButton } from "@/components/back-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
@@ -210,9 +211,17 @@ export default async function ApplicantResultPage({
           Applicant {applicant.sourceRowIndex}
           {applicant.email ? ` · ${applicant.email}` : null}
           {" · "}
-          <Link href={`/instances/${instance.id}/results`} className="hover:underline">
-            Back to results
-          </Link>
+          {/* A real back button rather than a fixed link. This page is reached
+              from a results view that is usually filtered — "incomplete", or a
+              variance threshold, or now "moved on" — and a hardcoded href
+              discards all of it, dropping the admin at the unfiltered top of a
+              158-row table they then have to re-narrow. The fallback keeps that
+              old behaviour for a tab opened straight onto this URL. */}
+          <BackButton
+            fallback={`/instances/${instance.id}/results`}
+            label="Back to results"
+            className="hover:underline"
+          />
         </p>
       </div>
 

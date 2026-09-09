@@ -165,6 +165,39 @@ export function groupMustChooseVisibility(group: FieldGroupLike): boolean {
   return group.isReviewerVisible === null;
 }
 
+/// Whether this column should arrive ticked Reviewer-visible. PRD decision 110.
+///
+/// **Only RESPONSE, and only from unset.** FR-3 carries two blockers over an
+/// included Responses column — Backend only refuses the commit, and unset
+/// refuses the commit — so Reviewer-visible is the single committable answer and
+/// the no-default rule was charging an admin a tick to reach a conclusion
+/// already forced. For OTHER and DEMOGRAPHIC both states are genuinely
+/// available and mean different things, which is the case decision 108 was
+/// written about; the rule stands there untouched.
+///
+/// **From unset only**, so this never overwrites a decision. An admin who
+/// deliberately ticks Backend only on a Responses column keeps that `false` and
+/// is refused at commit — which is 108's gate doing its job, not this default
+/// failing to. Nor does it fire on a column already `true`.
+///
+/// **Excluded columns are left alone.** An excluded column resolves hidden and
+/// is not committable-blocking either way, so defaulting it would write a choice
+/// nobody is being asked for — and it would then survive being re-included,
+/// which is the one path by which this could hand out visibility unasked.
+///
+/// A predicate rather than a mutation so the two mapping actions and their tests
+/// all read the same sentence. DEMOGRAPHIC cannot reach `true` here anyway: the
+/// category is wrong, and both actions refuse a `true` on it independently.
+export function shouldDefaultReviewerVisible(source: {
+  category: FieldCategory;
+  isIncluded: boolean;
+  isReviewerVisible: boolean | null;
+}): boolean {
+  if (source.category !== FieldCategory.RESPONSE) return false;
+  if (!source.isIncluded) return false;
+  return source.isReviewerVisible === null;
+}
+
 /// The ids a viewer may see. Every reviewer-facing query selects through this
 /// and projects `Applicant.data` down to the result on the server — §6 requires
 /// a hidden field be absent from the response, not hidden by the client.

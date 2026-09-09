@@ -64,6 +64,10 @@ async function loadFunnel(instanceId: string): Promise<Funnel> {
         category: true,
         isIncluded: true,
         isReviewerVisible: true,
+        // Decision 118's shape carries on `DemographicColumn`. FR-19's funnel
+        // renders its own percentage format and is deliberately unchanged by
+        // 118; this is here because the two share `demographicColumns`.
+        isMultiSelect: true,
       },
     }),
   ]);

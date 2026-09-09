@@ -29,6 +29,9 @@ export interface DemographicField extends FieldLike {
 export interface DemographicGroup extends FieldGroupLike {
   displayName: string;
   ordinal: number;
+  /// §5's flag: can members be checked together? Decision 118 formats a
+  /// multi-select column's proportion differently from a single-select one.
+  isMultiSelect: boolean;
 }
 
 export interface DemographicColumn {
@@ -38,6 +41,14 @@ export interface DemographicColumn {
   /// Set for a grouped column. FR-11's breakdown runs over these; an ungrouped
   /// single-value field has no 1/n to compute.
   members: GroupMember[] | null;
+  /// Whether one applicant can hold several of this column's values — the
+  /// group's `isMultiSelect`, false for an ungrouped field.
+  ///
+  /// Decision 118 formats the two differently, and it reads the flag off the
+  /// COLUMN rather than off the answers: a Yes/No column where everyone happens
+  /// to answer once is still single-select, and reading it from the data would
+  /// make the format flicker between one cohort and the next.
+  isMultiSelect: boolean;
 }
 
 /// The demographic columns this viewer may see, in the order the source CSV had
@@ -67,6 +78,9 @@ export function demographicColumns(
         key: field.id,
         label: field.displayName,
         members: null,
+        // An ungrouped field holds one value, so it is single-select by
+        // construction rather than by configuration.
+        isMultiSelect: false,
         ordinal: field.ordinal,
       });
       continue;
@@ -85,6 +99,7 @@ export function demographicColumns(
         key: group.id,
         label: group.displayName,
         members: [member],
+        isMultiSelect: group.isMultiSelect,
         // Sorts where its first member sits, matching how the seed places it.
         ordinal: group.ordinal,
       });
@@ -93,7 +108,7 @@ export function demographicColumns(
 
   return [...columns.values()]
     .sort((a, b) => a.ordinal - b.ordinal)
-    .map(({ key, label, members }) => ({ key, label, members }));
+    .map(({ key, label, members, isMultiSelect }) => ({ key, label, members, isMultiSelect }));
 }
 
 /// One applicant's answer in one column.
@@ -235,3 +250,26 @@ export function columnLabels(column: DemographicColumn): string[] {
     .filter((member) => member.groupRole === FieldGroupRole.OPTION)
     .map((member) => member.displayName);
 }
+
+// ---------------------------------------------------------------------------
+// PRD decision 118 — the panel states the denominator it sums to
+// ---------------------------------------------------------------------------
+
+/// One row of a breakdown, rendered.
+///
+/// **Nothing about the counting changes here.** §10.7's `1/n` weighting, the
+/// `NOT_SPECIFIED` bucket and the checked predicate are all exactly as
+/// `tallySelections` computes them. This is the formatting decision 118 makes on
+/// top: print the size of the set the weighted column already sums to, so the
+/// number is a proportion rather than a fractional person with no scale.
+export function formatTally(tally: DemographicTally, poolSize: number, multiSelect: boolean): string {
+  // A single-select column cannot be multi-selected, so n is always 1, weighted
+  // and headcount are identically equal, and a parenthesised count would just
+  // repeat the numerator. Decision 118's "applicable / total".
+  if (!multiSelect) return `${tally.headcount}/${poolSize}`;
+
+  // One decimal, because that is what a 1/n weighting produces and rounding it
+  // to a whole person would make the column stop summing to the pool.
+  return `${tally.weighted.toFixed(1)}/${poolSize} (${tally.headcount})`;
+}
+

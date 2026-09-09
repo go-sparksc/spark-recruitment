@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { tallySelections } from "@/lib/demographics";
+import { applicantLabel } from "@/lib/review";
 import type { FirstRoundResultRow } from "@/lib/first-round";
 import { formatYesPercent, hasNoVotes } from "@/lib/results";
 
@@ -53,6 +54,17 @@ export function FirstRoundResultsTable({
   );
 
   const pool = useMemo(() => rows.filter((row) => row.inPool), [rows]);
+
+  // The "moved on" filter. Client state rather than a URL parameter, unlike
+  // FR-10's — this page has no other filters to compose with and no threshold
+  // worth linking, so a query string would be machinery for one boolean. It is
+  // offered only once the round is finalized: before then nobody has advanced,
+  // and the control would empty the table.
+  const [advancedOnly, setAdvancedOnly] = useState(false);
+  const visible = useMemo(
+    () => (advancedOnly ? rows.filter((row) => row.advanced) : rows),
+    [rows, advancedOnly],
+  );
   const chosen = useMemo(() => pool.filter((row) => selected.has(row.id)), [pool, selected]);
 
   // FR-15, same sentence as decision 44's for the written round: the
@@ -73,6 +85,27 @@ export function FirstRoundResultsTable({
 
   return (
     <div className="space-y-6">
+      {selectable ? null : (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setAdvancedOnly((current) => !current)}
+            className={
+              advancedOnly
+                ? "bg-foreground text-background rounded-md px-3 py-1.5 text-sm"
+                : "hover:bg-muted rounded-md border px-3 py-1.5 text-sm"
+            }
+          >
+            Moved on
+          </button>
+          <span className="text-muted-foreground text-sm">
+            {advancedOnly
+              ? `${visible.length} of ${rows.length} advanced to the second round`
+              : `${rows.length} applicants`}
+          </span>
+        </div>
+      )}
+
       <Table>
         <TableHeader>
           <TableRow>
@@ -84,7 +117,10 @@ export function FirstRoundResultsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
+          {/* `visible`, not `rows` — the filter narrows what is drawn. The
+              breakdown below still runs over `pool`, and the ranks the rows
+              carry are their place in the whole cohort, both deliberately. */}
+          {visible.map((row) => (
             <TableRow key={row.id}>
               {selectable ? (
                 <TableCell>
@@ -99,7 +135,19 @@ export function FirstRoundResultsTable({
                 </TableCell>
               ) : null}
               <TableCell className="text-muted-foreground tabular-nums">{row.rank}</TableCell>
-              <TableCell className="font-medium">{row.displayName}</TableCell>
+              {/* The handle beside the name, and on this screen it is the one
+                  that matters most. Names collide — the seed carries two "Diego
+                  Hoffmann" — and these rows sit beside the checkboxes that
+                  advance or reject. On FR-14's list the same collision cost a
+                  reviewer opening the wrong profile; here it costs advancing the
+                  wrong applicant. Phase 6 fixed this on FR-18's grid and 9.2 on
+                  the first-round list; this was the third place it was missing. */}
+              <TableCell className="font-medium">
+                {row.displayName}
+                <span className="text-muted-foreground ml-2 text-xs font-normal">
+                  {applicantLabel(row.sourceRowIndex)}
+                </span>
+              </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatYesPercent(row.yesPercent)}
               </TableCell>
@@ -164,6 +212,9 @@ export function FirstRoundResultsTable({
                   pool.map((row) => row.selections[column.key] ?? []),
                   column.labels,
                 )}
+                selectionSize={chosen.length}
+                poolSize={pool.length}
+                isMultiSelect={column.isMultiSelect}
               />
             ))}
           </div>
@@ -191,10 +242,15 @@ export function FirstRoundResultsTable({
                   applicant nobody voted on records a decision nobody made. Named,
                   not counted — a number is something to click past. */}
               {unvotedRejects.length > 0 ? (
+                // Named with their handles, for the same reason the row carries
+                // one: this list can otherwise print "Diego Hoffmann, Diego
+                // Hoffmann" and leave an admin unable to tell which two.
                 <p className="text-destructive text-sm">
                   {unvotedRejects.length} of those being rejected had no votes at all:{" "}
-                  {unvotedRejects.map((row) => row.displayName).join(", ")}. Rejecting them records
-                  a decision nobody made.
+                  {unvotedRejects
+                    .map((row) => `${row.displayName} (${applicantLabel(row.sourceRowIndex)})`)
+                    .join(", ")}
+                  . Rejecting them records a decision nobody made.
                 </p>
               ) : null}
 

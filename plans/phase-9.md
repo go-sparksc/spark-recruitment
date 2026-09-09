@@ -393,16 +393,91 @@ to the real contract rather than the function bent to fit it.
 - [x] The return confirm names the pairing and all three consequences.
 - [x] Submit stays disabled while the note is empty — the note is required.
 - [x] `prerequisiteBlock`, nine cases, including the ordering of the named fix.
-- [ ] **The refusal itself was not clicked.** No reviewer in any instance lacks
-      `WRITTEN` — the seed always creates them into it — so the state cannot be
-      reached without writing one, and the only unlocked instance is the
-      reference demo. Covered by unit test rather than by eye.
-- [ ] **The return was not executed.** Writing it puts a permanent decision-23
-      exclusion on the reference instance; the panel was opened and cancelled.
+- [x] **The refusal, clicked.** Staged on a throwaway (`seed_p94`) with a probe
+      reviewer holding `rounds: []` — a state no product path creates, which is
+      why it needed staging. Ticking their first-round box reverted the checkbox
+      and rendered, directly under that row: *"A reviewer joins the first round
+      only after the written round… Add them to the written round first."* The
+      database kept `rounds: []`, so the refusal held on both sides.
+- [x] **The return, executed.** `Lars Ansari` on Applicant 1, carrying four
+      scores. Afterwards: `status = RETURNED_TO_POOL`, `returnReason = OTHER`,
+      `returnedAt` set, the note stored verbatim, **all four scores intact**, and
+      one audit row `RETURN_ASSIGNMENT_TO_POOL` whose payload names
+      `keptScoreCount: 4` — the field that distinguishes it from unassign's
+      `deletedScoreCount` at a glance. The applicant dropped to two active
+      reviewers, so the slot reads as open to `openPoolFor`, which is the whole
+      point of a return over an unassign.
+
+Both needed the owner to unlock the instance first: entering a password is off
+limits, so a throwaway is only reachable with one manual step from them.
+
+**Two false alarms during this gate, neither a defect.** I reported "no POST
+fired" and then "no refusal rendered"; both were me reading the dev-server log
+and the DOM before the round trip had finished. The click coordinates were also
+suspected and were fine — a recorder attached to `document` showed the click
+landing on the right element at the right point. Recorded because I said the
+wrong thing out loud twice before saying the right one, and the next person
+tempted to blame the harness should check timing first.
+
+**One harness fact worth keeping:** `computer` click coordinates are in
+**screenshot** space, which is ~1.33× the viewport here. Compute them as
+`rect * (screenshotWidth / window.innerWidth)`; a click aimed at raw viewport
+coordinates silently lands somewhere else and looks exactly like a dead control.
 
 ---
 
-## Slice 9.5
+## Slice 9.5 — admin surfaces
 
-Scope is in `BUILD_PLAN.md`'s Phase 9 section, and now carries decision 110 and
-the AI-flag tooltip as well.
+Decisions 110 and 118, plus the five straightforward items, the two missing
+handles found by 9.2's audit, and 116's tooltip.
+
+**Decision 110** is `shouldDefaultReviewerVisible` in `lib/fields.ts`, applied by
+both mapping actions at the moment a category is chosen — which is the only
+moment a column can become RESPONSE, since FR-2's importer never guesses one.
+The clause that earns its keep is the third: an **excluded** Responses column is
+left alone, because defaulting it would write a choice nobody was asked for and
+that choice would then survive being re-included. That is the one path by which
+this could hand out visibility unasked, and it is closed. A cross-check asserts
+the columns it defaults are exactly the ones `mustChooseVisibility` would have
+reported outstanding, so the default and FR-3's blocker cannot describe
+different sets.
+
+**Decision 118** is `formatTally`. Nothing about §10.7's counting changed — the
+`1/n` weighting, the `Not specified` bucket and the checked predicate are
+untouched; what changed is that the panel now prints the denominator it was
+always summing to. Two shapes: `1.0/9 (2)` for a multi-select column,
+`33/150` for a single-select one, where the second is the general rule with two
+of its three numbers coinciding rather than a special case. `isMultiSelect` is
+read off the **column**, not off the observed answers, so the format cannot
+flicker between two cohorts of the same question.
+
+Each column carries its own denominator — the selection's size on the left, the
+pool's on the right. A shared one would belong to one of them and quietly
+misdescribe the other.
+
+**The invariant is re-asserted through the formatter**, not only through
+`tallySelections`: the printed numerators of a whole breakdown sum to the printed
+denominator, over a set containing a single-selector, a multi-selector and a
+non-responder together, which is the only combination where it can fail.
+
+**Also in this slice.** Ethnicity cells wrap instead of truncating — `truncate`
+is `white-space: nowrap` with the full value only on `title`, and a touch screen
+has no hover, so the value was unreadable rather than merely clipped. 116's
+tooltip gained "N of M completed reviews". `Applicant N` handles landed on
+FR-15's ranked table, its confirm panel (which could print one name twice) and
+the first-round profile. "Moved on" filters on both results pages, offered only
+once the round is finalized — before that nobody has advanced and the control
+would empty the table. `No group` capitalised, and the group dropdown moved
+below category and visibility, so the three FR-2 questions read in the order an
+admin works through them and the one that overrides the others reads last.
+
+**The back button is an anchor, not a button.** Decision 33 measured ~640 ms
+where an `onClick` control is silently inert, and this is the one control an
+admin reaches for after opening an applicant from a filtered results view. It
+renders as a real `<a href>` to a server-supplied fallback and upgrades to
+`router.back()` on click — so it works with no JavaScript, during hydration, and
+middle-clicks like a link. `fallback` is required rather than defaulted, which
+forces every caller to answer "where does this go when there is no history",
+a real case for anyone opening a link from Slack.
+
+**Gate:** not yet run.

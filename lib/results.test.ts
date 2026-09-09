@@ -253,7 +253,7 @@ describe("rankApplicants", () => {
 // ---------------------------------------------------------------------------
 
 const TARGET = 3;
-const off = { incompleteOnly: false, minVariance: null };
+const off = { incompleteOnly: false, minVariance: null, advancedOnly: false };
 
 describe("applyResultFilters", () => {
   it("is a no-op when both filters are off", () => {
@@ -296,10 +296,49 @@ describe("applyResultFilters", () => {
     ];
     const found = applyResultFilters(
       rows,
-      { incompleteOnly: true, minVariance: 0.5 },
+      { incompleteOnly: true, minVariance: 0.5, advancedOnly: false },
       TARGET,
     );
     expect(found.map((r) => r.sourceRowIndex)).toEqual([3]);
+  });
+
+  /// The "moved on" filter, added with decision 9.5's straightforward items.
+  /// Reads `advanced`, which the page derives from `stageReached` rather than
+  /// from a `Decision` row — FR-11's finalize writes one for everybody either
+  /// way, so a decision's existence says only that the round was finalized.
+  it("moved-on keeps only the applicants the round advanced", () => {
+    const rows = [
+      { ...row(1, 3.0, 0.0, 3), advanced: true },
+      { ...row(2, 2.0, 0.0, 3), advanced: false },
+      { ...row(3, 4.0, 0.0, 3), advanced: true },
+    ];
+    const found = applyResultFilters(rows, { ...off, advancedOnly: true }, TARGET);
+    expect(found.map((r) => r.sourceRowIndex)).toEqual([1, 3]);
+  });
+
+  /// Composed with the others by AND, like they are with each other — "who moved
+  /// on, of the high-variance ones" is a real question.
+  it("moved-on composes with the variance threshold", () => {
+    const rows = [
+      { ...row(1, 3.0, 1.0, 3), advanced: true },
+      { ...row(2, 3.0, 1.0, 3), advanced: false },
+      { ...row(3, 3.0, 0.0, 3), advanced: true },
+    ];
+    const found = applyResultFilters(
+      rows,
+      { incompleteOnly: false, minVariance: 0.5, advancedOnly: true },
+      TARGET,
+    );
+    expect(found.map((r) => r.sourceRowIndex)).toEqual([1]);
+  });
+
+  /// A row that predates the flag — or one from a round with no notion of
+  /// advancing — is excluded rather than assumed advanced. Failing closed is
+  /// right here: an admin filtering to "moved on" should never be shown someone
+  /// the system is unsure about.
+  it("treats a missing advanced flag as not advanced", () => {
+    const rows = [row(1, 3.0, 0.0, 3)];
+    expect(applyResultFilters(rows, { ...off, advancedOnly: true }, TARGET)).toHaveLength(0);
   });
 
   it("measures incompleteness against the given target, not a hardcoded 3", () => {

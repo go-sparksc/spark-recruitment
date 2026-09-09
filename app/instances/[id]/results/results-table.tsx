@@ -27,6 +27,10 @@ export interface ResultRow {
   average: number | null;
   variance: number | null;
   completedCount: number;
+  /// Whether the round advanced this applicant. Drives the "moved on" filter,
+  /// which is offered only once the round is finalized — before that nobody has
+  /// moved on and the control would empty the table.
+  advanced: boolean;
   /// How many of this applicant's reviewers ticked decision 116's box. A count
   /// rather than a boolean: one reviewer suspecting and two not is a different
   /// signal from all three suspecting, and collapsing them would throw away the
@@ -43,6 +47,10 @@ export interface RankedRow extends ResultRow {
 export interface ResultsFilters {
   incompleteOnly: boolean;
   minVariance: number | null;
+  /// Only the applicants the round advanced. Shares the `only` query parameter
+  /// with `incompleteOnly`, which is why both are links rather than checkboxes:
+  /// they ask opposite questions and cannot both be on.
+  advancedOnly: boolean;
   basePath: string;
 }
 
@@ -88,9 +96,15 @@ export function ResultsTable({
 
   // Omits defaults so a URL stays clean and an unfiltered view has no query
   // string at all. Same shape as assignment-controls.tsx's href builder.
+  // `only` carries one of two mutually exclusive values, which is why the two
+  // filters that use it are links rather than checkboxes: "incomplete" and
+  // "advanced" ask opposite questions (who still needs reading, who already got
+  // through), and a URL that claimed both would have to mean neither.
+  const currentOnly = filters.incompleteOnly ? "incomplete" : filters.advancedOnly ? "advanced" : "";
+
   const href = (over: Partial<{ only: string; minVar: string }>) => {
     const params = new URLSearchParams();
-    const only = over.only ?? (filters.incompleteOnly ? "incomplete" : "");
+    const only = over.only ?? currentOnly;
     const minVar = over.minVar ?? (filters.minVariance === null ? "" : String(filters.minVariance));
     if (only !== "") params.set("only", only);
     if (minVar !== "") params.set("minVar", minVar);
@@ -98,7 +112,7 @@ export function ResultsTable({
     return query === "" ? filters.basePath : `${filters.basePath}?${query}`;
   };
 
-  const filtered = filters.incompleteOnly || filters.minVariance !== null;
+  const filtered = currentOnly !== "" || filters.minVariance !== null;
 
   return (
     <div className="space-y-4">
@@ -141,6 +155,24 @@ export function ResultsTable({
         >
           Incomplete
         </Link>
+
+        {/* Offered only once the round is finalized, which is exactly when
+            `selectable` goes false. Before that nobody has moved on, so the
+            control would empty the table and read as a bug rather than as an
+            answer — the Slice 4 rule again, that a surface should not offer
+            something that cannot work yet. */}
+        {selectable ? null : (
+          <Link
+            href={href({ only: filters.advancedOnly ? "" : "advanced" })}
+            className={
+              filters.advancedOnly
+                ? "bg-foreground text-background rounded-md px-3 py-1.5 text-sm"
+                : "hover:bg-muted rounded-md border px-3 py-1.5 text-sm"
+            }
+          >
+            Moved on
+          </Link>
+        )}
 
         {/* A plain GET form, so the threshold survives a revalidate and can be
             linked. Still "not persisted" in FR-10's sense: nothing writes it to
@@ -252,7 +284,16 @@ export function ResultsTable({
                   {row.aiFlagCount > 0 ? (
                     <span
                       className="text-amber-700"
-                      title={`${row.aiFlagCount} of this applicant's reviewers thought the writing looked AI-generated. Open the applicant to see who, and read the application again.`}
+                      // Decision 118's sibling problem, and 116 records the
+                      // reasoning: the denominator is COMPLETED reviews, not
+                      // assigned reviewers. `suspectedAiUse` defaults to false,
+                      // so a reviewer who never opened the application reads
+                      // identically to one who read it and did not suspect —
+                      // "1 of 3 assigned" would claim three people considered it
+                      // when perhaps one has. It stays in the tooltip rather
+                      // than the cell so it cannot be misread as a fraction
+                      // against the review-count column's target.
+                      title={`${row.aiFlagCount} of ${row.completedCount} completed review${row.completedCount === 1 ? "" : "s"} thought the writing looked AI-generated. Open the applicant to see who, and read the application again.`}
                     >
                       ⚑ {row.aiFlagCount}
                     </span>
@@ -276,10 +317,20 @@ function DemographicCell({ cell }: { cell: ApplicantDemographic | undefined }) {
   const selected = cell?.selected ?? [];
   const writeIn = cell?.writeIn ?? "";
 
+  // **Wraps rather than truncating.** These used to be `truncate`, which is
+  // `white-space: nowrap` plus an ellipsis, with the full value only on the
+  // native `title` — so a multi-select ethnicity like "East Asian, White,
+  // Middle Eastern" was clipped with no way to read the rest on a touch screen,
+  // where there is no hover. The width cap stays, because an unbounded column
+  // pushes the rest of FR-10's table off screen; the cell grows downward
+  // instead. `title` is kept as a convenience for a mouse, not as the only way.
   if (selected.length > 0) {
     const text = selected.join(", ");
     return (
-      <TableCell className="text-muted-foreground max-w-[16rem] truncate text-sm" title={text}>
+      <TableCell
+        className="text-muted-foreground max-w-[16rem] text-sm break-words whitespace-normal"
+        title={text}
+      >
         {text}
       </TableCell>
     );
@@ -287,11 +338,12 @@ function DemographicCell({ cell }: { cell: ApplicantDemographic | undefined }) {
 
   // §10.7: a write-in author has given a real answer the count cannot read.
   // Shown in italics so it does not look like a selected option, since it is
-  // not one and is not counted as one.
+  // not one and is not counted as one. Free text is the likelier of the two to
+  // be long, so the wrap matters more here than above.
   if (writeIn !== "") {
     return (
       <TableCell
-        className="text-muted-foreground max-w-[16rem] truncate text-sm italic"
+        className="text-muted-foreground max-w-[16rem] text-sm italic break-words whitespace-normal"
         title={writeIn}
       >
         {writeIn}

@@ -128,6 +128,10 @@ export default async function ResultsPage({
         category: true,
         isIncluded: true,
         isReviewerVisible: true,
+        // Decision 118: a multi-select column's proportion is formatted
+        // differently from a single-select one, and the flag is a property of
+        // the group rather than of the answers observed.
+        isMultiSelect: true,
       },
     }),
     prisma.reviewer.count({ where: { instanceId: id, rounds: { has: ROUND } } }),
@@ -156,6 +160,11 @@ export default async function ResultsPage({
       // sort key and not a filter — it is a reason to read the application
       // again, not a rank.
       aiFlagCount: applicant.assignments.filter((a) => a.suspectedAiUse).length,
+      // "Moved on" for the written round: FR-11's finalize advances
+      // `stageReached` past WRITTEN on exactly the applicants it selected, and
+      // leaves it at WRITTEN on the rest. Read here rather than from a
+      // `Decision` row, which exists for everyone either way.
+      advanced: applicant.stageReached !== Round.WRITTEN,
       demographics: applicantDemographics(applicant.data as ApplicantData, columns),
     };
   });
@@ -163,6 +172,7 @@ export default async function ResultsPage({
   const filters = {
     incompleteOnly: only === "incomplete",
     minVariance: parseVarianceThreshold(minVar),
+    advancedOnly: only === "advanced",
   };
 
   // Rank first, then filter, so the rank number a row carries is its place in
@@ -217,6 +227,7 @@ export default async function ResultsPage({
           key: column.key,
           label: column.label,
           labels: columnLabels(column),
+          isMultiSelect: column.isMultiSelect,
         }))}
         target={target}
         totalCount={ranked.length}

@@ -492,59 +492,6 @@ export function ColumnControls({
           <option value={PromotedRole.NAME}>Name column</option>
         </select>
 
-        <select
-          className={SELECT}
-          value={column.groupId ?? ""}
-          disabled={pending || promoted || frozen}
-          title={frozen ? `Grouping is ${FROZEN_NOTE}` : undefined}
-          aria-label="Group"
-          onChange={(e) => {
-            const value = e.target.value;
-            if (value === "__new__") {
-              setCreatingGroup(true);
-              return;
-            }
-            run(() =>
-              assignToGroup(
-                instanceId,
-                column.id,
-                value === "" ? null : value,
-                value === "" ? null : (column.groupRole ?? FieldGroupRole.OPTION),
-              ),
-            );
-          }}
-        >
-          <option value="">no group</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.displayName}
-            </option>
-          ))}
-          <option value="__new__">New group…</option>
-        </select>
-
-        {grouped ? (
-          <select
-            className={SELECT}
-            value={column.groupRole ?? FieldGroupRole.OPTION}
-            disabled={pending || frozen}
-            title={frozen ? `The role in the group is ${FROZEN_NOTE}` : undefined}
-            aria-label="Role in group"
-            onChange={(e) =>
-              run(() =>
-                assignToGroup(
-                  instanceId,
-                  column.id,
-                  column.groupId,
-                  e.target.value as FieldGroupRole,
-                ),
-              )
-            }
-          >
-            <option value={FieldGroupRole.OPTION}>option (counted)</option>
-            <option value={FieldGroupRole.FREE_TEXT}>write-in (not counted)</option>
-          </select>
-        ) : null}
       </div>
 
       {creatingGroup ? (
@@ -638,6 +585,69 @@ export function ColumnControls({
           <span className="text-muted-foreground text-xs">
             promoted out of the data at commit — cannot be excluded
           </span>
+        ) : null}
+      </div>
+
+      {/* Grouping moved below the category and visibility controls. It used to
+          sit up in the identity row beside the display name and the
+          designation, which put the three FR-2 decisions an admin actually
+          works through — what is this, is it included, who sees it — out of
+          order and split across two rows. Group membership is the one that
+          overrides the others (§5: the group's values win), so it reads last,
+          where its effect on what is above it is visible. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          className={SELECT}
+          value={column.groupId ?? ""}
+          disabled={pending || promoted || frozen}
+          title={frozen ? `Grouping is ${FROZEN_NOTE}` : undefined}
+          aria-label="Group"
+          onChange={(e) => {
+            const value = e.target.value;
+            if (value === "__new__") {
+              setCreatingGroup(true);
+              return;
+            }
+            run(() =>
+              assignToGroup(
+                instanceId,
+                column.id,
+                value === "" ? null : value,
+                value === "" ? null : (column.groupRole ?? FieldGroupRole.OPTION),
+              ),
+            );
+          }}
+        >
+          <option value="">No group</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.displayName}
+            </option>
+          ))}
+          <option value="__new__">New group…</option>
+        </select>
+
+        {grouped ? (
+          <select
+            className={SELECT}
+            value={column.groupRole ?? FieldGroupRole.OPTION}
+            disabled={pending || frozen}
+            title={frozen ? `The role in the group is ${FROZEN_NOTE}` : undefined}
+            aria-label="Role in group"
+            onChange={(e) =>
+              run(() =>
+                assignToGroup(
+                  instanceId,
+                  column.id,
+                  column.groupId,
+                  e.target.value as FieldGroupRole,
+                ),
+              )
+            }
+          >
+            <option value={FieldGroupRole.OPTION}>option (counted)</option>
+            <option value={FieldGroupRole.FREE_TEXT}>write-in (not counted)</option>
+          </select>
         ) : null}
       </div>
 

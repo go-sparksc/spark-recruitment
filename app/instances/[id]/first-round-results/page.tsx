@@ -68,6 +68,8 @@ export default async function FirstRoundResultsPage({
         category: true,
         isIncluded: true,
         isReviewerVisible: true,
+        // Decision 118, as on FR-10's page.
+        isMultiSelect: true,
       },
     }),
   ]);
@@ -142,6 +144,7 @@ export default async function FirstRoundResultsPage({
           key: column.key,
           label: column.label,
           labels: columnLabels(column),
+          isMultiSelect: column.isMultiSelect,
         }))}
         selectable={selectable}
       />

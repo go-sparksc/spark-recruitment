@@ -6,6 +6,7 @@ import {
   applicantDemographics,
   columnLabels,
   demographicColumns,
+  formatTally,
   tallySelections,
   type DemographicField,
   type DemographicGroup,
@@ -160,6 +161,9 @@ function group(overrides: Partial<DemographicGroup> = {}): DemographicGroup {
     category: FieldCategory.DEMOGRAPHIC,
     isIncluded: true,
     isReviewerVisible: null,
+    // The ethnicity group this fixture stands for is the multi-select one §10.7
+    // is written about, so that is the honest default here.
+    isMultiSelect: true,
     ...overrides,
   };
 }
@@ -249,5 +253,69 @@ describe("columnLabels", () => {
     // what keeps it out of the count.
     const columns = demographicColumns(ONE_HOT, [ETHNICITY_GROUP]);
     expect(columnLabels(columns[0])).toEqual(["East Asian", "White"]);
+  });
+});
+
+describe("formatTally — PRD decision 118", () => {
+  /// The worked example from the decision: two applicants who each ticked two
+  /// boxes contribute 0.5 apiece, so the weighted total is 1.0 against a pool of
+  /// 9, ticked by 2 people.
+  it("renders a multi-select row as weighted/pool (headcount)", () => {
+    expect(formatTally({ label: "East Asian", weighted: 1, headcount: 2 }, 9, true)).toBe(
+      "1.0/9 (2)",
+    );
+  });
+
+  it("keeps one decimal, because that is what a 1/n weighting produces", () => {
+    // 12.5 of 150, ticked by 18 — the example §10.7 itself uses. Rounding to a
+    // whole person would stop the column summing to the pool.
+    expect(formatTally({ label: "East Asian", weighted: 12.5, headcount: 18 }, 150, true)).toBe(
+      "12.5/150 (18)",
+    );
+  });
+
+  /// **Not a special case — the general rule where two of its three numbers
+  /// coincide.** A single-select column cannot be multi-selected, so n is always
+  /// 1, weighted equals headcount, and the bracketed number would repeat the
+  /// numerator.
+  it("renders a single-select row as applicable/total, with no bracket", () => {
+    expect(formatTally({ label: "Yes", weighted: 33, headcount: 33 }, 150, false)).toBe("33/150");
+    expect(formatTally({ label: "No", weighted: 117, headcount: 117 }, 150, false)).toBe("117/150");
+  });
+
+  it("renders a zero row rather than hiding it", () => {
+    // `tallySelections` keeps zero rows deliberately — "nobody selected this" is
+    // a finding, and two cohorts have to line up side by side.
+    expect(formatTally({ label: "Pacific Islander", weighted: 0, headcount: 0 }, 9, true)).toBe(
+      "0.0/9 (0)",
+    );
+    expect(formatTally({ label: "Yes", weighted: 0, headcount: 0 }, 150, false)).toBe("0/150");
+  });
+
+  /// The empty-selection case the panel renders before anyone ticks a checkbox.
+  /// A zero denominator is not an error state here; it is the honest reading of
+  /// "nothing is selected yet", and the panel is always rendered per FR-11.
+  it("survives a pool of zero", () => {
+    expect(formatTally({ label: "East Asian", weighted: 0, headcount: 0 }, 0, true)).toBe(
+      "0.0/0 (0)",
+    );
+  });
+
+  /// **The invariant, restated through the formatter.** §10.7 says the weighted
+  /// column sums to the size of the set counted — so the numerators of a whole
+  /// breakdown, denominators included, have to add back up to the denominator.
+  /// Asserted over a set containing a single-selector, a multi-selector and a
+  /// non-responder together, because it only fails when all three are present.
+  it("prints numerators that sum to the denominator it prints", () => {
+    const rows = tallySelections(
+      [["East Asian"], ["East Asian", "White"], []],
+      ["East Asian", "White"],
+    );
+
+    const printed = rows.map((row) => formatTally(row, 3, true));
+    const numerators = printed.map((text) => Number(text.split("/")[0]));
+
+    expect(numerators.reduce((sum, value) => sum + value, 0)).toBeCloseTo(3, 10);
+    expect(printed.every((text) => text.endsWith("(1)") || text.includes("/3 "))).toBe(true);
   });
 });
