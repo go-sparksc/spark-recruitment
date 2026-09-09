@@ -184,7 +184,7 @@ export function RubricBuilder({
               <p className="text-xs font-medium">
                 What each score means{" "}
                 <span className="text-muted-foreground font-normal">
-                  — optional, shown beside the reviewer&rsquo;s score buttons
+                  — optional, shown above the reviewer&rsquo;s score buttons
                 </span>
               </p>
 

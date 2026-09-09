@@ -142,7 +142,7 @@ export function RosterControls({
   return (
     <div className="space-y-10">
       {canCreateReviewers ? (
-        <AddReviewerForm instanceId={instanceId} round={round} roundLabel={roundLabel(round)} />
+        <AddReviewerForm instanceId={instanceId} round={round} />
       ) : rosterFixed ? (
         // Decision 84 has already said this roster cannot change at all, in its
         // own banner above. Repeating decision 115's "tick them in on the grid
@@ -163,8 +163,8 @@ export function RosterControls({
           <div className="space-y-1.5">
             <Label htmlFor="paste">Or paste names, one per line</Label>
             <p className="text-muted-foreground text-sm">
-              Everyone pasted joins the {roundLabel(round).toLowerCase()} as a non-Sparklet. Set the
-              Sparklet flag and any other rounds in the grid below.
+              Everyone pasted joins the written round as a non-Sparklet. Set the Sparklet flag and
+              any other rounds in the grid below.
             </p>
           </div>
           <textarea
@@ -331,16 +331,12 @@ export function RosterControls({
   );
 }
 
-/// FR-6's primary path: first name, last name, Sparklet checkbox.
-function AddReviewerForm({
-  instanceId,
-  round,
-  roundLabel,
-}: {
-  instanceId: string;
-  round: Round;
-  roundLabel: string;
-}) {
+/// FR-6's primary path: first name, last name, Sparklet checkbox. Decision 115
+/// renders this on the written tab only, so the round is not a variable the copy
+/// has to accommodate any more — it says "written round" outright. `round` stays
+/// a prop because the action still takes one and must keep taking one: the
+/// server-side refusal is what makes the other rounds unreachable.
+function AddReviewerForm({ instanceId, round }: { instanceId: string; round: Round }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [isSparklet, setIsSparklet] = useState(false);
@@ -368,7 +364,7 @@ function AddReviewerForm({
       <div>
         <h2 className="text-sm font-medium">Add a reviewer</h2>
         <p className="text-muted-foreground text-sm">
-          Joins the {roundLabel.toLowerCase()}. Add them to other rounds in the grid below.
+          Joins the written round. Add them to other rounds in the grid below.
         </p>
       </div>
 
