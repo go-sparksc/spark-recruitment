@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { FieldCategory } from "@/generated/prisma/enums";
 import { grantInstance, requireAdmin } from "@/lib/auth";
+import { validateCurrentTerm } from "@/lib/class-standing";
 import { cleanHeader } from "@/lib/fields";
 import { detectGroups } from "@/lib/import/detect-groups";
 import { CsvParseError, parseCsv } from "@/lib/import/parse-csv";
@@ -34,6 +35,16 @@ export async function createInstance(
 
   if (name === "") return { error: "Give the instance a name, such as “S26 Recruitment”." };
   if (password.length < 8) return { error: "The instance password must be at least 8 characters." };
+
+  // Decision 119. Required, with no default, and immutable once written. Checked
+  // before the file is parsed so a missing semester costs the admin nothing but
+  // a sentence.
+  const term = validateCurrentTerm(
+    String(formData.get("currentTermSeason") ?? ""),
+    String(formData.get("currentTermYear") ?? ""),
+  );
+  if (!term.ok) return { error: term.error };
+
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file to import." };
   if (file.size > MAX_UPLOAD_BYTES) {
     return { error: "That file is larger than 8MB. A real application export is far smaller." };
@@ -62,6 +73,11 @@ export async function createInstance(
       data: {
         name,
         passwordHash,
+        // Written once, here, as a pair. Nothing updates these after creation
+        // except the settings page's set-once control, which only writes where
+        // both are still null.
+        currentTermSeason: term.term.season,
+        currentTermYear: term.term.year,
         // Every column starts OTHER, included, ungrouped. The importer never
         // guesses a category from header text: a wrong silent guess is worse
         // than an unset one, and OTHER carries the same effective visibility as

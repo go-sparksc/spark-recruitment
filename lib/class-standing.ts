@@ -105,3 +105,56 @@ export function classStanding(raw: unknown, current: Term): ClassStanding {
   if (semestersOut <= 5) return "Sophomore";
   return "Freshman";
 }
+
+// ---------------------------------------------------------------------------
+// The cycle's current semester, as an admin enters it
+// ---------------------------------------------------------------------------
+
+/// "Fall 2026". What the settings page shows once a semester is set, and what
+/// the confirmation copy names before it is.
+export function termLabel(term: Term): string {
+  return `${term.season === "FALL" ? "Fall" : "Spring"} ${term.year}`;
+}
+
+/// Bounds for an entered year. The same range as the database's
+/// `Instance_currentTermYear_range` CHECK, which is the backstop behind this and
+/// not a substitute for it: a value refused here gets a sentence, a value that
+/// reached the CHECK would get a stack trace.
+export const MIN_TERM_YEAR = 2000;
+export const MAX_TERM_YEAR = 2100;
+
+export type TermValidation = { ok: true; term: Term } | { ok: false; error: string };
+
+/// The creation form and the settings page's set-once control both post a season
+/// and a year, and both go through this, so the two entry points cannot come to
+/// disagree about what a semester is.
+///
+/// **Both are required and neither has a default**, per decision 119. The
+/// semester is immutable once written, so a value nobody chose would be a silent
+/// guess that then becomes permanent. An empty season is refused here rather
+/// than filled from the clock.
+///
+/// **The year must be written as four digits.** `26` is the mistake worth a
+/// sentence: it is a real year to `Number`, it would fail the database CHECK,
+/// and if it ever got past both it would put every applicant thousands of
+/// semesters out and read the whole pool Non-standard for the life of the cycle.
+export function validateCurrentTerm(season: string, year: string): TermValidation {
+  if (season !== "SPRING" && season !== "FALL") {
+    return { ok: false, error: "Choose whether this cycle runs in a Spring or a Fall semester." };
+  }
+
+  const trimmed = year.trim();
+  if (!/^\d{4}$/.test(trimmed)) {
+    return { ok: false, error: "Enter the semester's year as four digits, such as 2026." };
+  }
+
+  const value = Number(trimmed);
+  if (value < MIN_TERM_YEAR || value > MAX_TERM_YEAR) {
+    return {
+      ok: false,
+      error: `Enter a year between ${MIN_TERM_YEAR} and ${MAX_TERM_YEAR}.`,
+    };
+  }
+
+  return { ok: true, term: { season, year: value } };
+}

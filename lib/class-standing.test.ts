@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { classStanding, parseTerm, termIndex, type Term } from "@/lib/class-standing";
+import {
+  MAX_TERM_YEAR,
+  MIN_TERM_YEAR,
+  classStanding,
+  parseTerm,
+  termIndex,
+  termLabel,
+  validateCurrentTerm,
+  type Term,
+} from "@/lib/class-standing";
 
 // Decision 119's table is the spec. Every expected value below is written out
 // as a literal term string rather than computed from `termIndex`, so a wrong
@@ -158,5 +167,49 @@ describe("a non-string value is read as its text", () => {
   // anything, and a number must not throw.
   it("a bare number is off-format, not a crash", () => {
     expect(classStanding(2027, FALL_2026)).toBe("Non-standard");
+  });
+});
+
+describe("termLabel", () => {
+  it("names both seasons", () => {
+    expect(termLabel({ season: "FALL", year: 2026 })).toBe("Fall 2026");
+    expect(termLabel({ season: "SPRING", year: 2027 })).toBe("Spring 2027");
+  });
+});
+
+describe("validateCurrentTerm — the semester an admin enters", () => {
+  it("accepts a season and a four-digit year", () => {
+    expect(validateCurrentTerm("FALL", "2026")).toEqual({
+      ok: true,
+      term: { season: "FALL", year: 2026 },
+    });
+    expect(validateCurrentTerm("SPRING", " 2027 ")).toEqual({
+      ok: true,
+      term: { season: "SPRING", year: 2027 },
+    });
+  });
+
+  it.each([
+    ["no season chosen", ""],
+    ["a season outside the enum", "SUMMER"],
+    ["lowercase, which no form control sends", "fall"],
+  ])("refuses %s", (_label, season) => {
+    expect(validateCurrentTerm(season, "2026").ok).toBe(false);
+  });
+
+  it.each([
+    ["no year", ""],
+    ["a two-digit year", "26"],
+    ["a decimal", "2026.5"],
+    ["words", "twenty"],
+    ["below the range", "1999"],
+    ["above the range", "2101"],
+  ])("refuses %s", (_label, year) => {
+    expect(validateCurrentTerm("FALL", year).ok).toBe(false);
+  });
+
+  it("accepts both ends of the range, matching the database CHECK", () => {
+    expect(validateCurrentTerm("FALL", String(MIN_TERM_YEAR)).ok).toBe(true);
+    expect(validateCurrentTerm("FALL", String(MAX_TERM_YEAR)).ok).toBe(true);
   });
 });

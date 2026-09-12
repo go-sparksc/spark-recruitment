@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { auditActor } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, requireInstance } from "@/lib/auth";
+import { termLabel, validateCurrentTerm } from "@/lib/class-standing";
 import { hashSecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 
@@ -15,6 +16,81 @@ export interface DeleteState {
 export interface ResetPasswordState {
   error?: string;
   saved?: boolean;
+}
+
+export interface SetSemesterState {
+  error?: string;
+}
+
+/// Decision 119's set-once control, for instances created before the semester
+/// was collected at creation.
+///
+/// **`requireInstance`, not `requireAdmin` like its neighbours.** Reset and
+/// delete sit behind the app password alone because they are FR-5's recovery
+/// path. This is not recovery: it changes what every reviewer sees on every
+/// applicant, which is routine instance work and belongs behind the instance
+/// password, the same as the mapping table's visibility controls.
+///
+/// **Set once, enforced here and not only by hiding the form.** The write is a
+/// conditional `updateMany` on both columns still being null, so a replayed POST,
+/// a second tab, or two admins racing each other all land as a count of 0, and a
+/// count of 0 is refused. The database does not make the semester immutable — its
+/// CHECKs only hold the pair together and bound the year — so this condition is
+/// the whole of that rule.
+export async function setCurrentSemester(
+  _prev: SetSemesterState,
+  formData: FormData,
+): Promise<SetSemesterState> {
+  const instanceId = String(formData.get("instanceId") ?? "");
+  const session = await requireInstance(instanceId, `/instances/${instanceId}/settings`);
+
+  const term = validateCurrentTerm(
+    String(formData.get("currentTermSeason") ?? ""),
+    String(formData.get("currentTermYear") ?? ""),
+  );
+  if (!term.ok) return { error: term.error };
+
+  const outcome = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.instance.updateMany({
+      where: { id: instanceId, currentTermSeason: null, currentTermYear: null },
+      data: { currentTermSeason: term.term.season, currentTermYear: term.term.year },
+    });
+    if (count === 0) return "ALREADY_SET" as const;
+
+    // Audited per §8: it changes what reviewers see. previousValue is the null
+    // pair it replaced; the new value is on the instance itself.
+    await tx.auditLog.create({
+      data: {
+        instanceId,
+        ...auditActor(session),
+        action: "SET_CURRENT_SEMESTER",
+        entityType: "Instance",
+        entityId: instanceId,
+        previousValue: { currentTermSeason: null, currentTermYear: null },
+      },
+    });
+    return "SET" as const;
+  });
+
+  if (outcome === "ALREADY_SET") {
+    const existing = await prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { currentTermSeason: true, currentTermYear: true },
+    });
+    if (!existing) return { error: "No such instance." };
+    // Naming the value that stands, so an admin who raced someone else sees what
+    // won rather than a bare refusal.
+    const standing =
+      existing.currentTermSeason !== null && existing.currentTermYear !== null
+        ? termLabel({ season: existing.currentTermSeason, year: existing.currentTermYear })
+        : "a semester";
+    return {
+      error: `This instance's semester is already set to ${standing}, and it cannot be changed.`,
+    };
+  }
+
+  revalidatePath(`/instances/${instanceId}/settings`);
+  return {};
 }
 
 /// FR-5: "Never recoverable; recovery means an admin with app-level access
