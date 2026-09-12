@@ -242,3 +242,43 @@ cycle. A trainee would miss this without being told; it is now called out in ste
   skip. It also never said that names are visible from the first round on, or
   that a pass vote needs a separate submit where a first-round vote does not.
   All three are now in the guide, from the screen.
+
+---
+
+## What the gate found
+
+**Closed 2026-09-11.** A board member who had never used the tool went through
+`ADMIN_GUIDE.md` — the full walkthrough of one cycle against `demo-cycle.csv`,
+from creating the cycle and importing the file through mapping, the rubric, the
+roster and assignment, the access code, closing the written round, the interview
+import, the passes, publishing and the export. The guide was their only source.
+
+**Nothing pressing surfaced. The guide held up.** There is no list under this
+heading because there is nothing to list: no step left them stuck, and no
+documentation bug came out of the run. That is the gate passed on its own terms —
+the measure was always whether someone who has not seen the tool can get through
+a cycle on the document alone, and they did.
+
+**The decision, explicitly: Spark's first real cycle runs on the platform
+as-is.** Smaller improvements may come up later, and they are deferred until
+after that cycle. Nothing goes in before it — not guide edits, not app copy, not
+code. The one item already sitting under "Open, not fixed" above, the singular
+"1 detected group still need naming" on the mapping screen, stays open by this
+same rule rather than by its own.
+
+The reason is what the first real cycle is for. It is the only run that exercises
+the tool under real conditions — real applicants, real reviewers, real volume,
+people who are not testing it — and that evidence is worth more than any
+refinement anyone can name in advance. Changing the thing under test in the week
+before it runs spends that evidence to buy improvements nobody yet has a reason
+to believe are needed. Whatever the real cycle turns up will be worth more than
+whatever gets guessed at now, and it will arrive with a screen behind it.
+
+### Not a gate finding
+
+Separately, and not from the gate: the owner accidentally rejected an applicant
+in the written round. That happened during the owner's own setup testing, on a
+separate recovery instance, not during the board member's walkthrough. The board
+member never hit it and it is not a finding about the guide. It is recorded here
+only so that a later reader who hears about it does not go looking for it in the
+list above.
