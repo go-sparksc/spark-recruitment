@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.26, Phases 0-9 complete, decisions recorded through 118 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is complete and found nothing pressing (`plans/phase-8.md`). Spark's first real cycle is pending and runs as-is; any refinements wait until after it
+**Status:** v1.27, Phases 0-9 complete, decisions recorded through 119 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is complete and found nothing pressing (`plans/phase-8.md`). Spark's first real cycle is pending. The freeze ahead of it has one owner-approved exception, decision 119's class standing (`plans/decision-119.md`), which ships before that cycle; every other refinement still waits until after it
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -63,6 +63,15 @@ Instance
                                //   database guarantee. Stale proposals on a
                                //   committed instance would read as meaningful
                                //   and could contradict the FieldGroup rows.
+  currentTermSeason: SPRING | FALL   // nullable. The semester the cycle runs in,
+  currentTermYear              //   nullable int. Together they are the "now" that
+                               //   class standing counts from — decision 119.
+                               //   Collected at creation and IMMUTABLE once set;
+                               //   null only on instances created before 119,
+                               //   which get one set-once control on settings.
+  CHECK ((currentTermSeason IS NULL) = (currentTermYear IS NULL))
+                               // a half-set semester is not a semester
+  CHECK (currentTermYear IS NULL OR currentTermYear BETWEEN 2000 AND 2100)
 
 FieldGroup                     // several CSV columns forming one logical question
   id, instanceId
@@ -111,6 +120,11 @@ Field                          // one per CSV column
                                //   and resolves hidden. No default, and forced false
                                //   where category is DEMOGRAPHIC. The group's value
                                //   wins when groupId is set. See §6 and decision 108.
+  isGraduationDate             // bool, default false. FR-2's graduation-date
+                               //   designation: the column class standing is
+                               //   derived from, per decision 119. Not a
+                               //   promotedRole — the row survives commit — and
+                               //   not frozen at commit, since it keys nothing.
   UNIQUE (instanceId, ordinal)
   CHECK ((groupId IS NULL) = (groupRole IS NULL))
                                // "set only when groupId is set", enforced.
@@ -126,6 +140,13 @@ Field                          // one per CSV column
                                //   promoted column is also never a group
                                //   member, since group properties would
                                //   override its inclusion.
+  UNIQUE (instanceId) WHERE isGraduationDate
+                               // partial index, EMAIL's shape: at most one
+                               //   graduation-date column per instance.
+  CHECK (NOT (isGraduationDate AND promotedRole IS NOT NULL))
+                               // a promoted row is deleted at commit, and would
+                               //   take the designation with it. Both live in
+                               //   raw migration SQL, asserted by prisma/checks/.
 
 ImportRow                      // FR-2/FR-3 staging. Exists only between upload
   id, instanceId               //   and commit, and is deleted at commit.
@@ -405,6 +426,7 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 | Mapped column, `isReviewerVisible` unset | Hidden | Hidden | Hidden | Visible |
 | Mapped column, category DEMOGRAPHIC | **Hidden, locked** | **Hidden, locked** | **Hidden, locked** | Visible |
 | Any column with `isIncluded = false` | Hidden | Hidden | Hidden | **Hidden** |
+| Class standing, derived from the designated graduation-date column | Follows that column | Follows that column | Follows that column | Follows that column |
 | Interview scores | Hidden | Visible | Visible | Visible |
 | Interview notes | Hidden | Visible | Visible | Visible |
 | Written rubric scores and review notes, from other reviewers | Hidden | Hidden | Visible | Visible |
@@ -425,6 +447,8 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 **Where the flag is set, and for how long.** On the FR-2 mapping table, where it stays editable after the import commits — along with the include/exclude checkbox, and unlike everything else on that table. See decision 34. Rounds run weeks after a CSV is imported, so freezing visibility at commit would close the only window in which it can be set before anyone has a reason to open it. FR-2 requires an explicit choice on every eligible column, and FR-3 blocks the commit until every one has been made.
 
 **There is no default, with one exception, and the exception is where the rule was doing no work.** An included RESPONSE column arrives ticked Reviewer-visible, per decision 110 — the two FR-3 blockers between them already leave that as the only committable state, so requiring the tick was charging an admin for a choice that had been made for them. Everywhere else the no-default rule stands: an OTHER column arrives unset and cannot be committed until someone chooses, which is the case decision 108 was written about and the case where an unchosen column really is a decision nobody has made.
+
+**Class standing has no visibility of its own.** It is derived at render time from the designated graduation-date column and the instance's current semester, and it resolves exactly as that column does — group, inclusion, the DEMOGRAPHIC lock and `isReviewerVisible` included. It is computed on the server only for a viewer who can already see the source value, so a hidden source means the derived line is absent from the response, not hidden by the client. See decision 119 for why a second toggle would add a place to forget rather than a control.
 
 Hiding demographics from reviewers is a deliberate change from the current spreadsheet, where reviewers see whatever columns are in front of them. Reviewers grading essays have no need for ethnicity or first-gen status, and hiding them removes a bias vector at no cost. Under decision 108 that now holds in the second round too, not only in the written and first rounds.
 
@@ -462,6 +486,8 @@ The admin can rename a group, split it, merge two, or assign an ungrouped column
 
 Two columns require explicit designation and cannot be excluded: **email** (used as the join key for later imports) and **display name** (first + last, or a single name column).
 
+**A third designation is optional: graduation date**, per decision 119. The admin marks at most one column as the graduation date, and class standing is derived from it. It is a separate control from the email/name designation because it follows the opposite freeze rule: the column stays an ordinary `Field` row after commit, keys nothing, and so the designation stays editable for the life of the instance alongside inclusion and visibility. A promoted column cannot carry it. The importer never guesses it from a header, for the same reason it never guesses a category.
+
 **FR-3 Import preview and commit.** Show row count, detected duplicates by email, and rows with a blank email or name. Admin resolves or discards these before commit. On commit, create one Applicant per row.
 
 **Duplicates are compared on the normalized email — trimmed, NFC, lowercased — not the verbatim one.** USC addresses are case-insensitive, and two rows differing only in case would otherwise pass the preview and then violate `UNIQUE (instanceId, email)` at commit, after the admin has approved the import. The verbatim value is what the preview displays, so a normalization that changes anything is visible rather than silent; an address that is whitespace-only normalizes to empty and counts as blank, not as a duplicate.
@@ -478,7 +504,7 @@ The preview also carries two warnings that do not block, because each describes 
 
 An instance accepts exactly one CSV. Commit is final, and a later upload into a committed instance is refused with a message naming the correction path rather than a disabled control. The only correction after commit is deleting the instance and importing again, which destroys every round's work along with the applicants; v1 has no applicant edit surface, and the only decision reversal is decision 107's, which reaches a manual reject in a still-open pass and nothing earlier (decision 106). This is why the preview above is load-bearing: it is the only point at which a bad file can be caught cheaply.
 
-**What "final" covers is field *identity*, not presentation policy.** Frozen at commit: the one-CSV rule, and each column's category, group membership, display name and email/name designation. Not frozen: inclusion and the `isReviewerVisible` flag, which stay editable for the life of the instance. The line between them is what a property keys — `Applicant.data` is keyed by `Field.id`, so recategorising or regrouping a column changes what an already-written key means, while the two booleans key nothing and orphan nothing. See decisions 34 and 108.
+**What "final" covers is field *identity*, not presentation policy.** Frozen at commit: the one-CSV rule, and each column's category, group membership, display name and email/name designation. Not frozen: inclusion, the `isReviewerVisible` flag, and the graduation-date designation (decision 119), which stay editable for the life of the instance. The line between them is what a property keys — `Applicant.data` is keyed by `Field.id`, so recategorising or regrouping a column changes what an already-written key means, while the two booleans key nothing and orphan nothing. See decisions 34 and 108.
 
 **Commit is guarded by a two-step confirmation**, because it is irreversible and it sits on a page whose whole purpose is reviewing and adjusting. Following the primary control renders a panel naming what is about to become final — how many applicants will be created, the one-CSV rule, and the column properties that freeze — and the commit itself is a separate submit inside that panel. Deliberately lighter than FR-5's typed-name gate for deletion, which is rare and destroys existing work, where commit is on the path every instance takes and creates rather than destroys. See decision 35.
 
@@ -497,6 +523,8 @@ The criteria are part of the rubric and are therefore covered by the same lock. 
 **FR-5 Instance save.** Admin sets an instance name and password. Password is hashed (argon2id or bcrypt, cost ≥ 12). Never stored or logged in plaintext. Never recoverable; recovery means an admin with app-level access resets it.
 
 Name and password are collected when the instance is created, at the start of the FR-2 import, because §5 makes `passwordHash` non-null and §8 forbids an ungated instance existing even as a draft. What FR-5 governs is therefore unlock and rotation, not creation.
+
+**Creation also collects the cycle's current semester** — Spring or Fall, and a year — per decision 119. Both are required, neither is preselected, and the pair is immutable once written: class standing counts from it for the whole cycle, and a mis-set semester is corrected only by deleting the instance. An instance created before decision 119 has none, and its settings page offers a set-once control until one is chosen.
 
 **Which gate protects which action:**
 
@@ -568,7 +596,7 @@ A regeneration that preserves manual overrides treats them as consumed capacity 
 **FR-9 Reviewer dashboard, written.** Reviewer selects Round → Written, then their name from a dropdown. They see:
 
 - Their assigned applicants as a list with completion state (0/4 scored, 4/4 scored)
-- An applicant detail view: anonymous label (e.g. "Applicant 47"), every reviewer-visible field, rubric always visible alongside. No name, per §6.
+- An applicant detail view: anonymous label (e.g. "Applicant 47"), every reviewer-visible field, rubric always visible alongside. No name, per §6. Class standing appears directly under the graduation date whenever that column is reviewer-visible, per decision 119.
 - Score inputs per rubric category, with each value's criterion beside it per decision 114, plus a free-text note
 - A **suspected AI use** checkbox, per decision 116. One reviewer's read of one application, stored on the assignment, admin-only under §6 — the reviewer sees their own and nobody else's. Nothing detects anything; this is the `AI Detected?` column the club already fills in by hand.
 - Autosave on every change. A dropped connection mid-review must not lose work.
@@ -577,7 +605,7 @@ A regeneration that preserves manual overrides treats them as consumed capacity 
 
 **How a reviewer gets here, since the six bullets above assume it and no requirement stated it.** Reviewers do not pass the §8 app-level gate and never see the instance list. They arrive on a per-instance link shared in the club Slack, pick the round, pick their name, and enter that round's access code — one screen, one submit, per decision 30. Verifying the code starts a reviewer session held in its own signed cookie, separate from the admin session so that neither confers the other, and carrying the instance, the round, and the reviewer id. Every reviewer page and every reviewer action re-checks it; an assignment id in a URL is an untrusted reference until it has been confirmed to belong to the session's reviewer. The code itself is set by an admin, per decision 31.
 
-**FR-10 Written results dashboard.** Applicants ranked by average score descending, then by variance ascending. Each row shows: rank, name, average, variance, review count (2/3, 3/3), any suspected-AI flags raised on it, and demographic fields inline. Filters for "high variance" and "incomplete." Admin can open any applicant to read the full profile and all three reviewers' scores and notes.
+**FR-10 Written results dashboard.** Applicants ranked by average score descending, then by variance ascending. Each row shows: rank, name, average, variance, review count (2/3, 3/3), any suspected-AI flags raised on it, and demographic fields inline. Filters for "high variance" and "incomplete." Admin can open any applicant to read the full profile and all three reviewers' scores and notes. The profile carries class standing under the graduation date, per decision 119.
 
 **Suspected AI use appears as a count on the row and per reviewer on the profile**, per decision 116. A count because the flag is one reviewer's judgment and three reviewers disagreeing is the thing an admin wants to see; naming the reviewer belongs on the profile, beside the score and note that reviewer also gave. It is not a filter and not a sort key — it is a reason to open the application and read it again, not a rank.
 
@@ -613,7 +641,7 @@ Each sheet is staged, previewed, and committed on its own schedule, per decision
 
 > **Process recommendation:** add an email field to the interview scoring form. This eliminates the entire class of problem and costs one form field.
 
-**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. **The reviewer also sees every reviewer-visible field, written responses included** — decision 108 removed the per-round distinction that hid them here, so this round reads the same application the written round did. Demographics remain hidden, per §6's lock. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
+**FR-14 First-round reviewer dashboard.** Round → First Round, then name. Reviewer sees each applicant's average interview score per interviewer prominently, with the per-category scores collapsed by default and expandable, plus the interview notes. The category count follows the configured `InterviewCategory` rows — four in S26, but the layout must not assume that. **The reviewer also sees every reviewer-visible field, written responses included** — decision 108 removed the per-round distinction that hid them here, so this round reads the same application the written round did. Demographics remain hidden, per §6's lock. Class standing follows the graduation-date column, per decision 119. Reviewer votes YES or NO per applicant. No vote recorded means SKIP.
 
 **The vote is cast from the applicant's page, not from the list**, per decision 113, matching the second round's pattern under decision 82. This reverses the reasoning this requirement was originally built on: the every-tap-counts rule was applied here on the premise that a first-round vote is a reaction to two numbers and a paragraph already on the row. It is not — the row shows a *summary of what exists* ("2 scores · notes") and links to the page that holds them, so a vote cast from the list was cast on a name. Decision 113 states why that reversal is being made now and why the rule itself is scoped rather than withdrawn.
 
@@ -625,7 +653,7 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 
 ### 7.4 Second round and passes
 
-**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: every reviewer-visible field, written scores, written review notes, interview scores, interview notes. **Demographics are not in that list**, and neither is another reviewer's suspected-AI flag. Decision 108 locked demographics out of every reviewer round including this one, and decision 116 keeps the flag admin-only; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: every reviewer-visible field (with class standing under the graduation date when that column is one, per decision 119), written scores, written review notes, interview scores, interview notes. **Demographics are not in that list**, and neither is another reviewer's suspected-AI flag. Decision 108 locked demographics out of every reviewer round including this one, and decision 116 keeps the flag admin-only; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
 
 **Every applicant who reached the second round stays on this list for the life of the round**, per decision 112, whatever their status. A resolved applicant does not disappear: the row persists, the profile stays reachable, neither renders a vote control, and both show the outcome — green for Sparklet, red for rejected — per decision 111. `CARRIED` and `NEEDS_ADMIN` stay too, showing the same settled control with no colour, which is what decision 83a already described for `CARRIED` and is now simply the general rule.
 
@@ -1534,6 +1562,72 @@ and decision 79, checked in the same place.
     **A single-select column reads `applicable / total`, with no parenthesised count.** First-generation status renders "Yes 33/150", "No 117/150". This is not a special case: an ungrouped demographic column cannot be multi-selected, so `n = 1` always, `weighted` and `headcount` are identically equal, and the parenthesised number would repeat the numerator. Dropping it is the general rule applied to a set where two of its three numbers coincide.
 
     **The system is not taught which value means yes.** Every distinct value gets its own line in value order, and "applicable" is whichever line the reader is looking at. Inferring an affirmative out of free-text CSV values is exactly the silent guess FR-2 refuses when it declines to detect a category from a header, and the same reasoning holds: a wrong silent guess about what "Y" or "First gen" means is worse than a display that shows both lines and lets the admin read the one they want.
+
+119. **Class standing is derived from the graduation-date answer and the cycle's current semester. RESOLVED, amending §5, §6, FR-2, FR-3, FR-5, FR-9, FR-10, FR-14 and FR-16.** Applicant views gain a **Class standing** line directly under the graduation date, so thirty reviewers stop doing the same semester arithmetic in their heads and doing it differently. Planned in `plans/decision-119.md`. **Shipped ahead of the first real cycle by the owner's explicit call**, as the one exception to the freeze the status line records.
+
+    **The rule, as behaviour.** Two inputs: the applicant's answer in the designated graduation-date column, and the instance's current semester. A term's index is `year × 2`, plus one for Fall; *semesters out* is the graduation index minus the current one.
+
+    | Answer | Class standing |
+    |---|---|
+    | No column designated, or the instance has no current semester | no line at all |
+    | Blank | Unknown |
+    | `Spring`/`Fall` + year, 0–1 semesters out | Senior |
+    | … 2–3 out | Junior |
+    | … 4–5 out | Sophomore |
+    | … 6–9 out | Freshman |
+    | `Spring`/`Fall` + year, 10 or more out | Non-standard |
+    | `Spring`/`Fall` + year, but in the past | Non-standard |
+    | Anything else non-blank — Summer, a month name, the dropdown's "… or later" option, a typo, a degree note | Non-standard |
+
+    A value matches only if, trimmed, with internal whitespace collapsed and case ignored, the *whole* string is a season word followed by a four-digit year. No substring matching.
+
+    **Amended 2026-09-12, before any code shipped: Freshman is capped at 9 semesters out.** As first approved, the Freshman row read "6 or more out", with no upper bound. That made an obvious typo like `Spring 2207` read as a confident Freshman, which is exactly the wrong label Non-standard exists to prevent.
+
+    **Why 9.** Spark's applicant pool includes legitimate five-year programs, and 9 is the furthest a five-year student can be from graduating: someone starting in a Fall graduates in the Spring five years later, 9 semesters on. A ceiling of 7, the four-year maximum, was considered first and rejected because it would turn every first-year in a five-year program into Non-standard. Past 9 the answer fits no program in the pool, whether it is a typo or something genuinely unusual, so it reads Non-standard under the same reasoning as a date in the past.
+
+    **The cost, stated plainly, because it goes against this decision's own "never print a wrong label".** The ranges below the ceiling are still counted on a four-year scale. A five-year student therefore gets a label, but in the middle of their program it is one class younger than their actual year:
+
+    | Year in a five-year program | Semesters out | Reads |
+    |---|---|---|
+    | First | 8–9 | Freshman |
+    | Second | 6–7 | Freshman |
+    | Third | 4–5 | Sophomore |
+    | Fourth | 2–3 | Junior |
+    | Fifth | 0–1 | Senior |
+
+    Only the first and final years read correctly. **The ceiling did not cause the offset, and moving it cannot fix it.** At 7, the same second- to fourth-year students already carried the same one-class-young labels, because they sit 2–7 out, inside both ceilings. Their answer looks exactly like a four-year student's, so no ceiling can tell them apart. The only difference 9 makes for five-year students is their first year, which now reads Freshman, correctly, instead of Non-standard.
+
+    **What 9 actually gives up is typo detection in a narrow band.** A mistyped year that lands 8–9 semesters out now reads Freshman rather than Non-standard. Typos further out, like `Spring 2207`, are still caught, which was the gap this amendment was written to close. A reviewer who needs the precise year reads the graduation date directly above the label.
+
+    **Non-standard exists so the tool never prints a wrong label.** A graduate student, a progressive-degree student, or a transfer on an odd timeline does not fit a four-year count, and forcing one onto them is worse than declining to. Non-standard tells a reviewer to read the raw answer, which is rendered directly above it. **Unknown means only that the applicant left the question blank** — the two are not interchangeable, and a successor collapsing them loses the difference between "nothing to read" and "read this yourself".
+
+    **Strict matching is deliberate.** The real Typeform field is a Fall/Spring dropdown, so anything in that column that is not one of its options is an anomaly worth flagging, not a value to interpret. Two consequences, recorded rather than discovered. A freshman who picks the dropdown's last option, "… or later", reads Non-standard. And the synthetic fixtures, which wrote graduation dates as `May 2027` / `December 2027`, were never the real vocabulary — they are corrected to the dropdown's, rather than the parser being widened to meet them. **Summer is not excluded by a rule, because the real vocabulary never contains it.** The form's dropdown offers eight choices, all Fall or Spring. A `Summer 2027` could only come from someone typing free text outside those eight, so it falls into the same Non-standard bucket as every other off-format entry. It is not a separate carve-out, and a successor should not add one.
+
+    **The column is designated, never guessed, and the designation is not frozen.** An admin marks at most one column as the graduation date on FR-2's mapping table. That keeps FR-2's refusal to infer meaning from a header intact. It is not a `promotedRole` — the `Field` row survives commit — and it sits on the not-frozen side of decision 34's line, because it keys nothing in `Applicant.data`: changing it after commit changes a label, not what any stored value means. It lives on `Field` rather than as a foreign key on `Instance` because FR-20's restore writes tables in foreign-key order, Instance before Field, and an `Instance → Field` reference would make that order circular.
+
+    **Visibility is inherited, not configured, and inheriting it adds no exposure.** Class standing is a function of a value the viewer can already see and a cycle-wide setting that is not sensitive, so showing it reveals nothing new. Where the source column is hidden — Backend only, unset, DEMOGRAPHIC, excluded, or under a hidden group — class standing is hidden too, and is not computed into the response at all. That holds even though class standing is coarser than the date it comes from: goal 3's controls attach to the column, and a second toggle would be a second place for an admin to forget.
+
+    **Class standing is shown in the written round despite that round's blinding, and that is a deliberate tradeoff, not an oversight.** §6 and decision 4 hide name and email from written reviewers for two reasons:
+    - a name is a bias vector a reviewer grading essays does not need;
+    - a name identifies one specific person, and so does an email.
+
+    Class standing does not identify anyone on its own. **That is a weaker claim than it may sound, and it is not a claim about anonymity.** It is tempting to argue from bucket size: four labels over a pool of 160-odd, or three or four applicants per label among the roughly 12–16 one written reviewer is assigned (160-odd applicants × 3 reviewers ÷ 30–40 reviewers). That argument is the wrong measure at either scale. A written reviewer does not pick an applicant out of the pool statistically. They recognise someone they already know from what is on the screen. The set that matters is the people *that reviewer* knows who applied, and it can be very small — small enough that class standing, combined with other reviewer-visible fields, narrows it to one person.
+
+    What holds is narrower: **class standing adds nothing to that recognition that the graduation date did not already provide.** It appears only where the date is reviewer-visible, and the date says more than the label. So the blinding question is not "should reviewers see class standing". It is "should reviewers see graduation date", and that was answered on the column before this decision existed. The recognition route that does exist, through any combination of visible fields, is the one §6 already names: a reviewer who recognises an applicant returns them to the pool.
+
+    **The cost is real and stated plainly.** Class year can bias a reviewer. Printing "Freshman" beside an essay makes that easier to act on than a date a reviewer would have had to work out. This is a cost of *salience*, not of exposure, and it does not contradict "visibility is inherited … adds no exposure" above: the reviewer learns nothing the date did not already say, but the label puts it in front of them.
+
+    It is accepted for two reasons. The information was already on the screen. And the club decides whether class year belongs in blind review by setting one column, not by the system hiding a derived label while showing its source. **An admin who wants the written round blind to class year sets the graduation-date column to Backend only, and class standing disappears with it in every round.** No setting blinds the label while leaving the date visible, on purpose: that would give the appearance of a bias control without its substance.
+
+    **The semester is set once, and the cost of that is stated.** Mis-set at creation, it mislabels every applicant for the whole cycle, and the only correction is deleting the instance. Accepted because the value cannot legitimately change within a cycle, and an editable one invites relabelling applicants mid-round. The same reasoning is why the creation form preselects nothing: a default derived from the clock would be a silent guess that then becomes permanent, which is FR-2's category argument with higher stakes. Instances created before this decision have no semester; each gets a single set-once control on its settings page, audited, and until it is used class standing is **absent**, not Unknown.
+
+    **Not a demographic, and not stored.** Class standing is computed at render time. It does not enter §10.7's counting, FR-11's or FR-15's panels, FR-19's funnel, or the per-stage CSVs. The two semester columns and the designation flag reach FR-20's JSON export as ordinary columns through `EXPORT_TABLES`.
+
+    Forward pointers:
+
+    - **34** — amended. The editable-after-commit list gains the graduation-date designation, on 34's own test: it keys nothing.
+    - **108** — unchanged. Class standing reads `resolveField` and adds no visibility state.
+    - **FR-2's no-guessing rule** — unchanged and load-bearing; it is why the designation exists.
 
 ## 11. Out of scope for v1, worth noting for v2
 
