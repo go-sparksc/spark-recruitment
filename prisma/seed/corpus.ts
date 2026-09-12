@@ -74,25 +74,27 @@ export const WRITE_IN_MAJORS = [
 /// earlier `May 2027` / `December 2027` values here were never that vocabulary,
 /// and every one of them would have read Non-standard.
 ///
-/// **The exact eight real choices are not in the repo**, so these are the shape
-/// rather than a copy: eight consecutive terms from Fall 2026, as a Spring 2026
-/// cycle would offer. Counted from the seed's Spring 2026 semester they cover
-/// every label — Senior (1 out) through Freshman (7), and the "or later" option
-/// as Non-standard.
+/// **These are the real form's eight choices, verbatim**, as the owner supplied
+/// them on 2026-09-12. The last carries "(or later)" and reads Non-standard.
+///
+/// Counted from the seed's Spring 2026 semester they run from Junior (Fall 2027,
+/// 3 out) to Freshman (Fall 2030, 9 out). **No seeded applicant reads Senior**:
+/// the dropdown's first choice is already 3 semesters away from that semester.
+/// Senior is covered by lib/class-standing.test.ts, not by the seed.
 ///
 /// Each real choice appears twice, and the two off-vocabulary values once each,
 /// so a 150-applicant pool carries a handful of Unknown and Summer rows to click
 /// through without dominating it. `rng.pick` consumes one draw whatever the
 /// array length, so this changes this column and nothing else the seed builds.
 const GRADUATION_DROPDOWN = [
-  "Fall 2026",
-  "Spring 2027",
   "Fall 2027",
   "Spring 2028",
   "Fall 2028",
   "Spring 2029",
   "Fall 2029",
-  "Spring 2030 or later",
+  "Spring 2030",
+  "Fall 2030",
+  "Spring 2031 (or later)",
 ];
 
 export const GRADUATION_DATES = [

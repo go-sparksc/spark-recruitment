@@ -71,8 +71,9 @@ Both files used to write `May 2027` / `December 2027`, which was never what the
 real dropdown offers and which class standing reads as Non-standard. `s26-shape.csv`
 was corrected by mapping each month to its season (May → Spring, December → Fall)
 on its 28 rows and nothing else; `demo-cycle.csv` follows `prisma/seed/corpus.ts`
-on regeneration, and deliberately carries a few blank and `Summer 2027` answers so
-Unknown and Non-standard are both reachable in training.
+on regeneration, which holds the real form's eight choices (Fall 2027 through
+`Spring 2031 (or later)`) plus a few blank and `Summer 2027` answers so Unknown and
+Non-standard are both reachable in training.
 
 ## `s26-shape.csv`
 
