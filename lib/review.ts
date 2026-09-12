@@ -13,6 +13,7 @@
 
 import { ReturnReason } from "@/generated/prisma/enums";
 import { planShape } from "@/lib/assignment";
+import { classStanding, type Term } from "@/lib/class-standing";
 import {
   projectApplicantData,
   resolvePromoted,
@@ -267,6 +268,22 @@ export function claimEligibility(
 export interface ReviewFieldLike extends FieldLike {
   displayName: string;
   ordinal: number;
+  /// Decision 119's designation. Required rather than optional so every page
+  /// select that feeds this view fails typecheck until it loads the column —
+  /// an optional flag would let a page that forgot it silently show no class
+  /// standing.
+  isGraduationDate: boolean;
+}
+
+/// The heading of decision 119's derived line.
+export const CLASS_STANDING_LABEL = "Class standing";
+
+/// The render key of the derived line. It is NOT a `Field.id`: no column holds
+/// class standing, and nothing should look it up as one. Prefixed so it can
+/// never collide with a cuid, and suffixed with the source column so the key is
+/// stable across renders.
+export function classStandingKey(sourceFieldId: string): string {
+  return `class-standing:${sourceFieldId}`;
 }
 
 export interface ReviewFieldGroupLike extends FieldGroupLike {
@@ -274,6 +291,9 @@ export interface ReviewFieldGroupLike extends FieldGroupLike {
 }
 
 export interface ApplicantViewField {
+  /// A `Field.id` for every line but one: decision 119's class standing line
+  /// carries `classStandingKey(sourceFieldId)`, a render key that names no
+  /// column. Pages use this only as a React key, which both satisfy.
   fieldId: string;
   displayName: string;
   /// The group's heading when this column is a member of one, so several
@@ -347,11 +367,25 @@ function presentableValue(raw: unknown): string | null {
 /// Empty values are dropped rather than rendered blank. Thirty headings over
 /// "(no answer)" on a phone is scrolling that buys a reviewer nothing, and FR-3
 /// already warns at import when an instance has no RESPONSE field at all.
+///
+/// **Class standing, per decision 119**, is inserted directly after the
+/// designated graduation-date column — and only when that column is in this
+/// viewer's visible set and `currentTerm` is non-null. It is computed from the
+/// already-projected data, so a hidden source is never read here at all, and
+/// the derived line is absent from the returned object exactly as its source
+/// is. That is the whole of its visibility: there is no second rule to keep in
+/// step.
+///
+/// It is the one line exempt from dropping blanks. A blank graduation date is
+/// dropped as usual, but its class standing still renders, reading Unknown —
+/// the decision distinguishes "left blank" from "no line at all", and the second
+/// is reserved for an instance with no designation or no semester.
 export function buildApplicantView(
   applicant: ApplicantSource,
   fields: readonly ReviewFieldLike[],
   groups: readonly ReviewFieldGroupLike[],
   viewer: Viewer,
+  currentTerm: Term | null,
 ): ApplicantView {
   const visible = visibleFieldIds(fields, groups, viewer);
   const data = projectApplicantData(applicant.data, visible);
@@ -362,18 +396,30 @@ export function buildApplicantView(
     .filter((field) => visible.has(field.id))
     .slice()
     .sort((a, b) => a.ordinal - b.ordinal)
-    .map((field) => {
+    .flatMap((field) => {
+      const entries: ApplicantViewField[] = [];
       const value = presentableValue(data[field.id]);
-      if (value === null) return null;
-      const group = field.groupId === null ? null : (groupsById.get(field.groupId) ?? null);
-      return {
-        fieldId: field.id,
-        displayName: field.displayName,
-        groupDisplayName: group?.displayName ?? null,
-        value,
-      };
-    })
-    .filter((entry): entry is ApplicantViewField => entry !== null);
+      if (value !== null) {
+        const group = field.groupId === null ? null : (groupsById.get(field.groupId) ?? null);
+        entries.push({
+          fieldId: field.id,
+          displayName: field.displayName,
+          groupDisplayName: group?.displayName ?? null,
+          value,
+        });
+      }
+      // `field` is already known visible here, and `data` already projected, so
+      // this cannot read or reveal a hidden answer.
+      if (field.isGraduationDate && currentTerm !== null) {
+        entries.push({
+          fieldId: classStandingKey(field.id),
+          displayName: CLASS_STANDING_LABEL,
+          groupDisplayName: null,
+          value: classStanding(data[field.id], currentTerm),
+        });
+      }
+      return entries;
+    });
 
   const label = applicantLabel(applicant.sourceRowIndex);
   const promoted = resolvePromoted(viewer);

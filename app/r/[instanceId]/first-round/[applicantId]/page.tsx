@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { VoteButtons } from "../vote-buttons";
 import { Round } from "@/generated/prisma/enums";
+import { currentTermOf } from "@/lib/class-standing";
 import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
@@ -29,7 +30,7 @@ export default async function FirstRoundApplicantPage({
 
   if (session.rd !== Round.FIRST_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [applicant, fields, groups, categories] = await Promise.all([
+  const [applicant, fields, groups, categories, instance] = await Promise.all([
     prisma.applicant.findFirst({
       // The pool predicate again, so an applicant who left the round cannot be
       // reached by keeping the URL.
@@ -66,6 +67,8 @@ export default async function FirstRoundApplicantPage({
         groupId: true,
         groupRole: true,
         isReviewerVisible: true,
+        // Decision 119. buildApplicantView requires it and decides.
+        isGraduationDate: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -87,6 +90,11 @@ export default async function FirstRoundApplicantPage({
       orderBy: { ordinal: "asc" },
       select: { id: true, name: true, maxPoints: true },
     }),
+    // Decision 119: the semester class standing counts from.
+    prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { currentTermSeason: true, currentTermYear: true },
+    }),
   ]);
 
   if (!applicant) notFound();
@@ -101,6 +109,7 @@ export default async function FirstRoundApplicantPage({
     fields,
     groups,
     "FIRST_ROUND_REVIEWER",
+    instance === null ? null : currentTermOf(instance),
   );
 
   const vote = applicant.firstRoundVotes[0]?.value ?? null;

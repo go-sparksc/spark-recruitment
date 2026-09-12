@@ -6,6 +6,7 @@ import {
   DecisionOutcome,
   InstanceStage,
   Round,
+  TermSeason,
 } from "../generated/prisma/enums";
 import { buildApplicantData, buildApplicantProfiles } from "./seed/applicants";
 import {
@@ -125,6 +126,10 @@ async function main() {
       // 150 committed Applicant rows and no ImportRow rows to have staged them —
       // a state the real import flow cannot produce.
       importCommittedAt: new Date(),
+      // Decision 119. The S26 cycle's own semester, so class standing counts from
+      // the semester the synthetic applications were written in.
+      currentTermSeason: TermSeason.SPRING,
+      currentTermYear: 2026,
       // Groups are created with the instance so the fields below can point at
       // them. Nested creates run parent-first, so the group row exists by the
       // time a member references its id.
@@ -155,6 +160,7 @@ async function main() {
           groupRole: spec.groupRole,
           isIncluded: spec.isIncluded,
           isReviewerVisible: spec.isReviewerVisible,
+          isGraduationDate: spec.isGraduationDate,
           ordinal: spec.ordinal,
         })),
       },

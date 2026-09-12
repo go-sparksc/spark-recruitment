@@ -4,6 +4,8 @@ import { FieldCategory, FieldGroupRole } from "@/generated/prisma/enums";
 import {
   applicantLabel,
   buildApplicantView,
+  CLASS_STANDING_LABEL,
+  classStandingKey,
   claimEligibility,
   completionOf,
   MAX_RETURN_NOTE_LENGTH,
@@ -29,6 +31,8 @@ function field(overrides: Partial<ReviewFieldLike> = {}): ReviewFieldLike {
     // question and said reviewers may see this column. Tests about hiding set
     // it to false or null explicitly.
     isReviewerVisible: true,
+    // Decision 119: no column is the graduation date unless a test says so.
+    isGraduationDate: false,
     ...overrides,
   };
 }
@@ -416,7 +420,7 @@ describe("claimEligibility", () => {
 
 describe("buildApplicantView — what a written reviewer gets", () => {
   it("labels the applicant by source row index and carries no identity", () => {
-    const view = buildApplicantView(applicant(), [], [], "WRITTEN_REVIEWER");
+    const view = buildApplicantView(applicant(), [], [], "WRITTEN_REVIEWER", null);
 
     expect(view.label).toBe("Applicant 47");
     expect(view.identified).toBe(false);
@@ -432,6 +436,7 @@ describe("buildApplicantView — what a written reviewer gets", () => {
       [field({ id: "f1" })],
       [],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     const serialized = JSON.stringify(view);
@@ -450,6 +455,7 @@ describe("buildApplicantView — what a written reviewer gets", () => {
       ],
       [],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     expect(view.fields.map((f) => f.displayName)).toEqual([
@@ -467,6 +473,7 @@ describe("buildApplicantView — what a written reviewer gets", () => {
       ],
       [],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     expect(view.fields.map((f) => f.displayName)).toEqual(["First", "Second"]);
@@ -482,6 +489,7 @@ describe("buildApplicantView — what a written reviewer gets", () => {
       ],
       [],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     expect(view.fields.map((f) => f.fieldId)).toEqual(["f1"]);
@@ -501,7 +509,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     const source = applicant({ data: { other: "2028" } });
 
     for (const viewer of ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"] as const) {
-      expect(buildApplicantView(source, [other], [], viewer).fields.map((f) => f.fieldId)).toEqual([
+      expect(buildApplicantView(source, [other], [], viewer, null).fields.map((f) => f.fieldId)).toEqual([
         "other",
       ]);
     }
@@ -516,7 +524,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     });
 
     expect(
-      buildApplicantView(applicant({ data: { other: "2028" } }), [unchosen], [], "WRITTEN_REVIEWER")
+      buildApplicantView(applicant({ data: { other: "2028" } }), [unchosen], [], "WRITTEN_REVIEWER", null)
         .fields,
     ).toEqual([]);
   });
@@ -532,7 +540,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     });
 
     expect(
-      buildApplicantView(applicant({ data: { junk: "NET-1000" } }), [excluded], [], "WRITTEN_REVIEWER")
+      buildApplicantView(applicant({ data: { junk: "NET-1000" } }), [excluded], [], "WRITTEN_REVIEWER", null)
         .fields,
     ).toEqual([]);
   });
@@ -543,7 +551,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     const response = field({ id: "essay", category: FieldCategory.RESPONSE });
 
     expect(
-      buildApplicantView(applicant({ data: { essay: "words" } }), [response], [], "FIRST_ROUND_REVIEWER")
+      buildApplicantView(applicant({ data: { essay: "words" } }), [response], [], "FIRST_ROUND_REVIEWER", null)
         .fields.map((f) => f.fieldId),
     ).toEqual(["essay"]);
   });
@@ -560,7 +568,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     const source = applicant({ data: { eth: "White" } });
 
     for (const viewer of ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"] as const) {
-      expect(buildApplicantView(source, [demographic], [], viewer).fields).toEqual([]);
+      expect(buildApplicantView(source, [demographic], [], viewer, null).fields).toEqual([]);
     }
   });
 
@@ -575,7 +583,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
     });
 
     expect(
-      buildApplicantView(applicant({ data: { eth1: "White" } }), [member], [group()], "WRITTEN_REVIEWER")
+      buildApplicantView(applicant({ data: { eth1: "White" } }), [member], [group()], "WRITTEN_REVIEWER", null)
         .fields,
     ).toEqual([]);
   });
@@ -600,6 +608,7 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
       [member],
       [visibleGroup],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     expect(view.fields).toEqual([
@@ -613,6 +622,147 @@ describe("buildApplicantView — the §6 boundary, per field", () => {
   });
 });
 
+describe("buildApplicantView — class standing (decision 119)", () => {
+  const FALL_2026 = { season: "FALL", year: 2026 } as const;
+  const REVIEWERS = ["WRITTEN_REVIEWER", "FIRST_ROUND_REVIEWER", "SECOND_ROUND_REVIEWER"] as const;
+
+  const graduation = (overrides: Partial<ReviewFieldLike> = {}) =>
+    field({
+      id: "grad",
+      displayName: "Graduation Date",
+      ordinal: 1,
+      category: FieldCategory.OTHER,
+      isReviewerVisible: true,
+      isGraduationDate: true,
+      ...overrides,
+    });
+  const before = field({ id: "major", displayName: "Major", ordinal: 0, category: FieldCategory.OTHER });
+  const after = field({ id: "essay", displayName: "Essay", ordinal: 2 });
+  const source = (grad: string) => applicant({ data: { major: "Economics", grad, essay: "words" } });
+
+  it("appears directly after its source column, for every reviewer round", () => {
+    for (const viewer of REVIEWERS) {
+      const view = buildApplicantView(source("Spring 2028"), [after, graduation(), before], [], viewer, FALL_2026);
+      expect(view.fields.map((f) => f.fieldId)).toEqual(["major", "grad", classStandingKey("grad"), "essay"]);
+      expect(view.fields[2]).toEqual({
+        fieldId: classStandingKey("grad"),
+        displayName: CLASS_STANDING_LABEL,
+        groupDisplayName: null,
+        value: "Junior",
+      });
+    }
+  });
+
+  it("reads Unknown on a blank answer, with the blank source line itself dropped", () => {
+    const view = buildApplicantView(source(""), [before, graduation(), after], [], "WRITTEN_REVIEWER", FALL_2026);
+    expect(view.fields.map((f) => [f.fieldId, f.value])).toEqual([
+      ["major", "Economics"],
+      [classStandingKey("grad"), "Unknown"],
+      ["essay", "words"],
+    ]);
+  });
+
+  it("reads Non-standard on an off-format answer, beneath the raw answer", () => {
+    const view = buildApplicantView(
+      source("Spring 2030 or later"),
+      [graduation()],
+      [],
+      "WRITTEN_REVIEWER",
+      FALL_2026,
+    );
+    expect(view.fields.map((f) => f.value)).toEqual(["Spring 2030 or later", "Non-standard"]);
+  });
+
+  it("is absent — no line at all — when the instance has no semester", () => {
+    const view = buildApplicantView(source("Spring 2028"), [graduation()], [], "WRITTEN_REVIEWER", null);
+    expect(view.fields.map((f) => f.fieldId)).toEqual(["grad"]);
+  });
+
+  it("is absent when no column is designated", () => {
+    const view = buildApplicantView(
+      source("Spring 2028"),
+      [graduation({ isGraduationDate: false })],
+      [],
+      "WRITTEN_REVIEWER",
+      FALL_2026,
+    );
+    expect(view.fields.map((f) => f.fieldId)).toEqual(["grad"]);
+  });
+
+  // The §6 boundary. Each case asserts on the serialized object, not only on
+  // `fields`, because "absent from the response" is the requirement.
+  describe("follows its source column's visibility, with nothing of its own", () => {
+    const hiddenCases = [
+      ["Backend only", graduation({ isReviewerVisible: false }), [] as ReviewFieldGroupLike[]],
+      ["unset", graduation({ isReviewerVisible: null }), []],
+      [
+        "DEMOGRAPHIC with a stored true",
+        graduation({ category: FieldCategory.DEMOGRAPHIC, isReviewerVisible: true }),
+        [],
+      ],
+      ["excluded", graduation({ isIncluded: false }), []],
+      [
+        "a member of a hidden group",
+        graduation({ groupId: "g1", groupRole: FieldGroupRole.OPTION }),
+        [group({ id: "g1", category: FieldCategory.OTHER, isReviewerVisible: false })],
+      ],
+    ] as const;
+
+    it.each(hiddenCases)("hidden from every reviewer round when the source is %s", (_label, grad, groups) => {
+      for (const viewer of REVIEWERS) {
+        const view = buildApplicantView(source("Spring 2028"), [grad], [...groups], viewer, FALL_2026);
+        expect(view.fields).toEqual([]);
+        const serialized = JSON.stringify(view);
+        expect(serialized).not.toContain("class-standing");
+        expect(serialized).not.toContain("Junior");
+        expect(serialized).not.toContain(CLASS_STANDING_LABEL);
+      }
+    });
+
+    it("an admin still sees it where the source is Backend only", () => {
+      const view = buildApplicantView(
+        source("Spring 2028"),
+        [graduation({ isReviewerVisible: false })],
+        [],
+        "ADMIN",
+        FALL_2026,
+      );
+      expect(view.fields.map((f) => f.value)).toEqual(["Spring 2028", "Junior"]);
+    });
+
+    it("an admin does not see it where the source is excluded, since exclusion beats everyone", () => {
+      const view = buildApplicantView(
+        source("Spring 2028"),
+        [graduation({ isIncluded: false })],
+        [],
+        "ADMIN",
+        FALL_2026,
+      );
+      expect(view.fields).toEqual([]);
+    });
+
+    it("appears for a member of a visible group, with no group heading of its own", () => {
+      const view = buildApplicantView(
+        source("Spring 2028"),
+        [graduation({ groupId: "g2", groupRole: FieldGroupRole.OPTION })],
+        [group({ id: "g2", displayName: "Timeline", category: FieldCategory.OTHER, isReviewerVisible: true })],
+        "WRITTEN_REVIEWER",
+        FALL_2026,
+      );
+      expect(view.fields.map((f) => [f.displayName, f.groupDisplayName])).toEqual([
+        ["Graduation Date", "Timeline"],
+        [CLASS_STANDING_LABEL, null],
+      ]);
+    });
+  });
+
+  it("does not identify a written reviewer's applicant: the view stays unidentified", () => {
+    const view = buildApplicantView(source("Spring 2028"), [graduation()], [], "WRITTEN_REVIEWER", FALL_2026);
+    expect(view.identified).toBe(false);
+    expect(JSON.stringify(view)).not.toContain("Quinn");
+  });
+});
+
 describe("buildApplicantView — the other viewers", () => {
   const fields = [
     field({ id: "essay", displayName: "Essay", category: FieldCategory.RESPONSE, ordinal: 0 }),
@@ -623,7 +773,7 @@ describe("buildApplicantView — the other viewers", () => {
   it("gives a second-round reviewer the name, the email and the responses — but not demographics", () => {
     // FR-16 used to call this "the complete applicant profile" and mean it
     // literally. Decision 108 took demographics out of that list.
-    const view = buildApplicantView(applicant({ data }), fields, [], "SECOND_ROUND_REVIEWER");
+    const view = buildApplicantView(applicant({ data }), fields, [], "SECOND_ROUND_REVIEWER", null);
 
     expect(view.identified).toBe(true);
     if (!view.identified) throw new Error("unreachable");
@@ -635,7 +785,7 @@ describe("buildApplicantView — the other viewers", () => {
   it("gives an admin the same, and still supplies the label", () => {
     // FR-8's applicant list searches by both the label a reviewer sees and the
     // name an admin knows, so the label is not written-only.
-    const view = buildApplicantView(applicant({ data }), fields, [], "ADMIN");
+    const view = buildApplicantView(applicant({ data }), fields, [], "ADMIN", null);
 
     expect(view.label).toBe("Applicant 47");
     expect(view.identified).toBe(true);
@@ -644,7 +794,7 @@ describe("buildApplicantView — the other viewers", () => {
   it("gives a first-round reviewer the identity and the responses, but not demographics", () => {
     // The mirror of the second-round case above, and the shape decision 108
     // gives every reviewer round: same fields, different evidence around them.
-    const view = buildApplicantView(applicant({ data }), fields, [], "FIRST_ROUND_REVIEWER");
+    const view = buildApplicantView(applicant({ data }), fields, [], "FIRST_ROUND_REVIEWER", null);
 
     expect(view.identified).toBe(true);
     expect(view.fields.map((f) => f.fieldId)).toEqual(["essay"]);
@@ -652,7 +802,7 @@ describe("buildApplicantView — the other viewers", () => {
 
   it("carries a null email through rather than inventing one", () => {
     // FR-3 lets a blank-email row through once the admin resolves it.
-    const view = buildApplicantView(applicant({ email: null }), [], [], "ADMIN");
+    const view = buildApplicantView(applicant({ email: null }), [], [], "ADMIN", null);
 
     expect(view.identified).toBe(true);
     if (!view.identified) throw new Error("unreachable");
@@ -676,6 +826,7 @@ describe("applicantLabel", () => {
       [],
       [],
       "WRITTEN_REVIEWER",
+      null,
     );
 
     expect(view.label).toBe(applicantLabel(47));

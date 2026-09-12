@@ -4,6 +4,7 @@ import {
   MAX_TERM_YEAR,
   MIN_TERM_YEAR,
   classStanding,
+  currentTermOf,
   parseTerm,
   termIndex,
   termLabel,
@@ -211,5 +212,20 @@ describe("validateCurrentTerm — the semester an admin enters", () => {
   it("accepts both ends of the range, matching the database CHECK", () => {
     expect(validateCurrentTerm("FALL", String(MIN_TERM_YEAR)).ok).toBe(true);
     expect(validateCurrentTerm("FALL", String(MAX_TERM_YEAR)).ok).toBe(true);
+  });
+});
+
+describe("currentTermOf", () => {
+  it("reads a set pair as a term", () => {
+    expect(currentTermOf({ currentTermSeason: "SPRING", currentTermYear: 2026 })).toEqual({
+      season: "SPRING",
+      year: 2026,
+    });
+  });
+
+  it("is null while unset, and null for a half-set pair rather than inventing the other half", () => {
+    expect(currentTermOf({ currentTermSeason: null, currentTermYear: null })).toBeNull();
+    expect(currentTermOf({ currentTermSeason: "FALL", currentTermYear: null })).toBeNull();
+    expect(currentTermOf({ currentTermSeason: null, currentTermYear: 2026 })).toBeNull();
   });
 });

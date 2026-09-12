@@ -6,6 +6,7 @@ import { BackButton } from "@/components/back-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AssignmentStatus, Round } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
+import { currentTermOf } from "@/lib/class-standing";
 import { ROUND_LABEL, STATUS_LABEL } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { buildPassHistory } from "@/lib/final";
@@ -46,7 +47,11 @@ export default async function ApplicantResultPage({
     secondRoundReviewers,
     conflicts,
   ] = await Promise.all([
-    prisma.instance.findUnique({ where: { id }, select: { id: true, name: true } }),
+    prisma.instance.findUnique({
+      where: { id },
+      // Decision 119: the semester class standing counts from.
+      select: { id: true, name: true, currentTermSeason: true, currentTermYear: true },
+    }),
     // Scoped to the instance: an applicant id in a URL is an untrusted
     // reference until it has been confirmed to belong to this cycle.
     prisma.applicant.findFirst({
@@ -91,6 +96,8 @@ export default async function ApplicantResultPage({
         groupId: true,
         groupRole: true,
         isReviewerVisible: true,
+        // Decision 119. buildApplicantView requires it and decides.
+        isGraduationDate: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -172,6 +179,7 @@ export default async function ApplicantResultPage({
     fields,
     groups,
     "ADMIN",
+    currentTermOf(instance),
   );
 
   const active = applicant.assignments.filter((a) => a.status === AssignmentStatus.ACTIVE);

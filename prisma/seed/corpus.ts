@@ -69,13 +69,39 @@ export const WRITE_IN_MAJORS = [
   "Quantitative Biology",
 ];
 
+/// The graduation-date column's vocabulary, per PRD decision 119. The real form
+/// is a dropdown of Fall/Spring terms whose last option carries "or later"; the
+/// earlier `May 2027` / `December 2027` values here were never that vocabulary,
+/// and every one of them would have read Non-standard.
+///
+/// **The exact eight real choices are not in the repo**, so these are the shape
+/// rather than a copy: eight consecutive terms from Fall 2026, as a Spring 2026
+/// cycle would offer. Counted from the seed's Spring 2026 semester they cover
+/// every label — Senior (1 out) through Freshman (7), and the "or later" option
+/// as Non-standard.
+///
+/// Each real choice appears twice, and the two off-vocabulary values once each,
+/// so a 150-applicant pool carries a handful of Unknown and Summer rows to click
+/// through without dominating it. `rng.pick` consumes one draw whatever the
+/// array length, so this changes this column and nothing else the seed builds.
+const GRADUATION_DROPDOWN = [
+  "Fall 2026",
+  "Spring 2027",
+  "Fall 2027",
+  "Spring 2028",
+  "Fall 2028",
+  "Spring 2029",
+  "Fall 2029",
+  "Spring 2030 or later",
+];
+
 export const GRADUATION_DATES = [
-  "May 2027",
-  "May 2028",
-  "May 2029",
-  "December 2027",
-  "December 2028",
-  "May 2030",
+  ...GRADUATION_DROPDOWN,
+  ...GRADUATION_DROPDOWN,
+  // Blank: the applicant skipped the question. Reads Unknown.
+  "",
+  // Typed outside the dropdown. Reads Non-standard, like any off-format value.
+  "Summer 2027",
 ];
 
 export const HEARD_ABOUT = [

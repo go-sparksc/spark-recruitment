@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { ConflictControl } from "../conflict-control";
 import { VoteButtons } from "./vote-buttons";
 import { PassStatus, Round } from "@/generated/prisma/enums";
+import { currentTermOf } from "@/lib/class-standing";
 import { SECOND_ROUND_COHORT, voteAvailability } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
@@ -38,7 +39,7 @@ export default async function SecondRoundApplicantPage({
 
   if (session.rd !== Round.SECOND_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [applicant, fields, groups, rubric, interviewCategories] = await Promise.all([
+  const [applicant, fields, groups, rubric, interviewCategories, instance] = await Promise.all([
     prisma.applicant.findFirst({
       // **`SECOND_ROUND_COHORT`, matching the list** — decision 112. This used
       // to be `SECOND_ROUND_POOL`, with a comment saying a resolved applicant
@@ -98,6 +99,8 @@ export default async function SecondRoundApplicantPage({
         groupId: true,
         groupRole: true,
         isReviewerVisible: true,
+        // Decision 119. buildApplicantView requires it and decides.
+        isGraduationDate: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -121,6 +124,11 @@ export default async function SecondRoundApplicantPage({
       where: { instanceId },
       orderBy: { ordinal: "asc" },
       select: { id: true, name: true, maxPoints: true },
+    }),
+    // Decision 119: the semester class standing counts from.
+    prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { currentTermSeason: true, currentTermYear: true },
     }),
   ]);
 
@@ -179,6 +187,7 @@ export default async function SecondRoundApplicantPage({
     fields,
     groups,
     "SECOND_ROUND_REVIEWER",
+    instance === null ? null : currentTermOf(instance),
   );
 
   const written = buildWrittenReviews(

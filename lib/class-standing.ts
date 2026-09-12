@@ -110,6 +110,20 @@ export function classStanding(raw: unknown, current: Term): ClassStanding {
 // The cycle's current semester, as an admin enters it
 // ---------------------------------------------------------------------------
 
+/// An instance row's two semester columns as a `Term`, or null while unset.
+///
+/// One place for the four applicant pages to do this, so none of them can come
+/// to treat a half-set pair as a semester. The database CHECK makes a half-set
+/// pair unreachable; this still answers null for one rather than inventing the
+/// missing half.
+export function currentTermOf(row: {
+  currentTermSeason: Season | null;
+  currentTermYear: number | null;
+}): Term | null {
+  if (row.currentTermSeason === null || row.currentTermYear === null) return null;
+  return { season: row.currentTermSeason, year: row.currentTermYear };
+}
+
 /// "Fall 2026". What the settings page shows once a semester is set, and what
 /// the confirmation copy names before it is.
 export function termLabel(term: Term): string {

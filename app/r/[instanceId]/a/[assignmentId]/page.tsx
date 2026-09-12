@@ -4,6 +4,7 @@ import { ReturnControl } from "../../return-control";
 import { GuardedLink } from "./guarded-link";
 import { ScoreCard, type RubricRow } from "./score-card";
 import { AssignmentStatus } from "@/generated/prisma/enums";
+import { currentTermOf } from "@/lib/class-standing";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 // completionOf is no longer read here: the card counts scored categories from
@@ -68,7 +69,7 @@ export default async function ApplicantDetailPage({
 
   if (!assignment) notFound();
 
-  const [fields, groups, categories, siblings] = await Promise.all([
+  const [fields, groups, categories, siblings, instance] = await Promise.all([
     prisma.field.findMany({
       where: { instanceId },
       orderBy: { ordinal: "asc" },
@@ -81,6 +82,8 @@ export default async function ApplicantDetailPage({
         groupId: true,
         groupRole: true,
         isReviewerVisible: true,
+        // Decision 119. buildApplicantView requires it and decides.
+        isGraduationDate: true,
       },
     }),
     prisma.fieldGroup.findMany({
@@ -117,6 +120,11 @@ export default async function ApplicantDetailPage({
       orderBy: { applicant: { sourceRowIndex: "asc" } },
       select: { id: true },
     }),
+    // Decision 119: the semester class standing counts from.
+    prisma.instance.findUnique({
+      where: { id: instanceId },
+      select: { currentTermSeason: true, currentTermYear: true },
+    }),
   ]);
 
   const view = buildApplicantView(
@@ -129,6 +137,7 @@ export default async function ApplicantDetailPage({
     fields,
     groups,
     "WRITTEN_REVIEWER",
+    instance === null ? null : currentTermOf(instance),
   );
 
   const pointsByCategory = new Map(

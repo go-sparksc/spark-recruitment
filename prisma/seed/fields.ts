@@ -87,6 +87,9 @@ export interface FieldSpec {
   /// default, and a seeded instance is meant to look like one an admin has
   /// finished configuring.
   isReviewerVisible: boolean;
+  /// Decision 119's designation. True on exactly one column, which the database's
+  /// partial unique index requires.
+  isGraduationDate: boolean;
   ordinal: number;
   /// Set only on the ten one-hot ethnicity columns: the value written when checked.
   optionLabel?: string;
@@ -109,12 +112,14 @@ interface CatalogEntry {
   groupKey?: string;
   groupRole?: FieldGroupRole;
   isIncluded?: boolean;
+  isGraduationDate?: boolean;
 }
 
 // Ordered as the columns appear in the export, with the synthetic prompt slotted
 // in beside the other essay questions.
 const CATALOG: readonly CatalogEntry[] = [
-  { key: "graduationDate", column: 4, category: FieldCategory.OTHER },
+  // Decision 119's designation: class standing is derived from this column.
+  { key: "graduationDate", column: 4, category: FieldCategory.OTHER, isGraduationDate: true },
   { key: "major", column: 5, category: FieldCategory.OTHER },
   { key: "otherMajor", column: 6, category: FieldCategory.OTHER },
   { key: "secondMajor", column: 7, category: FieldCategory.OTHER },
@@ -228,6 +233,7 @@ export function buildFieldSpecs(): FieldSpec[] {
       // stays backend-only. This reproduces exactly where the migration's
       // backfill lands the pre-108 seed, so a reseed and an upgrade agree.
       isReviewerVisible: entry.category === FieldCategory.RESPONSE,
+      isGraduationDate: entry.isGraduationDate ?? false,
       ordinal,
       // Only the OPTION members carry a label to write when checked. The
       // FREE_TEXT member holds whatever the applicant typed.

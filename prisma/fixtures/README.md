@@ -66,6 +66,14 @@ only in the database. This file is **committed**, which is a different standard:
   pronouns) are left alone too, since the mapping step matches them against fixed
   vocabularies.
 
+**Graduation dates use the form's Fall/Spring vocabulary, per PRD decision 119.**
+Both files used to write `May 2027` / `December 2027`, which was never what the
+real dropdown offers and which class standing reads as Non-standard. `s26-shape.csv`
+was corrected by mapping each month to its season (May → Spring, December → Fall)
+on its 28 rows and nothing else; `demo-cycle.csv` follows `prisma/seed/corpus.ts`
+on regeneration, and deliberately carries a few blank and `Summer 2027` answers so
+Unknown and Non-standard are both reachable in training.
+
 ## `s26-shape.csv`
 
 **This file is entirely synthetic. It contains no real applicant data.**
