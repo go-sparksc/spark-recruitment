@@ -9,7 +9,8 @@ Handles three rounds: written review, first-round interviews, and second-round
 deliberation via sequential voting passes. 160+ applicants and roughly 30 reviewers per
 cycle.
 
-**Status:** feature-complete, with all nine build phases shipped and gated. CSV import
+**Status:** complete — all nine build phases shipped and gated, the succession gate
+closed, and Spark's first real cycle pending. CSV import
 and field mapping, reviewer assignment, a phone-first scoring dashboard, first-round
 interview import and voting, second-round deliberation by sequential passes, the final
 class with its demographic funnel, and a full JSON export whose round trip is verified by
@@ -27,12 +28,17 @@ Finished cycles are kept in full and indefinitely — an earlier retention rule 
 old ones was reversed, for the reasons in PRD decision 109, leaving FR-5's confirmed
 per-instance deletion as the only way to remove a cycle.
 
-The succession gate is running now: a board member who has never used the tool is taking
-a complete mock cycle from `ADMIN_GUIDE.md` alone, and every place they get stuck is a
-documentation bug. It was deliberately held until the changes above had shipped. The one
-genuinely scarce resource here is a board member who has never seen the tool, and
-spending it on screens that were about to change would have tested documentation that was
-about to be rewritten.
+The succession gate is closed. A board member who had never used the tool took a complete
+mock cycle from `ADMIN_GUIDE.md` alone, and nothing pressing surfaced — no step left them
+stuck and no documentation bug came out of the run. It was deliberately held until the
+changes above had shipped. The one genuinely scarce resource here is a board member who
+has never seen the tool, and spending it on screens that were about to change would have
+tested documentation that was about to be rewritten. The record is in
+[plans/phase-8.md](plans/phase-8.md).
+
+Spark's first real cycle runs on the platform as-is. Smaller improvements may come up
+later and wait until after it, because the only run that exercises the tool under real
+conditions is worth more than any refinement guessed at beforehand.
 
 **Documentation:** **[ADMIN_GUIDE.md](ADMIN_GUIDE.md)** walks one complete cycle, screen
 by screen, for whoever is running applications this semester. **[REVIEWER_GUIDE.md](REVIEWER_GUIDE.md)**

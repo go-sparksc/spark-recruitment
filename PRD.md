@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.26, Phases 0-9 complete, decisions recorded through 118 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is in progress
+**Status:** v1.26, Phases 0-9 complete, decisions recorded through 118 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is complete and found nothing pressing (`plans/phase-8.md`). Spark's first real cycle is pending and runs as-is; any refinements wait until after it
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
