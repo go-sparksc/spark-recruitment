@@ -9,6 +9,7 @@ import {
   mergeGroups,
   nameProposal,
   setFieldRoundSettings,
+  setGraduationDateField,
   setGroupRoundSettings,
   setPromotedRole,
   splitGroup,
@@ -424,6 +425,8 @@ export interface ColumnView {
   groupRole: FieldGroupRole | null;
   promotedRole: PromotedRole | null;
   isReviewerVisible: boolean | null;
+  /// Decision 119's designation. At most one true per instance.
+  isGraduationDate: boolean;
   /// Resolved through lib/fields.ts, so the row shows what the group actually
   /// imposes rather than what the column happens to store.
   effectiveCategory: FieldCategory;
@@ -492,6 +495,29 @@ export function ColumnControls({
           <option value={PromotedRole.NAME}>Name column</option>
         </select>
 
+        {/* Decision 119. Beside the designation because it is one, but on the
+            other side of decision 34's line: it keys nothing, so it stays live
+            after commit when the select beside it freezes. Controlled, with
+            the server's re-render as the only source of `checked`, so ticking
+            a second column visibly moves the mark rather than leaving two. */}
+        <label
+          className="flex items-center gap-1.5 text-xs"
+          title={
+            promoted
+              ? "The email and name columns are removed at commit, so they cannot be the graduation date."
+              : "Class standing is derived from this column. Only one column can be marked."
+          }
+        >
+          <input
+            type="checkbox"
+            checked={column.isGraduationDate}
+            disabled={pending || promoted}
+            onChange={(e) =>
+              run(() => setGraduationDateField(instanceId, e.target.checked ? column.id : null))
+            }
+          />
+          Graduation date
+        </label>
       </div>
 
       {creatingGroup ? (

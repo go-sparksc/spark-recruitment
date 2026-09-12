@@ -238,6 +238,89 @@ export async function setFieldRoundSettings(
   return ok;
 }
 
+/// FR-2's optional graduation-date designation, per decision 119. `fieldId`
+/// null clears it.
+///
+/// **Through `openInstance`, not `openDraft`: editable after commit.** It keys
+/// nothing in Applicant.data, so moving it changes a derived label and orphans no
+/// stored value — decision 34's test for what stays editable, the same one
+/// inclusion and visibility pass.
+///
+/// **Moves rather than refuses**, the way setPromotedRole moves EMAIL: the
+/// previous designation is cleared in the same transaction, so the partial
+/// unique index is never the thing that answers an admin picking a different
+/// column.
+///
+/// Refuses a promoted column, in a sentence, ahead of the database CHECK that
+/// would otherwise answer with a stack trace. A promoted row is deleted at commit
+/// and would take the designation with it.
+///
+/// Grouped columns are deliberately allowed. Class standing resolves through the
+/// same `resolveField` as the column it comes from, group included, so there is
+/// no half-visible state to guard against.
+///
+/// Audited only after commit, as SET_FIELD_VISIBILITY is: before commit there
+/// are no applicants and no reviewers for the entry to be about.
+export async function setGraduationDateField(
+  instanceId: string,
+  fieldId: string | null,
+): Promise<ActionState> {
+  const { instance, session } = await openInstance(instanceId);
+
+  if (fieldId !== null) {
+    const field = await prisma.field.findFirst({
+      where: { id: fieldId, instanceId },
+      select: { promotedRole: true },
+    });
+    if (!field) return { error: "No such column." };
+    if (field.promotedRole !== null) {
+      return {
+        error:
+          "The email or name column cannot be the graduation date — it is removed at commit. " +
+          "Clear its designation first.",
+      };
+    }
+  }
+
+  const previous = await prisma.field.findFirst({
+    where: { instanceId, isGraduationDate: true },
+    select: { id: true },
+  });
+  const previousFieldId = previous?.id ?? null;
+  if (previousFieldId === fieldId) {
+    refresh(instanceId);
+    return ok;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Clear first, then set, so the one-per-instance index never sees two.
+    await tx.field.updateMany({
+      where: { instanceId, isGraduationDate: true },
+      data: { isGraduationDate: false },
+    });
+    if (fieldId !== null) {
+      await tx.field.update({ where: { id: fieldId }, data: { isGraduationDate: true } });
+    }
+
+    if (instance.importCommittedAt !== null) {
+      await tx.auditLog.create({
+        data: {
+          instanceId,
+          ...auditActor(session),
+          action: "SET_GRADUATION_DATE_FIELD",
+          entityType: "Field",
+          // The column now designated, or the one just cleared when nothing is.
+          entityId: fieldId ?? previousFieldId ?? instanceId,
+          previousValue: { graduationDateFieldId: previousFieldId },
+        },
+      });
+    }
+  });
+
+  refresh(instanceId);
+  return ok;
+}
+
 /// FR-2's designation. Setting EMAIL clears any previous email column, since the
 /// database permits only one per instance and silently failing the unique index
 /// would be a worse experience than moving the designation.
@@ -250,9 +333,18 @@ export async function setPromotedRole(
 
   const field = await prisma.field.findFirst({
     where: { id: fieldId, instanceId },
-    select: { groupId: true },
+    select: { groupId: true, isGraduationDate: true },
   });
   if (!field) return { error: "No such column." };
+
+  // Decision 119, ahead of the database CHECK that would otherwise throw. A
+  // promoted row is deleted at commit and would take the designation with it.
+  if (role !== null && field.isGraduationDate) {
+    return {
+      error:
+        "This column is marked as the graduation date. Unmark it before making it the email or name column.",
+    };
+  }
 
   if (role !== null && field.groupId !== null) {
     return {

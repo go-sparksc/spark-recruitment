@@ -84,6 +84,7 @@ export default async function MappingPage({ params }: { params: Promise<{ id: st
       groupRole: field.groupRole,
       promotedRole: field.promotedRole,
       isReviewerVisible: field.isReviewerVisible,
+      isGraduationDate: field.isGraduationDate,
       effectiveCategory: resolved.category,
       effectiveIncluded: resolved.isIncluded,
       inheritedFromGroup: resolved.inheritedFromGroup,
