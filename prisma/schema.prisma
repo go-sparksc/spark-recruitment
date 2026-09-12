@@ -73,6 +73,16 @@ enum PromotedRole {
   NAME
 }
 
+/// The two seasons a cycle can run in, and the only two the real form's
+/// graduation-date dropdown offers. PRD decision 119. There is no SUMMER, and
+/// that is not a carve-out: a Summer answer is off-format like any other value
+/// outside the dropdown, and reads Non-standard. `lib/class-standing.ts` mirrors
+/// these values as a string union so it stays pure.
+enum TermSeason {
+  SPRING
+  FALL
+}
+
 /// Which of FR-12's two uploads a staged row came from. The two sheets stage,
 /// preview and commit on their own schedules (PRD decision 47), so this is what
 /// keeps one sheet's staging set from being read as the other's.
@@ -201,6 +211,18 @@ model Instance {
   /// Stale proposals on a committed instance would read as meaningful to a
   /// successor and could contradict the FieldGroup rows beside them.
   importProposals   Json?
+
+  /// The semester this cycle runs in — the "now" class standing counts from.
+  /// PRD decision 119. Collected at creation and IMMUTABLE once set: the actions
+  /// that write it refuse a second write, because a semester that can change
+  /// mid-cycle relabels every applicant mid-round.
+  ///
+  /// Nullable only for instances created before decision 119, which get one
+  /// set-once control on the settings page. While null, class standing is absent
+  /// rather than Unknown. A raw-SQL CHECK holds the two columns set-or-null
+  /// together, and a second bounds the year; see the migration.
+  currentTermSeason TermSeason?
+  currentTermYear   Int?
 
   applicants          Applicant[]
   assignments         Assignment[]
@@ -342,6 +364,23 @@ model Field {
   /// Server-side enforcement reads this; the client is never trusted to hide
   /// anything. Decision 108.
   isReviewerVisible Boolean?
+
+  /// FR-2's optional graduation-date designation: the column class standing is
+  /// derived from. PRD decision 119.
+  ///
+  /// Not a PromotedRole. A promoted row is deleted at commit, and this one has to
+  /// survive it. It is also not frozen at commit, because it keys nothing in
+  /// Applicant.data (decision 34's line). It lives here rather than as a foreign
+  /// key on Instance because FR-20's restore writes Instance before Field, and an
+  /// Instance → Field reference would make that order circular.
+  ///
+  /// At most one per instance, by a partial unique index; never on a promoted
+  /// row, by a CHECK. Both are raw SQL in the migration, asserted by
+  /// prisma/checks/.
+  ///
+  /// Carries no visibility of its own. Class standing resolves exactly as this
+  /// column does, through lib/fields.ts.
+  isGraduationDate Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -65,9 +65,9 @@ export interface TableManifest {
 /// compile time — a table added here with no query fails `npm run typecheck`
 /// rather than exporting as an empty array.
 export const EXPORT_TABLES = [
-  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "importCommittedAt", "importProposals"] },
+  { table: "Instance", columns: ["id", "name", "passwordHash", "currentStage", "createdAt", "updatedAt", "importCommittedAt", "importProposals", "currentTermSeason", "currentTermYear"] },
   { table: "FieldGroup", columns: ["id", "instanceId", "key", "displayName", "category", "isMultiSelect", "isIncluded", "ordinal", "isReviewerVisible", "createdAt", "updatedAt"] },
-  { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "isReviewerVisible", "createdAt", "updatedAt"] },
+  { table: "Field", columns: ["id", "instanceId", "sourceHeader", "displayName", "category", "groupId", "groupRole", "promotedRole", "ordinal", "isIncluded", "isReviewerVisible", "isGraduationDate", "createdAt", "updatedAt"] },
   { table: "ImportRow", columns: ["id", "instanceId", "rowIndex", "cells", "discarded", "createdAt"] },
   { table: "RubricCategory", columns: ["id", "instanceId", "name", "maxPoints", "ordinal", "minPoints", "createdAt", "updatedAt"] },
   // Decision 114. After RubricCategory, which it cascades from.
