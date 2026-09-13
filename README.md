@@ -36,9 +36,13 @@ has never seen the tool, and spending it on screens that were about to change wo
 tested documentation that was about to be rewritten. The record is in
 [plans/phase-8.md](plans/phase-8.md).
 
-Spark's first real cycle runs on the platform as-is. Smaller improvements may come up
-later and wait until after it, because the only run that exercises the tool under real
-conditions is worth more than any refinement guessed at beforehand.
+Spark's first real cycle runs on the platform with one addition. Smaller improvements may
+come up later and wait until after it, because the only run that exercises the tool under
+real conditions is worth more than any refinement guessed at beforehand. The exception,
+approved by the owner, is **class standing**, per PRD decision 119. It is derived from a
+designated graduation-date column and a set-once semester chosen when the cycle is created,
+and shown under the graduation date on every applicant view, with exactly that column's
+visibility.
 
 **Documentation:** **[ADMIN_GUIDE.md](ADMIN_GUIDE.md)** walks one complete cycle, screen
 by screen, for whoever is running applications this semester. **[REVIEWER_GUIDE.md](REVIEWER_GUIDE.md)**
@@ -46,7 +50,7 @@ is the one-page version to paste into Slack alongside the access code.
 **[ARCHITECTURE.md](ARCHITECTURE.md)** is for the next person to maintain the code.
 
 **[PRD.md](PRD.md)** has the full specification, including the permissions model and the
-118 numbered decisions recording what was chosen and why. **[BUILD_PLAN.md](BUILD_PLAN.md)**
+119 numbered decisions recording what was chosen and why. **[BUILD_PLAN.md](BUILD_PLAN.md)**
 has the phased execution plan, and **[plans/](plans/)** is the design history, one file
 per phase, including what each gate found.
 

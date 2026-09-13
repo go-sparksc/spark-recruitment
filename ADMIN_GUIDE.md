@@ -41,7 +41,7 @@ password.
 
 ![Creating a cycle from the application export](docs/img/01-new-instance.jpg)
 
-Three things:
+Four things:
 
 - **Instance name** — how this cycle appears in the list. "F26 Recruitment" or
   similar.
@@ -49,6 +49,12 @@ Three things:
   app password. Share it with the other admins on this cycle. **It cannot be
   recovered.** If everyone forgets it, an admin with the app password can reset
   it from Settings, but nobody can read it back.
+- **Current semester** — Spring or Fall, and the year: the semester this cycle
+  runs in. Applicant pages use it to show each applicant's class standing
+  (Senior, Junior and so on). **Check it before you continue: it cannot be
+  changed later.** A wrong semester labels every applicant a year off for the
+  whole cycle, and the only fix is deleting the cycle and starting again. Nothing
+  is filled in for you, on purpose.
 - **The application export**, as a `.csv`.
 
 > **A cycle accepts exactly one file, and importing is final.** If the file turns
@@ -137,6 +143,42 @@ Further down, in the columns table:
 - **Email Address** → designation **Email column**. This is how later imports
   find the right person, so it is not optional.
 - **First Name** and **Last Name** → designation **Name column** (both of them).
+
+### The graduation date (optional)
+
+Tick **Graduation date** on the column that holds it. Applicant pages then show a
+**Class standing** line directly under the graduation date, worked out from that
+answer and the semester you chose in step 1:
+
+| The answer is… | Class standing |
+|---|---|
+| a term 0–1 semesters away | Senior |
+| 2–3 away | Junior |
+| 4–5 away | Sophomore |
+| 6–9 away | Freshman |
+| blank | Unknown |
+| anything else — a past term, more than 9 away, "Summer", "or later", a typo | Non-standard |
+
+Only one column can be ticked; ticking another moves it. Unlike the designation
+beside it, this one **stays editable after you commit**.
+
+**Class standing has no visibility setting of its own.** It follows the
+graduation-date column exactly: set that column **Reviewer-visible** and
+reviewers see both lines, in every round including the written one; set it
+**Backend only** and neither reaches a reviewer. If the club does not want
+reviewers — especially written reviewers — knowing an applicant's year, Backend
+only on the graduation date is the whole of that decision.
+
+Two things it does not do, so nobody reads more into it than is there. It counts
+on a four-year scale, so a student in a five-year program reads a year young in
+the middle of their degree; the graduation date directly above it is the precise
+answer. And it only reads terms written exactly as `Fall 2027` or `Spring 2028`,
+which is what the application form's dropdown produces.
+
+> **Older cycles.** A cycle created before this feature has no semester, so its
+> applicant pages show no class standing. Its **Settings** page has a **Current
+> semester** card where you can set one — once. It needs the cycle's own
+> password, and like the one on the creation form it cannot be changed after.
 
 ### Categories
 
@@ -443,6 +485,13 @@ enforced by the tool, not by people remembering.
 
 The name and email rule is specific to this round: reviewers see both from the
 first round onwards. The ethnicity rule is not — it holds in every round.
+
+**Class standing, if you set it up in step 2**, appears under the graduation date
+wherever reviewers can see that column — including in this round. That is a
+deliberate trade rather than a gap in the blinding: it tells a reviewer nothing
+the graduation date was not already telling them. If you want written reviewers
+not to know an applicant's year at all, the graduation-date column has to be
+Backend only.
 
 They score against your rubric, reading **your line for each score value** above
 the buttons, and scores **save as they tap** — there is no submit button to

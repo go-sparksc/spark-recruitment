@@ -75,6 +75,7 @@ lib/
   reconciliation.ts FR-13's four-tier name-matching cascade
   roster.ts         FR-6 paste parsing
   fields.ts         §6 visibility resolution — the single source
+  class-standing.ts decision 119's graduation-date → class standing table
   demographics.ts   §10.7's checked predicate and 1/n weighting
   funnel.ts         FR-19's breakdown, built on demographics.ts
   export.ts         what "the entire instance" and "intact" mean
@@ -282,7 +283,7 @@ different matter and are still pruned, on every successful admin sign-in.
 
 ## Where the reasoning is written down
 
-- **`PRD.md` §10** — 118 numbered decisions, each recording what was chosen, what
+- **`PRD.md` §10** — 119 numbered decisions, each recording what was chosen, what
   was rejected, and why. When something looks arbitrary, it is usually in here.
 - **`plans/phase-N.md`** — the design history, one file per build phase,
   including what each gate found.

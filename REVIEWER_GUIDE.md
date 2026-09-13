@@ -37,6 +37,13 @@ Beyond that, what you see is what your admin chose to show: the written answers
 always, and sometimes a detail like the major or graduation year. If a field is
 not there, it is because it was deliberately kept back.
 
+If you can see the graduation date, you may see **Class standing** just under it
+— Senior, Junior, Sophomore or Freshman, worked out for you. Two other words can
+appear there. **Unknown** means the applicant left the question blank.
+**Non-standard** means the answer does not fit a normal undergraduate timeline, or
+was not written as a plain term like "Fall 2027" — read the graduation date above
+it for yourself. Neither is a mark against anyone.
+
 Tap one to open it.
 
 ---
