@@ -163,7 +163,7 @@ export async function commitImport(
         importProposals: Prisma.DbNull,
       },
     });
-  });
+  }, { maxWait: 10_000, timeout: 60_000 });
 
   revalidatePath("/");
   redirect(`/instances/${instanceId}/mapping`);
