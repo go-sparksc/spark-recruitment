@@ -250,6 +250,19 @@ cycle. A trainee would miss this without being told; it is now called out in ste
   read-only and unmount the form along with its error, so the fix is a choice between
   the two, not a one-line change. Found in decision 119's click-through gate.
 
+- **The import commit crosses the country, and a timeout covers for it.** Added
+  2026-09-12. A 197-row commit failed in production, and the fast fix raised the
+  limits on its interactive transaction: `commitImport` in
+  `app/instances/[id]/preview/actions.ts` now passes `{ maxWait: 10_000, timeout:
+  60_000 }` in place of Prisma's defaults of 2000 ms and 5000 ms. That accommodates the slowness rather than fixing it. The project's
+  functions run in `iad1` and the database is Neon in `us-west-2`, and the commit
+  awaits one `applicant.create` per row inside the transaction, so every row is a
+  cross-country round trip while a write transaction is held open. That distance is
+  the likely real cause. The actual fix is whichever is cheaper to do later: batch
+  the inserts into one `createMany`, or deploy functions in a region matched to the
+  database. The function ceiling is not the constraint: the project sets no
+  duration of its own, and Vercel's API reports the fluid default of 300 s.
+
 - ~~**`REVIEWER_GUIDE.md`'s first- and second-round sections are unverified against
   a running screen.**~~ **Closed 2026-09-06**, using the throwaway-instance recipe
   from `plans/phase-8-decision-106.md`: `npm run seed` and `seed:advance` under
