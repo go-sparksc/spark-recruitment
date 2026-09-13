@@ -229,6 +229,27 @@ cycle. A trainee would miss this without being told; it is now called out in ste
   rather than changing app copy in the middle of a documentation pass; worth one
   commit of its own.
 
+- **Screenshots predate decision 119.** Added 2026-09-13, deferred by the owner.
+  Captured before the change, so none can show it: `docs/img/01-new-instance.jpg`
+  (the form now has a Current semester field), the mapping-table images
+  `02-mapping.jpg`, `02b-column-visibility.jpg` and `02c-visibility-outstanding.jpg`
+  (each column row now has a Graduation date checkbox), and the applicant-page images
+  `r3-scoring.jpg`, `r5-first-round-applicant.jpg` and `r7-second-round-profile.jpg`
+  (a Class standing line where the graduation date is reviewer-visible). Chosen by
+  what each file is named for, not by opening every image, so check which actually
+  frame the changed controls before recapturing. The guide text around them is
+  current. See `plans/decision-119.md`.
+
+- **The semester card reads "Not set" behind its own refusal.** Added 2026-09-13,
+  deferred by the owner as cosmetic. When the set-once form on Settings is submitted
+  from a stale page — the semester was set in another tab or by another admin — the
+  action correctly refuses and writes nothing, and the error names the semester that
+  stands ("already set to Spring 2026, and it cannot be changed"). But
+  `setCurrentSemester` does not revalidate on refusal, so the card above the error
+  still says "Not set" until the page reloads. Revalidating would re-render the card
+  read-only and unmount the form along with its error, so the fix is a choice between
+  the two, not a one-line change. Found in decision 119's click-through gate.
+
 - ~~**`REVIEWER_GUIDE.md`'s first- and second-round sections are unverified against
   a running screen.**~~ **Closed 2026-09-06**, using the throwaway-instance recipe
   from `plans/phase-8-decision-106.md`: `npm run seed` and `seed:advance` under
