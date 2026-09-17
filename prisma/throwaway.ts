@@ -114,10 +114,78 @@ function applicantId(index: number): string {
 /// The interview data covers all 62 either way, because the sheets do.
 const SECOND_ROUND_COUNT = 20;
 
-const SYNTHETIC_QUESTIONS = [
-  { header: "What are you studying?", answers: ["Computer Science", "Business Administration", "Biomedical Engineering", "Design", "Economics"] },
-  { header: "Why do you want to join Spark SC?", answers: ["Synthetic answer — the written application is not what this test is about.", "Synthetic answer — see the interview sheets for the content under test."] },
-  { header: "When do you graduate?", answers: ["Spring 2027", "Fall 2027", "Spring 2028", "Fall 2028", "Spring 2029"] },
+/// The application, as six questions with answers at realistic length.
+///
+/// **Length is the point, not decoration.** The first version of this was three
+/// one-liners, one of which read "Synthetic answer — the written application is
+/// not what this test is about." It rendered correctly and still read as an
+/// absence: someone checking whether the second-round profile shows the
+/// application saw a line announcing that it did not, and reasonably concluded
+/// the section was broken. A fixture that says "ignore me" is indistinguishable
+/// from a fixture that failed.
+///
+/// It also matters for the judgement this instance exists to support. Decision
+/// 120 asks whether a profile carrying two interviewers' notes, three written
+/// reviews and a nine-part transcript is still legible. A page whose application
+/// section is three short lines cannot answer that; one carrying a few hundred
+/// words of prose can.
+///
+/// Every word below is invented. Nothing here comes from any real application —
+/// only the applicants' names are real, and those are read from the sheet at run
+/// time and never written to the repository.
+const SYNTHETIC_QUESTIONS: { header: string; answers: string[]; isGraduation?: boolean }[] = [
+  {
+    header: "What are you studying, and what drew you to it?",
+    answers: [
+      "Computer Science. I came in wanting to build games and stayed for the systems courses — the first time I saw how a compiler actually worked I lost a weekend to it.",
+      "Business Administration, with a minor in design. I wanted the vocabulary to talk to people who make things, without having to be the one making them.",
+      "Biomedical Engineering. My mother is a nurse and I grew up hearing about equipment that almost worked, which turns out to be a whole field.",
+      "Economics. I thought it would be about money and it turned out to be about why people do things, which is more interesting and much harder.",
+      "Design, though I spend most of my time in the engineering building. The two departments do not talk to each other much and I have found that gap useful.",
+    ],
+  },
+  {
+    header: "Tell us about something you started. What happened to it?",
+    answers: [
+      "In my second year I started a repair café in the dorm basement — people brought broken lamps, headphones, a rice cooker once, and we fixed what we could on Sunday afternoons.\n\nIt ran for about seven months. The hard part was never the repairs; it was that I was the only one who knew where the tools were, so nothing happened on weekends I was away. I wrote down where everything lived and trained two other people, and it survived my semester abroad. It is still running. I am not involved any more, which I think is the point.",
+      "I built a tool that scraped our department's course listings and told you which classes still had seats, because the registrar's page refused to say. About four hundred people used it during registration week.\n\nThen the university asked me to take it down. I did. I still think I was right that the information should have been public, and I also think arguing about it would have cost more than it was worth. I sent the maintainers a note about what I had learned from the traffic patterns and they shipped a filter the next year.",
+      "A friend and I tried to start a tutoring service for the local high school and it did not work. We had eleven tutors signed up and three students, and we had built the whole thing around the assumption that finding tutors would be the hard part.\n\nWhat I took from it is that we never asked a single student what they wanted before we built it. We asked teachers, who told us what they thought students needed. Those turned out to be different questions with different answers.",
+      "I run a small newsletter about the food carts around campus — where they are, what is good, which ones take cards. It started as a text thread with four friends and is now read by about nine hundred people.\n\nIt is not a business and I have turned down the two people who wanted to advertise in it, because the moment it becomes that I will stop wanting to write it. It has taught me more about consistency than anything else I have done: the only thing that matters is that it arrives on Thursday.",
+    ],
+  },
+  {
+    header: "Describe a time you wanted to make something happen without the resources to do it.",
+    answers: [
+      "My high school had no space for students who prayed during the day, and the library staff were not unkind about it but they were not going to give up a room either.\n\nI spent about two months finding out who actually had the authority to say yes, which turned out not to be anyone I had been talking to. A teacher who ran the theatre programme had a storage room nobody used between shows. I asked her directly and she said yes in about a minute. The lesson I keep coming back to is that I had spent two months asking the wrong people politely.",
+      "I wanted to run a hackathon in my first year and had no money, no venue and no reputation. I got the venue by asking a professor whose lab sat empty at weekends, and the food by calling nine restaurants and getting two yeses.\n\nWhat I could not get was people. Twenty-two signed up and eleven came. I had assumed that if the event was good, people would find it, and I had done nothing to make that true. The second one had ninety, because I spent three weeks talking to people individually instead of posting a form.",
+      "I needed a specific piece of lab equipment for a project and the department would not buy one for an undergraduate. I found a broken one on a surplus auction site for about a tenth of the price and spent a month getting it working, mostly by emailing people who had written about the same model.\n\nTwo of them replied. One sent me a schematic he had drawn by hand in 1998. I still have it.",
+      "Our student organisation lost its funding halfway through the year because of a paperwork deadline nobody had told us about. We had committed to an event for two hundred people.\n\nI could not undo the deadline, so I stopped trying. We moved the event outdoors, cut the catering to something we could cook ourselves, and ran it for about a fifth of the budget. Roughly the same number of people came. I am still not sure whether that says something good about us or something uncomfortable about the original budget.",
+    ],
+  },
+  {
+    header: "What do you want to get out of Spark SC?",
+    answers: [
+      "Mostly I want to be around people who finish things. I have a lot of half-built projects and I have noticed that the difference between the ones I finished and the ones I did not is almost always whether somebody else was expecting them.",
+      "I want to work on something where I am not the most capable person in the room. Everything I have done so far I have done because nobody else would, which is a bad reason and produces mediocre work.",
+      "Project Launch, specifically. I went to a high school where nobody used the word entrepreneurship and it would not have occurred to me that starting something was a thing a person like me could do. I would like to be the person who says that out loud to somebody else.",
+      "Honestly, I want to find out whether I like this. I have been told I would be good at it by people who have never done it, and the only way to know is to be somewhere it is actually happening.",
+    ],
+  },
+  {
+    header: "When do you graduate?",
+    isGraduation: true,
+    answers: ["Spring 2027", "Fall 2027", "Spring 2028", "Fall 2028", "Spring 2029"],
+  },
+  {
+    header: "Anything else you would like us to know?",
+    answers: [
+      "",
+      "",
+      "",
+      "I am a transfer student, so if my timeline looks strange that is why.",
+      "I work about twenty hours a week and would want to be honest about that up front rather than over-commit and disappear in November.",
+    ],
+  },
 ];
 
 function arg(name: string): string | undefined {
@@ -263,8 +331,14 @@ async function main() {
           displayName: question.header,
           category: FieldCategory.RESPONSE,
           ordinal,
+          // Explicitly true, never left null. Null is "nobody has chosen", which
+          // §6 resolves HIDDEN — a throwaway whose application section is empty
+          // by default would look like the bug it exists to rule out.
           isReviewerVisible: true,
-          isGraduationDate: question.header === "When do you graduate?",
+          // Flagged on the question rather than matched by its text, so renaming
+          // it cannot silently drop decision 119's class-standing line. At most
+          // one per instance, which a partial unique index enforces.
+          isGraduationDate: question.isGraduation === true,
         })),
       },
       // The written rubric, reused from the main seed rather than invented here.
