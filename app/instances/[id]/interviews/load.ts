@@ -184,6 +184,7 @@ export async function loadInterviewSheet(
     categories,
     mappingErrors,
     applicantNames,
+    headers,
   });
 
   // What a commit would overwrite. Keyed exactly as `commitInterviewSheet` keys

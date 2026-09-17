@@ -34,7 +34,6 @@ const NAMES = new Map([
   ["app-1", "Cecilia Fang"],
   ["app-2", "Jordan Lee"],
 ]);
-
 /// A resolved scores row. Defaults describe the ordinary case — matched by
 /// email, both categories scored, average agreeing — so each test changes only
 /// the thing it is about.
@@ -67,6 +66,7 @@ function preview(rows: StagedRow[], mappingErrors: string[] = []) {
     categories: CATEGORIES,
     mappingErrors,
     applicantNames: NAMES,
+    headers: HEADERS,
   });
 }
 
@@ -224,6 +224,7 @@ describe("the average", () => {
       categories: three,
       mappingErrors: [],
       applicantNames: NAMES,
+      headers: HEADERS,
     });
 
     expect(findings.rows[0].averageDisagrees).toBeNull();
@@ -399,6 +400,7 @@ describe("the notes sheet", () => {
       categories: CATEGORIES,
       mappingErrors: [],
       applicantNames: NAMES,
+      headers: HEADERS,
     });
 
   it("reads no category scores and reports no row-count outliers", () => {
@@ -493,10 +495,309 @@ describe("rows that cannot become an InterviewResult", () => {
       categories: CATEGORIES,
       mappingErrors: [],
       applicantNames: NAMES,
+      headers: HEADERS,
     });
 
     expect(findings.rows[0].unreadableAverage).toBe(false);
     expect(findings.rows[0].missingInterviewerName).toBe(false);
     expect(findings.canCommit).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRD decision 120 — computed averages, category notes, recommendation, transcript
+// ---------------------------------------------------------------------------
+
+describe("decision 120: a scores sheet with no Average column", () => {
+  /// Same two categories as everything above, but no column 5. This is F26's
+  /// actual shape: the Google Form exports the four scores and never an average.
+  const NO_AVERAGE = resolveMapping(
+    {
+      "0": "APPLICANT_EMAIL",
+      "2": "INTERVIEWER_NAME",
+      "3": "CATEGORY:cat-a",
+      "4": "CATEGORY:cat-b",
+    },
+    new Set(["cat-a", "cat-b"]),
+  );
+
+  const previewNoAverage = (rows: StagedRow[]) =>
+    buildInterviewPreview({
+      sheet: "SCORES",
+      rows,
+      columns: NO_AVERAGE,
+      categories: CATEGORIES,
+      mappingErrors: [],
+      applicantNames: NAMES,
+      headers: HEADERS,
+    });
+
+  it("computes the score from the categories and says that it did", () => {
+    const findings = previewNoAverage([row({ cells: { "3": "4", "4": "3" } })]);
+
+    expect(findings.rows[0].score).toBe(3.5);
+    expect(findings.rows[0].scoreIsComputed).toBe(true);
+    expect(findings.rows[0].average).toBeNull();
+    expect(findings.canCommit).toBe(true);
+  });
+
+  it("warns that the scores are computed, so nobody reads them as the sheet's", () => {
+    const findings = previewNoAverage([row({ cells: { "3": "4", "4": "3" } })]);
+    expect(findings.warnings.some((w) => w.includes("no Average column"))).toBe(true);
+    expect(findings.blockers).toEqual([]);
+  });
+
+  it("averages only the cells that were readable, never treating a gap as zero", () => {
+    // Decision 59's rule, arriving from a third side. Three of four readable
+    // means the mean of three — dividing by four would import a silent zero.
+    const findings = previewNoAverage([row({ cells: { "3": "4", "4": "" } })]);
+
+    expect(findings.rows[0].score).toBe(4);
+    expect(findings.rows[0].issues.some((i) => i.kind === "BLANK")).toBe(true);
+  });
+
+  it("blocks a row with no readable category at all, and says why", () => {
+    const findings = previewNoAverage([row({ cells: { "3": "", "4": "" } })]);
+
+    expect(findings.rows[0].score).toBeNull();
+    expect(findings.rows[0].unreadableAverage).toBe(true);
+    expect(findings.rows[0].unreadableAverageCause).toBe("COMPUTED");
+    expect(findings.canCommit).toBe(false);
+    // The old sentence told the admin to fix the Average column. This sheet has
+    // no Average column, so that advice would send them looking for nothing.
+    const blocker = findings.blockers.find((b) => b.includes("no category score"));
+    expect(blocker).toBeDefined();
+    expect(blocker).toContain("no Average column");
+  });
+
+  it("never reports an average disagreement, because a mean cannot disagree with itself", () => {
+    // Left unsuppressed, this fires on every row of the sheet — 123 of them in
+    // the file this decision was built for.
+    const findings = previewNoAverage([
+      row({ cells: { "3": "4", "4": "3" } }),
+      row({ rowIndex: 3, cells: { "3": "2", "4": "1" } }),
+    ]);
+
+    expect(findings.rows.every((r) => r.averageDisagrees === null)).toBe(true);
+    expect(findings.warnings.some((w) => w.includes("disagrees"))).toBe(false);
+  });
+});
+
+describe("decision 120: a mapped Average column still behaves exactly as before", () => {
+  it("imports the stated number verbatim and does not mark it computed", () => {
+    // The COLUMNS fixture maps column 5 as AVERAGE. 3.5 is stated; the mean of
+    // 4 and 3 is also 3.5, so this isolates provenance from arithmetic.
+    const findings = preview([row({ cells: { "3": "4", "4": "3", "5": "3.5" } })]);
+
+    expect(findings.rows[0].score).toBe(3.5);
+    expect(findings.rows[0].scoreIsComputed).toBe(false);
+  });
+
+  it("still blocks an unreadable stated average, with the original advice", () => {
+    const findings = preview([row({ cells: { "5": "n/a" } })]);
+
+    expect(findings.rows[0].unreadableAverageCause).toBe("STATED");
+    expect(findings.blockers.some((b) => b.includes("no readable Average"))).toBe(true);
+  });
+
+  it("prefers the stated number over the categories even when they disagree", () => {
+    // Clause 12h, untouched: interviewers sometimes adjust the average
+    // deliberately, and the sheet wins.
+    const findings = preview([row({ cells: { "3": "4", "4": "4", "5": "2" } })]);
+
+    expect(findings.rows[0].score).toBe(2);
+    expect(findings.rows[0].scoreIsComputed).toBe(false);
+    expect(findings.rows[0].averageDisagrees).toEqual({ stated: 2, computed: 4 });
+  });
+});
+
+describe("decision 120: per-category notes", () => {
+  const WITH_NOTES = resolveMapping(
+    {
+      "0": "APPLICANT_EMAIL",
+      "2": "INTERVIEWER_NAME",
+      "3": "CATEGORY:cat-a",
+      "4": "CATEGORY:cat-b",
+      "5": "AVERAGE",
+      "6": "CATEGORY_NOTE:cat-a",
+      "7": "CATEGORY_NOTE:cat-b",
+    },
+    new Set(["cat-a", "cat-b"]),
+  );
+
+  const previewWithNotes = (rows: StagedRow[]) =>
+    buildInterviewPreview({
+      sheet: "SCORES",
+      rows,
+      columns: WITH_NOTES,
+      categories: CATEGORIES,
+      mappingErrors: [],
+      applicantNames: NAMES,
+      headers: HEADERS,
+    });
+
+  it("attaches each note to its own category", () => {
+    const findings = previewWithNotes([
+      row({ cells: { "3": "4", "4": "3", "5": "3.5", "6": "strong start", "7": "less sure" } }),
+    ]);
+
+    expect(findings.rows[0].categoryNotes).toEqual([
+      { interviewCategoryId: "cat-a", body: "strong start" },
+      { interviewCategoryId: "cat-b", body: "less sure" },
+    ]);
+    expect(findings.rows[0].notesWithoutScore).toEqual([]);
+  });
+
+  it("drops a blank note rather than storing an empty string", () => {
+    const findings = previewWithNotes([
+      row({ cells: { "3": "4", "4": "3", "5": "3.5", "6": "   ", "7": "kept" } }),
+    ]);
+
+    expect(findings.rows[0].categoryNotes).toEqual([
+      { interviewCategoryId: "cat-b", body: "kept" },
+    ]);
+  });
+
+  it("reports a note whose score did not parse, and does not import it", () => {
+    // The note is a column on InterviewCategoryScore, and decision 59 writes no
+    // such row for a blank score. So there is nowhere to put it.
+    const findings = previewWithNotes([
+      row({ cells: { "3": "", "4": "3", "5": "3", "6": "orphaned", "7": "" } }),
+    ]);
+
+    expect(findings.rows[0].categoryNotes).toEqual([]);
+    expect(findings.rows[0].notesWithoutScore).toEqual(["Communication"]);
+    expect(findings.warnings.some((w) => w.includes("could not be read"))).toBe(true);
+    // Reported, never refused — the missing score is the problem, and it is
+    // already flagged in its own right.
+    expect(findings.canCommit).toBe(true);
+  });
+});
+
+describe("decision 120: the recommendation", () => {
+  const WITH_RECOMMENDATION = resolveMapping(
+    {
+      "0": "APPLICANT_EMAIL",
+      "2": "INTERVIEWER_NAME",
+      "3": "CATEGORY:cat-a",
+      "4": "CATEGORY:cat-b",
+      "5": "AVERAGE",
+      "6": "RECOMMENDATION",
+      "7": "OVERALL_NOTE",
+    },
+    new Set(["cat-a", "cat-b"]),
+  );
+
+  const previewRec = (cells: Record<string, string>) =>
+    buildInterviewPreview({
+      sheet: "SCORES",
+      rows: [row({ cells: { "3": "4", "4": "3", "5": "3.5", ...cells } })],
+      columns: WITH_RECOMMENDATION,
+      categories: CATEGORIES,
+      mappingErrors: [],
+      applicantNames: NAMES,
+      headers: HEADERS,
+    });
+
+  it("reads yes and no in any case, trimmed", () => {
+    expect(previewRec({ "6": "Yes" }).rows[0].recommendation).toBe("YES");
+    expect(previewRec({ "6": " no " }).rows[0].recommendation).toBe("NO");
+    expect(previewRec({ "6": "YES" }).rows[0].recommendation).toBe("YES");
+  });
+
+  it("reads a blank as absent, not as a No", () => {
+    const findings = previewRec({ "6": "" });
+    expect(findings.rows[0].recommendation).toBeNull();
+    expect(findings.rows[0].unreadableRecommendation).toBe(false);
+    expect(findings.warnings.some((w) => w.includes("recommendation"))).toBe(false);
+  });
+
+  it("reads anything else as absent and warns, rather than blocking or inventing a No", () => {
+    // A rejection the interviewer did not write is worse than no recommendation,
+    // and the column is advisory — nothing tallies it, so nothing needs it.
+    const findings = previewRec({ "6": "maybe" });
+
+    expect(findings.rows[0].recommendation).toBeNull();
+    expect(findings.rows[0].unreadableRecommendation).toBe(true);
+    expect(findings.canCommit).toBe(true);
+    const warning = findings.warnings.find((w) => w.includes("recommendation"));
+    expect(warning).toContain("rather than as a No");
+  });
+
+  it("trims the overall note and reports a blank one as empty", () => {
+    expect(previewRec({ "7": "  sat well  " }).rows[0].overallNote).toBe("sat well");
+    expect(previewRec({ "7": "   " }).rows[0].overallNote).toBe("");
+  });
+});
+
+describe("decision 120: the transcript", () => {
+  const QUESTION_HEADERS = [
+    "Timestamp",
+    "Your Name",
+    "Applicant Name",
+    "1. Tell us a bit about yourself. (1-2 minutes)",
+    "2. Why do YOU want to be a part of Spark SC? (2-3 min)",
+  ];
+
+  const TRANSCRIPT_COLUMNS = resolveMapping(
+    { "1": "INTERVIEWER_NAME", "2": "APPLICANT_NAME", "3": "TRANSCRIPT", "4": "TRANSCRIPT" },
+    new Set(),
+  );
+
+  const previewNotes = (cells: Record<string, string>) =>
+    buildInterviewPreview({
+      sheet: "NOTES",
+      rows: [
+        {
+          rowIndex: 2,
+          cells: { "1": "Nandini", "2": "Jordan Lee", ...cells },
+          matchedApplicantId: "app-2",
+          matchTier: "NAME" as const,
+          matchConfidence: null,
+          skipped: false,
+        },
+      ],
+      columns: TRANSCRIPT_COLUMNS,
+      categories: [],
+      mappingErrors: [],
+      applicantNames: NAMES,
+      headers: QUESTION_HEADERS,
+    });
+
+  it("carries each question's header text as its prompt, verbatim", () => {
+    // There is no builder screen and no other place the question is written
+    // down, so the header IS the prompt. Verbatim matters: shortening happens at
+    // render, over the stored full text.
+    const findings = previewNotes({ "3": "first gen, transferred", "4": "project launch" });
+
+    expect(findings.rows[0].transcript).toEqual([
+      {
+        columnIndex: 3,
+        prompt: "1. Tell us a bit about yourself. (1-2 minutes)",
+        body: "first gen, transferred",
+      },
+      {
+        columnIndex: 4,
+        prompt: "2. Why do YOU want to be a part of Spark SC? (2-3 min)",
+        body: "project launch",
+      },
+    ]);
+    expect(findings.canCommit).toBe(true);
+  });
+
+  it("keeps an unanswered question in the row, for the commit to drop", () => {
+    // The preview reports what the sheet holds. Which blanks become rows is the
+    // commit's decision, and it is tested where it is made.
+    const findings = previewNotes({ "3": "answered", "4": "" });
+    expect(findings.rows[0].transcript.map((t) => t.body)).toEqual(["answered", ""]);
+  });
+
+  it("does not compute a score or flag an average on the notes sheet", () => {
+    const findings = previewNotes({ "3": "a", "4": "b" });
+
+    expect(findings.rows[0].scoreIsComputed).toBe(false);
+    expect(findings.rows[0].unreadableAverage).toBe(false);
+    expect(findings.rows[0].unreadableAverageCause).toBeNull();
+    expect(findings.blockers).toEqual([]);
   });
 });

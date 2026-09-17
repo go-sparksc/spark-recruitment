@@ -59,22 +59,57 @@ export interface PreviewRow {
   rawName: string;
   interviewerName: string;
   notes: string;
+  /// PRD decision 120, notes sheet. One entry per column mapped as a transcript
+  /// question, in the sheet's left-to-right order, which becomes
+  /// `InterviewQuestion.ordinal`. `prompt` is the header text verbatim.
+  transcript: { columnIndex: number; prompt: string; body: string }[];
+  /// PRD decision 120, scores sheet. Only categories that produced BOTH a
+  /// storable score and a non-empty note — the note is stored on the score row,
+  /// so a note without one has nowhere to go. `notesWithoutScore` counts the
+  /// ones dropped that way so the preview can say so.
+  categoryNotes: { interviewCategoryId: string; body: string }[];
+  notesWithoutScore: string[];
+  /// The interviewer's own summing-up. Empty string when unmapped or blank; the
+  /// commit stores null rather than "".
+  overallNote: string;
+  /// PRD decision 120. Null in three situations that deliberately read alike:
+  /// unmapped, blank, or a value that is neither yes nor no. None may read NO.
+  recommendation: "YES" | "NO" | null;
+  rawRecommendation: string;
+  /// True when `rawRecommendation` was non-blank and did not parse. Warns; never
+  /// blocks — the recommendation is advisory and nothing tallies it.
+  unreadableRecommendation: boolean;
   /// Only the cells that produced a storable value. Decision 59: a blank,
   /// non-numeric or fractional cell writes no row, and the row's other
   /// categories still import.
   categoryPoints: { interviewCategoryId: string; points: number }[];
   issues: CellIssue[];
-  /// The sheet's own number, parsed but never recomputed.
+  /// The sheet's own number, parsed but never recomputed. Null when no average
+  /// column is mapped at all, which PRD decision 120 permits.
   average: number | null;
   rawAverage: string;
-  /// `InterviewResult.score` is a non-null Float and FR-12 forbids recomputing
-  /// the average from the categories, so a row whose Average cannot be read
-  /// cannot become a result at all. Blocking rather than skipped — silently
-  /// dropping an interview is what FR-13's "nothing imports silently" rules out,
-  /// and the admin can fix the file or mark the row as not importing.
+  /// What will actually be stored as `InterviewResult.score`: the sheet's own
+  /// number when there is one, otherwise the mean of this row's storable
+  /// category cells. Null only when neither is available, which blocks.
+  score: number | null;
+  /// PRD decision 120. True when `score` is the mean rather than the sheet's own
+  /// number, which is stored on the row and labelled at every render. Never let
+  /// a computed average pass for a recorded one — that, and not the arithmetic,
+  /// is what decision 6 forbids.
+  scoreIsComputed: boolean;
+  /// `InterviewResult.score` is a non-null Float, so a row that can produce no
+  /// score at all cannot become a result. Blocking rather than skipped —
+  /// silently dropping an interview is what FR-13's "nothing imports silently"
+  /// rules out, and the admin can fix the file or mark the row as not importing.
+  ///
+  /// **Two distinct causes since decision 120**, which `unreadableAverageCause`
+  /// tells apart so the blocker can say what to do. A mapped average column whose
+  /// cell will not parse is a typo in one cell. No average column at all, plus a
+  /// row with no storable category cell either, is a row with nothing in it.
   ///
   /// Scores sheet only; the notes sheet has no average.
   unreadableAverage: boolean;
+  unreadableAverageCause: "STATED" | "COMPUTED" | null;
   /// Clause 12b. Half of `(applicantId, interviewerName)`, which is what makes a
   /// re-upload an upsert rather than a duplicate under decision 47 — a blank one
   /// would silently merge every unnamed interviewer's rows into a single result.
@@ -115,6 +150,10 @@ export interface InterviewPreviewInput {
   /// For naming applicants in collision warnings. Missing ids fall back to the
   /// id, which is ugly and correct — better than a blank where a name goes.
   applicantNames: ReadonlyMap<string, string>;
+  /// The source file's header row. PRD decision 120 needs it because a transcript
+  /// question's prompt IS its header text — there is no other place the question
+  /// is written down, and no builder screen where someone typed it.
+  headers: readonly string[];
 }
 
 const cell = (row: StagedRow, column: number | null): string =>
@@ -199,6 +238,37 @@ function averageDisagreement(
   return round(stated) === round(computed) ? null : { stated, computed };
 }
 
+/// PRD decision 120's fallback score: the mean of whatever this row produced.
+///
+/// **Over the cells that were storable, not over the configured categories.** A
+/// row with three readable scores out of four averages those three. Dividing by
+/// four instead would silently treat the fourth as a zero, which is the "unscored
+/// is not a zero" rule decision 59 exists to hold, arriving from a third side.
+/// The missing cell is separately flagged, so the admin is not being told a
+/// half-truth — they are told the cell is missing and shown what the rest average
+/// to.
+///
+/// Null over an empty list rather than NaN: no cells means no score, and a NaN
+/// reaching `InterviewResult.score` would be a non-null Float column holding
+/// something Postgres will take and nothing can render.
+function computeAverage(points: readonly number[]): number | null {
+  if (points.length === 0) return null;
+  return points.reduce((sum, value) => sum + value, 0) / points.length;
+}
+
+/// PRD decision 120. Case-insensitive, trimmed, whole-string.
+///
+/// **Anything else is null, never NO.** A sheet that wrote "maybe", "y", or a
+/// timestamp recorded no recommendation, and reading an unparsed value as a
+/// rejection would invent a judgement the interviewer did not make. The caller
+/// warns about it instead.
+function readRecommendation(raw: string): "YES" | "NO" | null {
+  const key = raw.trim().toLowerCase();
+  if (key === "yes") return "YES";
+  if (key === "no") return "NO";
+  return null;
+}
+
 export function buildInterviewPreview(
   input: InterviewPreviewInput,
 ): InterviewPreviewFindings {
@@ -206,6 +276,8 @@ export function buildInterviewPreview(
 
   const rows: PreviewRow[] = input.rows.map((row) => {
     const categoryPoints: PreviewRow["categoryPoints"] = [];
+    const categoryNotes: PreviewRow["categoryNotes"] = [];
+    const notesWithoutScore: string[] = [];
     const issues: CellIssue[] = [];
 
     if (sheet === "SCORES") {
@@ -219,12 +291,38 @@ export function buildInterviewPreview(
         if (result.points !== undefined) {
           categoryPoints.push({ interviewCategoryId: category.id, points: result.points });
         }
+
+        // PRD decision 120. The note is a column on InterviewCategoryScore, so
+        // it can only be stored if that row exists — and decision 59 means it
+        // does not exist when the score cell was blank or unreadable. Recorded
+        // as dropped rather than rescued onto InterviewResult, which would put
+        // a judgement about one category somewhere that does not say which.
+        const noteColumn = columns.categoryNoteColumns.get(category.id) ?? null;
+        const noteBody = cell(row, noteColumn).trim();
+        if (noteBody !== "") {
+          if (result.points !== undefined) {
+            categoryNotes.push({ interviewCategoryId: category.id, body: noteBody });
+          } else {
+            notesWithoutScore.push(category.name);
+          }
+        }
       }
     }
 
     const rawAverage = cell(row, columns.averageColumn);
     const parsedAverage = rawAverage.trim() === "" ? Number.NaN : Number(rawAverage.trim());
     const average = Number.isFinite(parsedAverage) ? parsedAverage : null;
+
+    // PRD decision 120. The mapping decides which of the two rules applies, not
+    // the cell: a mapped column that will not parse is an error to fix, while no
+    // column at all is a sheet that never offered one.
+    const hasAverageColumn = columns.averageColumn !== null;
+    const computed = computeAverage(categoryPoints.map((p) => p.points));
+    const score = hasAverageColumn ? average : computed;
+    const scoreIsComputed = sheet === "SCORES" && !hasAverageColumn && score !== null;
+
+    const rawRecommendation = cell(row, columns.recommendationColumn);
+    const recommendation = readRecommendation(rawRecommendation);
 
     return {
       rowIndex: row.rowIndex,
@@ -239,18 +337,38 @@ export function buildInterviewPreview(
       rawName: cell(row, columns.nameColumn),
       interviewerName: cell(row, columns.interviewerColumn),
       notes: cell(row, columns.notesColumn),
+      transcript: columns.transcriptColumns.map((columnIndex) => ({
+        columnIndex,
+        prompt: input.headers[columnIndex] ?? `Column ${columnIndex + 1}`,
+        body: cell(row, columnIndex),
+      })),
+      categoryNotes,
+      notesWithoutScore,
+      overallNote: cell(row, columns.overallNoteColumn).trim(),
+      recommendation,
+      rawRecommendation,
+      unreadableRecommendation: rawRecommendation.trim() !== "" && recommendation === null,
       categoryPoints,
       issues,
       average,
       rawAverage,
-      unreadableAverage: sheet === "SCORES" && average === null,
+      score,
+      scoreIsComputed,
+      unreadableAverage: sheet === "SCORES" && score === null,
+      unreadableAverageCause:
+        sheet === "SCORES" && score === null ? (hasAverageColumn ? "STATED" : "COMPUTED") : null,
       missingInterviewerName:
         sheet === "SCORES" && cell(row, columns.interviewerColumn).trim() === "",
-      averageDisagrees: averageDisagreement(
-        average,
-        categoryPoints.map((p) => p.points),
-        categories.length,
-      ),
+      // Suppressed when the score was computed: a mean cannot disagree with
+      // itself, and reporting it would fire on every row of a sheet with no
+      // average column — 123 of them, in the file this decision was built for.
+      averageDisagrees: scoreIsComputed
+        ? null
+        : averageDisagreement(
+            average,
+            categoryPoints.map((p) => p.points),
+            categories.length,
+          ),
     };
   });
 
@@ -305,15 +423,34 @@ export function buildInterviewPreview(
   // Two per-row blockers the schema forces rather than the requirement choosing.
   // Both name the row, because "some row is wrong" in a 160-row file is not
   // something an admin can act on.
-  const noAverage = live.filter((row) => row.unreadableAverage);
-  if (noAverage.length > 0) {
+  // Two causes, two sentences. PRD decision 120 split what used to be one
+  // blocker, because "fix the Average column" is useless advice on a sheet that
+  // has no Average column — and that is now a supported sheet, not a broken one.
+  const statedUnreadable = live.filter((row) => row.unreadableAverageCause === "STATED");
+  if (statedUnreadable.length > 0) {
     blockers.push(
-      `${noAverage.length} row${noAverage.length === 1 ? "" : "s"} ${
-        noAverage.length === 1 ? "has" : "have"
-      } no readable Average (row${noAverage.length === 1 ? "" : "s"} ` +
-        `${noAverage.map((r) => r.rowIndex).join(", ")}). The average is imported as the sheet ` +
-        `states it and is never recomputed from the categories, so a row without one cannot be ` +
-        `imported. Fix the file and upload it again, or mark those rows as not importing.`,
+      `${statedUnreadable.length} row${statedUnreadable.length === 1 ? "" : "s"} ${
+        statedUnreadable.length === 1 ? "has" : "have"
+      } no readable Average (row${statedUnreadable.length === 1 ? "" : "s"} ` +
+        `${statedUnreadable.map((r) => r.rowIndex).join(", ")}). The average is imported as the ` +
+        `sheet states it and is never recomputed from the categories, so a row without one ` +
+        `cannot be imported. Fix the file and upload it again, or mark those rows as not ` +
+        `importing.`,
+    );
+  }
+
+  const computedUnreadable = live.filter((row) => row.unreadableAverageCause === "COMPUTED");
+  if (computedUnreadable.length > 0) {
+    blockers.push(
+      `${computedUnreadable.length} row${computedUnreadable.length === 1 ? "" : "s"} ${
+        computedUnreadable.length === 1 ? "has" : "have"
+      } no category score that could be read (row${computedUnreadable.length === 1 ? "" : "s"} ` +
+        `${computedUnreadable.map((r) => r.rowIndex).join(", ")}). This sheet has no Average ` +
+        `column, so each interview's score is the average of its categories — and ${
+          computedUnreadable.length === 1 ? "this row has" : "these rows have"
+        } none to average. Fix the file and upload it again, or mark ${
+          computedUnreadable.length === 1 ? "that row" : "those rows"
+        } as not importing.`,
     );
   }
 
@@ -405,6 +542,50 @@ export function buildInterviewPreview(
     warnings.push(
       `${blank} category cell${blank === 1 ? " is" : "s are"} empty. Those categories are left ` +
         `unscored rather than imported as a zero.`,
+    );
+  }
+
+  // PRD decision 120. Said plainly and up front, because a score the reader
+  // takes for the interviewers' own number is exactly what decision 6 forbids,
+  // and the preview is where they first meet it.
+  const computedScores = live.filter((row) => row.scoreIsComputed).length;
+  if (computedScores > 0) {
+    warnings.push(
+      `This sheet has no Average column, so ${computedScores} interview score${
+        computedScores === 1 ? " is" : "s are"
+      } the average of ${computedScores === 1 ? "its" : "their"} own categories rather than a ` +
+        `number the sheet states. They are labelled as computed everywhere they appear.`,
+    );
+  }
+
+  // Decision 55's posture: reported, with what happens to the data said out
+  // loud, rather than a refusal the admin has to reverse-engineer.
+  const droppedNotes = live.reduce((total, row) => total + row.notesWithoutScore.length, 0);
+  if (droppedNotes > 0) {
+    const affected = live.filter((row) => row.notesWithoutScore.length > 0);
+    warnings.push(
+      `${droppedNotes} category note${droppedNotes === 1 ? "" : "s"} sit${
+        droppedNotes === 1 ? "s" : ""
+      } beside a score that could not be read, on row${affected.length === 1 ? "" : "s"} ` +
+        `${affected.slice(0, 5).map((r) => r.rowIndex).join(", ")}${
+          affected.length > 5 ? ", and others" : ""
+        }. A category's note is stored on its score, so ${
+          droppedNotes === 1 ? "it will" : "those will"
+        } not import. The rest of each interview imports normally.`,
+    );
+  }
+
+  const unreadableRecommendations = live.filter((row) => row.unreadableRecommendation);
+  if (unreadableRecommendations.length > 0) {
+    warnings.push(
+      `${unreadableRecommendations.length} recommendation${
+        unreadableRecommendations.length === 1 ? "" : "s"
+      } could not be read as yes or no (row${unreadableRecommendations.length === 1 ? "" : "s"} ` +
+        `${unreadableRecommendations.slice(0, 5).map((r) => r.rowIndex).join(", ")}${
+          unreadableRecommendations.length > 5 ? ", and others" : ""
+        }). ${
+          unreadableRecommendations.length === 1 ? "It is" : "They are"
+        } imported as no recommendation rather than as a No, and nothing counts them either way.`,
     );
   }
 
