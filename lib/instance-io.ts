@@ -72,6 +72,7 @@ export async function readSnapshot(
     // instance's file.
     RubricLevel: () => prisma.rubricLevel.findMany({ where: { rubricCategory: byInstance } }),
     InterviewCategory: () => prisma.interviewCategory.findMany({ where: byInstance }),
+    InterviewQuestion: () => prisma.interviewQuestion.findMany({ where: byInstance }),
     RoundAccessCode: () => prisma.roundAccessCode.findMany({ where: byInstance }),
     Reviewer: () => prisma.reviewer.findMany({ where: byInstance }),
     Applicant: () => prisma.applicant.findMany({ where: byInstance }),
@@ -84,6 +85,16 @@ export async function readSnapshot(
         where: { interviewResult: { applicant: byInstance } },
       }),
     InterviewNotes: () => prisma.interviewNotes.findMany({ where: { applicant: byInstance } }),
+    // Two hops to the instance: an answer belongs to a transcript, which
+    // belongs to an applicant. Scoped through the transcript rather than the
+    // question, because the question is instance-scoped and the answer is not
+    // — reaching it that way would export answers belonging to no applicant
+    // in this instance if a question were ever shared, which nothing does but
+    // which this query should not depend on.
+    InterviewAnswer: () =>
+      prisma.interviewAnswer.findMany({
+        where: { interviewNotes: { applicant: byInstance } },
+      }),
     InterviewImport: () => prisma.interviewImport.findMany({ where: byInstance }),
     InterviewImportRow: () => prisma.interviewImportRow.findMany({ where: byInstance }),
     FirstRoundVote: () => prisma.firstRoundVote.findMany({ where: { applicant: byInstance } }),

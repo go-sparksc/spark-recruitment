@@ -1,7 +1,7 @@
 # Spark SC Recruitment Platform — Product Requirements Document
 
 **Owner:** Kai Lincoln
-**Status:** v1.27, Phases 0-9 complete, decisions recorded through 119 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is complete and found nothing pressing (`plans/phase-8.md`). Spark's first real cycle is pending. The freeze ahead of it has one owner-approved exception, decision 119's class standing (`plans/decision-119.md`), which ships before that cycle; every other refinement still waits until after it
+**Status:** v1.28, Phases 0-9 complete, decisions recorded through 120 — every slice shipped and gated, and the reconciliation pass in `plans/prd-reconciliation.md` applied. Phase 8's succession gate, a board member running a full mock cycle from `ADMIN_GUIDE.md` alone, is complete and found nothing pressing (`plans/phase-8.md`). Spark's first real cycle is **in progress and stopped at FR-12's upload step**, which is what decision 120 addresses. The freeze ahead of that cycle had one owner-approved exception, decision 119's class standing (`plans/decision-119.md`), which shipped. **Decision 120 is the second, and unlike 119 it is provisional**: built against the cycle's two real sheets, tested on a throwaway instance, and adopted or abandoned on the owner's call (`plans/decision-120.md`). Every other refinement still waits until after the cycle
 **Target:** Replace the S26 recruitment spreadsheet before the next full recruitment cycle
 
 ---
@@ -254,19 +254,74 @@ InterviewResult                // first round, imported. Two rows per applicant.
   interviewerName
   score                        // the average as it appears in the source sheet,
                                //   imported verbatim. Never recomputed from the
-                               //   category rows. See decision 6.
+                               //   category rows — unless the sheet carries no
+                               //   average column at all, which decision 120
+                               //   allows and `scoreIsComputed` records.
+                               //   See decision 6.
+  scoreIsComputed              // false means `score` is the sheet's own number.
+                               //   true means the sheet had no Average column and
+                               //   this is the mean of the category rows below.
+                               //   Default false — every row imported before
+                               //   decision 120 is a verbatim one. Never rendered
+                               //   silently: a computed score is labelled wherever
+                               //   it appears.
+  note                         // this interviewer's overall prose, from the
+                               //   sheet's "Additional Notes". Nullable — most
+                               //   interviewers leave it blank. Decision 120.
+  recommendation: YES | NO     // this interviewer's "should this applicant move
+                               //   on" answer. Nullable: the column is optional,
+                               //   and an unreadable answer reads as absent rather
+                               //   than as a No. Advisory only — nothing in FR-15
+                               //   or FR-17 counts it. Decision 120.
   UNIQUE (applicantId, interviewerName)
                                // makes a re-upload an upsert rather than a
                                //   duplicate. See decision 47.
 
 InterviewCategoryScore         // one per category per InterviewResult
   id, interviewResultId, interviewCategoryId, points
+  note                         // this interviewer's prose for this one category,
+                               //   from the sheet's "Notes on <category>" column.
+                               //   Nullable. Lives here rather than on
+                               //   InterviewResult because the sheet writes one
+                               //   per category per interviewer, and flattening
+                               //   four of them into one body would lose which
+                               //   category each judgement was about.
+                               //   Decision 120.
   UNIQUE (interviewResultId, interviewCategoryId)
+                               // a consequence worth stating: decision 59 writes
+                               //   no row for an unscored category, so a note on
+                               //   a category whose score did not parse has
+                               //   nowhere to go. The preview says so rather than
+                               //   dropping it quietly.
 
 InterviewNotes                 // one row per applicant; only one interviewer of
   id, applicantId, body        //   the pair writes them, and the "Your Name"
   interviewerName              //   column records which. Nullable, per decision 60.
-  UNIQUE (applicantId)
+  UNIQUE (applicantId)         // Still one per applicant after decision 120: the
+                               //   notes sheet is a shared notetaker's transcript,
+                               //   not a per-interviewer judgement. `body` holds
+                               //   the whole transcript as readable prose, which
+                               //   is what every consumer written before decision
+                               //   120 keeps reading.
+
+InterviewQuestion              // the interview's questions, instance-scoped.
+  id, instanceId               //   Deliberately the same shape as
+  ordinal, prompt              //   InterviewCategory — a cycle's questions are
+  UNIQUE (instanceId, ordinal) //   configured per cycle exactly as its rubric is.
+                               //   Unlike the rubric there is no builder screen:
+                               //   `prompt` is the notes sheet's header text,
+                               //   verbatim, and the rows are written at that
+                               //   sheet's commit. Upserted on (instanceId,
+                               //   ordinal), never deleted — deleting would
+                               //   cascade away answers belonging to applicants
+                               //   the re-import never touched. Decision 120.
+
+InterviewAnswer                // one answer per question per applicant.
+  id, interviewNotesId         //   Cascades from InterviewNotes, which is what
+  interviewQuestionId, body    //   keeps FR-12's delete-then-insert commit
+  UNIQUE (interviewNotesId, interviewQuestionId)
+                               //   idempotent without a second delete: removing
+                               //   the transcript removes its answers. Decision 120.
 
 InterviewImport                // FR-12 staging header. One row per sheet, deleted
   id, instanceId               //   at that sheet's commit, taking its rows with it.
@@ -274,7 +329,12 @@ InterviewImport                // FR-12 staging header. One row per sheet, delet
   headers: jsonb               // the source file's header row, verbatim
   mapping: jsonb               // { columnIndex: role }, role being APPLICANT_EMAIL |
                                //   APPLICANT_NAME | INTERVIEWER_NAME | AVERAGE |
-                               //   NOTES | CATEGORY:<interviewCategoryId> | IGNORED
+                               //   NOTES | CATEGORY:<interviewCategoryId> |
+                               //   CATEGORY_NOTE:<interviewCategoryId> |
+                               //   OVERALL_NOTE | RECOMMENDATION | TRANSCRIPT |
+                               //   IGNORED. TRANSCRIPT is the one repeatable role:
+                               //   a notes sheet carries one column per question.
+                               //   Decision 120.
   uploadedAt
   UNIQUE (instanceId, sheet)   // A re-upload replaces this row and cascades its
                                //   staged rows away, which is FR-12's "accepts
@@ -627,11 +687,13 @@ FR-12 presupposed these rows and named no surface that creates them, which left 
 
 **FR-12 Score and notes import.** Two uploads with a defined contract:
 
-*First Round Scores* — required columns: `Applicant Email` (or `Applicant Name` if email is unavailable), `Interviewer Name`, one column per configured `InterviewCategory`, and `Average`. Two rows per applicant expected, one per interviewer.
+*First Round Scores* — required columns: `Applicant Email` (or `Applicant Name` if email is unavailable), `Interviewer Name`, and one column per configured `InterviewCategory`. Two rows per applicant expected, one per interviewer. Optional columns, per decision 120: `Average`; a `Notes on <category>` column beside any score column; `Additional Notes`; and a yes/no recommendation.
 
 The category columns are matched to `InterviewCategory` rows by the same mapping table FR-2 uses for applicant columns, so a cycle that changes its interview rubric does not need a code change. `Average` imports verbatim into `InterviewResult.score`; the category columns become `InterviewCategoryScore` rows. The importer does **not** recompute the average or reject a row whose average disagrees with its categories — interviewers sometimes adjust it deliberately — but it does flag the disagreement in the preview so the admin sees it before commit.
 
-*First Round Notes* — required columns: `Applicant Email` (or `Applicant Name`), `Notes`. One row per applicant.
+**Where no `Average` column is mapped at all**, decision 120 computes `score` from the row's category cells and sets `scoreIsComputed`, which is labelled everywhere the score is shown. That narrows the paragraph above rather than contradicting it: the prohibition is on overruling a number the sheet states, and this case is a sheet that states none. A `Notes on <category>` value imports onto that category's `InterviewCategoryScore` row, which means a note whose score did not parse has no row to sit on — reported as a warning, never a blocker. The recommendation is stored and displayed and counts toward no tally.
+
+*First Round Notes* — required columns: `Applicant Email` (or `Applicant Name`), and either a single `Notes` column or, per decision 120, one column per interview question. The question columns become `InterviewQuestion` rows keyed on their header text, and their cells become `InterviewAnswer` rows; `InterviewNotes.body` holds the assembled transcript so that every consumer written before decision 120 keeps reading what it always did. One row per applicant either way.
 
 Each sheet is staged, previewed, and committed on its own schedule, per decision 47 — scores and notes need not arrive together, and the dashboard renders whichever half exists. A sheet accepts repeated uploads; re-committing upserts on `(applicantId, interviewerName)` for scores and on `applicantId` for notes, rather than refusing a second file the way FR-3 refuses a second applicant CSV.
 
@@ -654,6 +716,8 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 ### 7.4 Second round and passes
 
 **FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: every reviewer-visible field (with class standing under the graduation date when that column is one, per decision 119), written scores, written review notes, interview scores, interview notes. **Demographics are not in that list**, and neither is another reviewer's suspected-AI flag. Decision 108 locked demographics out of every reviewer round including this one, and decision 116 keeps the flag admin-only; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+
+**Per decision 120 the interview section carries more than a score and one note.** Each interviewer's card shows their per-category notes beside their per-category scores, plus their overall note and their recommendation; a score computed because the sheet carried no average column is labelled as computed. The notetaker's transcript renders below the cards as one collapsed disclosure per question. FR-14's first-round profile and the admin results view show the same three things from the same transform, so no two of them can disagree about one interview.
 
 **Every applicant who reached the second round stays on this list for the life of the round**, per decision 112, whatever their status. A resolved applicant does not disappear: the row persists, the profile stays reachable, neither renders a vote control, and both show the outcome — green for Sparklet, red for rejected — per decision 111. `CARRIED` and `NEEDS_ADMIN` stay too, showing the same settled control with no colour, which is what decision 83a already described for `CARRIED` and is now simply the general rule.
 
@@ -1628,6 +1692,38 @@ and decision 79, checked in the same place.
     - **34** — amended. The editable-after-commit list gains the graduation-date designation, on 34's own test: it keys nothing.
     - **108** — unchanged. Class standing reads `resolveField` and adds no visibility state.
     - **FR-2's no-guessing rule** — unchanged and load-bearing; it is why the designation exists.
+
+120. **The interview sheets carry a nine-question transcript and per-category notes from each of two interviewers. RESOLVED, amending §5, FR-12, FR-14 and FR-16, and narrowing decision 6 and clause 12h.** Additive throughout: two new tables, four new columns, four new mapping roles, and one blocker removed. No existing row changes meaning and nothing is backfilled. Planned in `plans/decision-120.md`.
+
+    **Provisional when written.** Built against F26's two real exports, to be tested on a throwaway instance and either adopted or abandoned within the hour. The fallback was to import a single combined text blob into `InterviewNotes.body` — which is what this decision writes there anyway, so the fallback costs nothing and needs no separate code path.
+
+    **What the files actually are.** The notes sheet is one row per applicant, written by one shared notetaker, with nine numbered question columns. The evaluation sheet is two rows per applicant, one per interviewer, each carrying four scores, a `Notes on <category>` column beside each score, an `Additional Notes` column, and a yes/no recommendation. Measured against F26: 62 applicants, 62 notes rows, 123 evaluation rows, and **zero applicants whose two interviewer names collide**.
+
+    **Scores were already per-interviewer; only the notes were not.** `InterviewResult`'s `UNIQUE (applicantId, interviewerName)` has always expected two rows per applicant — that is decision 47's key and clause 12e's "two rows per applicant expected". The gap was that a per-interviewer *judgement* had nowhere to live, and the notes sheet's single `body` was the only prose in the model. So the per-interviewer notes attach to the row that is already per-interviewer, and `InterviewNotes` keeps `UNIQUE (applicantId)`.
+
+    **`InterviewNotes` is deliberately not re-keyed per interviewer**, which was the first shape considered. The notes sheet has one row per applicant because one person takes the notes; keying it per interviewer would model something the data does not contain, and would then need the per-category notes flattened into prose to fit, losing which category each judgement was about.
+
+    **The transcript is a question table, not nine columns and not a jsonb blob.** `InterviewQuestion` is the same shape as `InterviewCategory` for the reason decision 40 made the rubric a table: the questions are data that travels with the cycle that asked them, and a cycle that changes its questions must not need a code change. Unlike the rubric there is **no builder screen** — `prompt` is the sheet's header text verbatim, written at commit. Asking an admin to retype nine prompts, one of which runs to 300 characters, would be a step that eventually stops happening.
+
+    Question rows are **upserted on `(instanceId, ordinal)` and never deleted.** Deleting and recreating them at each commit would cascade away answers belonging to applicants that import never touched. `InterviewAnswer` cascades from `InterviewNotes` instead, so FR-12's existing delete-then-insert stays idempotent with no second delete — a re-commit replaces exactly its own rows, which is what decision 47 means in practice.
+
+    **`Average` becomes an optional column, which narrows decision 6 and clause 12h rather than reversing them.** F26's evaluation sheet has no average column at all, and `InterviewResult.score` is a non-null Float, so the sheet was unimportable. When no average column is mapped, `score` is the mean of that row's category cells and `scoreIsComputed` records that it was.
+
+    Decision 6's rule is that **the importer may not overrule the sheet**. A sheet with no average has nothing to overrule, so the rule is not in play. What would breach it is a computed number that reads like a recorded one, and the provenance flag is the whole answer to that: a computed score is labelled at preview and at every render, in all three places an interview is shown. Where an average column *is* mapped, behaviour is unchanged to the letter — verbatim, never recomputed, and clause 12l's disagreement warning still fires. That warning is suppressed only when the score was computed, because a mean cannot disagree with itself and reporting it would have fired on all 123 rows.
+
+    **`TRANSCRIPT` is the first repeatable mapping role**, and the only one. Every other role is still refused twice over, which is what stops two columns silently resolving last-wins. A notes sheet legitimately carries one column per question, so the duplicate check exempts it and orders the columns by index.
+
+    **It is also never proposed.** FR-2's no-guessing rule and the mapping module's own "exact after trimming, never a prefix or a substring" both hold: nine long prompts have no exact key to match against, and a leading-number heuristic is exactly the loose matching the `Black` / `Black or African American` lesson rules out. Instead the sheet screen gains one bulk control — *mark the remaining columns as transcript questions* — an explicit action over columns the admin can see, not an inference. One tap for nine columns, against nine dropdowns.
+
+    **`Notes on <category>` is proposed, and that is not a substring match.** The key is built from the configured category's own name and compared whole, after the same trim and case-fold every other proposal uses. A category named differently from its column simply arrives unmapped, as today. **The corollary is worth stating because it saves eight dropdowns:** naming the interview rubric's categories exactly as the sheet's score headers spell them auto-maps both the score column and its note column. The rubric locks on the first `InterviewCategoryScore`, so this is free before an import and impossible after one.
+
+    **A note on a category whose score did not parse cannot be stored, and the preview says so.** Decision 59 writes no `InterviewCategoryScore` row for a blank or unreadable cell, and the note lives on that row. Flattening it onto `InterviewResult` to rescue it would put a category-specific judgement somewhere that does not say which category it was about. Reported as a warning naming the affected rows — the posture decision 55 takes — and never a blocker, because the score is the thing that was missing and it is already flagged in its own right.
+
+    **The recommendation is stored and shown, and counts toward nothing.** It is what each interviewer wrote down, and dropping a column silently is the failure the clause-ticking rule exists to prevent. But no tally reads it: FR-15 ranks on first-round votes and FR-17 resolves on pass votes, and an imported advisory that quietly became a vote would be a second, invisible franchise. An unreadable value reads as absent rather than as a No, and warns rather than blocking — refusing an import over an advisory column would be the importer overruling the sheet from the other direction.
+
+    **Rendered in all three places an interview appears** — FR-16's second-round profile, FR-14's first-round profile, and the admin results view — from one shared transform, so three surfaces cannot disagree about one interview. Nine collapsed disclosures rather than 2,500 characters of prose above the vote controls, on the `<details>` pattern those pages already use.
+
+    **Interviewer identity reconciliation is explicitly not in this decision.** F26's two sheets between them carry twelve name variants — `Cici` and `Cici Fang`, `Nandini` and `Nandini Iyer`, `Hansika Reddy Kondapally` and `Hansika Kondapally` — and for 7 of 62 applicants the notetaker's label matches neither interview card. That is decision 47's accepted cost, unchanged by this work and visible where it always was. It is named here so a reader meeting it on the second-round profile knows it is pre-existing rather than something this decision introduced. Worth its own decision if deliberation trips over it.
 
 ## 11. Out of scope for v1, worth noting for v2
 

@@ -231,6 +231,7 @@ model Instance {
   fields              Field[]
   importRows          ImportRow[]
   interviewCategories InterviewCategory[]
+  interviewQuestions  InterviewQuestion[]
   interviewImports    InterviewImport[]
   interviewImportRows InterviewImportRow[]
   passes              Pass[]
@@ -693,7 +694,37 @@ model InterviewResult {
   /// disagreement in the preview rather than resolving it.
   ///
   /// Float because an average of integers is not one.
+  ///
+  /// **PRD decision 120 adds one exception**, recorded in `scoreIsComputed`
+  /// rather than hidden: a sheet with no Average column at all states no number
+  /// to overrule, so the mean of the categories is used.
   score           Float
+  /// Whether `score` was computed rather than read. False on every row imported
+  /// before decision 120, which is exactly what they are — the default is the
+  /// honest value, so nothing needed backfilling.
+  ///
+  /// **Never render `score` without consulting this.** A computed average that
+  /// looks like a recorded one is the thing decision 6 actually forbids; the
+  /// computation itself is fine when the sheet offered nothing.
+  scoreIsComputed Boolean   @default(false)
+  /// This interviewer's overall prose — the S26 evaluation sheet's "Additional
+  /// Notes". Nullable and usually null: 91 of 123 F26 rows left it blank.
+  /// Distinct from InterviewNotes, which is the shared notetaker's transcript
+  /// for the whole interview rather than one interviewer's summing-up.
+  note            String?
+  /// This interviewer's answer to the sheet's "should this applicant move on"
+  /// question. PRD decision 120.
+  ///
+  /// **Advisory. Nothing counts it.** FR-15 ranks on FirstRoundVote and FR-17
+  /// resolves on PassVote; an imported recommendation that quietly became a vote
+  /// would be a second franchise nobody granted. It is stored and displayed
+  /// because it is what the interviewer wrote down.
+  ///
+  /// Nullable in three distinct situations that deliberately read alike: the
+  /// column was not mapped, the cell was blank, or the value was neither yes nor
+  /// no. All three mean "this interviewer did not record one", and none of them
+  /// may read as NO.
+  recommendation  InterviewRecommendation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -720,12 +751,33 @@ model InterviewCategoryScore {
   interviewCategoryId String
   interviewCategory   InterviewCategory @relation(fields: [interviewCategoryId], references: [id], onDelete: Cascade)
   points              Int
+  /// This interviewer's prose for this one category, from the sheet's "Notes on
+  /// <category>" column. PRD decision 120.
+  ///
+  /// It lives here rather than on InterviewResult because the sheet writes one
+  /// per category per interviewer, and concatenating four of them into a single
+  /// body would lose which category each judgement was about — which is the
+  /// whole reason a reviewer opens the per-category disclosure.
+  ///
+  /// **A consequence worth knowing before you go looking for a missing note.**
+  /// Decision 59 writes no row at all for a category whose score was blank or
+  /// unreadable, so a note beside such a score has nowhere to sit and does not
+  /// import. FR-12's preview reports that rather than dropping it silently.
+  note                String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([interviewResultId, interviewCategoryId])
   @@index([interviewCategoryId])
+}
+
+/// One yes/no from one interviewer, per PRD decision 120. Deliberately not
+/// VoteValue: that enum carries weight in FR-15 and FR-17's tallies, and reusing
+/// it here would invite a future join that turns an advisory into a vote.
+enum InterviewRecommendation {
+  YES
+  NO
 }
 
 /// FR-12 staging header. One row per sheet, deleted at that sheet's commit and
@@ -822,10 +874,74 @@ model InterviewNotes {
   applicantId     String    @unique
   applicant       Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
   interviewerName String?
+  /// The transcript as readable prose. Before PRD decision 120 this was the
+  /// sheet's single Notes column; it still is when a sheet has one.
+  ///
+  /// When the sheet instead carries a column per question, this holds every
+  /// prompt followed by its answer. **That redundancy with `answers` is
+  /// deliberate**, not an oversight to normalise away: every consumer written
+  /// before decision 120 — FR-20's export, the admin views, `lib/export.ts` —
+  /// reads this column, and it is also the fallback the decision was designed
+  /// to keep free. Written by `flattenTranscript`, never by hand.
   body            String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  answers InterviewAnswer[]
+}
+
+/// The interview's questions, instance-scoped. PRD decision 120.
+///
+/// Deliberately the same shape as InterviewCategory, for decision 40's reason:
+/// the questions a cycle asked are data that travels with that cycle, so history
+/// stays coherent when the next cycle asks different ones.
+///
+/// **Unlike the interview rubric there is no builder screen.** `prompt` is the
+/// notes sheet's header text, verbatim, and these rows are written at that
+/// sheet's commit. Nine prompts — one of F26's runs to 300 characters — is not
+/// something to ask an admin to retype, and a form that reproduces the sheet is
+/// a step that eventually stops happening.
+model InterviewQuestion {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  /// Position in the sheet, ascending over the columns mapped as TRANSCRIPT.
+  /// Non-negative, enforced by a CHECK the migration adds — Prisma cannot say it.
+  ordinal    Int
+  prompt     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  answers InterviewAnswer[]
+
+  /// Upserted on this key at each commit, and **never deleted**. Deleting and
+  /// recreating the set would cascade away the answers of every applicant the
+  /// re-import did not touch, which is the opposite of what decision 47's
+  /// re-committable import promises.
+  @@unique([instanceId, ordinal])
+}
+
+/// One applicant's answer to one question. PRD decision 120.
+model InterviewAnswer {
+  id                  String            @id @default(cuid())
+  interviewNotesId    String
+  /// **Cascades from InterviewNotes, and that is load-bearing.** FR-12's notes
+  /// commit deletes and re-inserts InterviewNotes for exactly the applicants in
+  /// the batch; the cascade takes their old answers with it, so the commit stays
+  /// idempotent without a second delete that could disagree about which rows it
+  /// owns.
+  interviewNotes      InterviewNotes    @relation(fields: [interviewNotesId], references: [id], onDelete: Cascade)
+  interviewQuestionId String
+  interviewQuestion   InterviewQuestion @relation(fields: [interviewQuestionId], references: [id], onDelete: Cascade)
+  body                String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([interviewNotesId, interviewQuestionId])
+  @@index([interviewQuestionId])
 }
 
 model FirstRoundVote {

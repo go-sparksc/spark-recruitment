@@ -40,7 +40,7 @@ export interface TableManifest {
   columns: readonly string[];
 }
 
-/// The twenty-four tables that make up one instance, **in foreign-key
+/// The twenty-six tables that make up one instance, **in foreign-key
 /// dependency order**. `writeSnapshot` walks this list and nothing else decides
 /// ordering, so the order here is load-bearing rather than cosmetic.
 ///
@@ -73,15 +73,21 @@ export const EXPORT_TABLES = [
   // Decision 114. After RubricCategory, which it cascades from.
   { table: "RubricLevel", columns: ["id", "rubricCategoryId", "points", "criterion", "createdAt", "updatedAt"] },
   { table: "InterviewCategory", columns: ["id", "instanceId", "name", "maxPoints", "ordinal", "createdAt", "updatedAt"] },
+  // Decision 120. Instance-scoped like InterviewCategory beside it, and for
+  // the same reason: the questions a cycle asked travel with that cycle.
+  { table: "InterviewQuestion", columns: ["id", "instanceId", "ordinal", "prompt", "createdAt", "updatedAt"] },
   { table: "RoundAccessCode", columns: ["id", "instanceId", "round", "codeHash", "createdAt", "updatedAt"] },
   { table: "Reviewer", columns: ["id", "instanceId", "firstName", "lastName", "isSparklet", "rounds", "createdAt", "updatedAt"] },
   { table: "Applicant", columns: ["id", "instanceId", "sourceRowIndex", "email", "displayName", "data", "status", "stageReached", "createdAt", "updatedAt"] },
   { table: "Assignment", columns: ["id", "instanceId", "round", "applicantId", "reviewerId", "origin", "status", "returnReason", "returnNote", "returnedAt", "suspectedAiUse", "createdAt", "updatedAt"] },
   { table: "Score", columns: ["id", "assignmentId", "rubricCategoryId", "points", "createdAt", "updatedAt"] },
   { table: "ReviewNote", columns: ["id", "assignmentId", "body", "createdAt", "updatedAt"] },
-  { table: "InterviewResult", columns: ["id", "applicantId", "interviewerName", "score", "createdAt", "updatedAt"] },
-  { table: "InterviewCategoryScore", columns: ["id", "interviewResultId", "interviewCategoryId", "points", "createdAt", "updatedAt"] },
+  { table: "InterviewResult", columns: ["id", "applicantId", "interviewerName", "score", "scoreIsComputed", "note", "recommendation", "createdAt", "updatedAt"] },
+  { table: "InterviewCategoryScore", columns: ["id", "interviewResultId", "interviewCategoryId", "points", "note", "createdAt", "updatedAt"] },
   { table: "InterviewNotes", columns: ["id", "applicantId", "interviewerName", "body", "createdAt", "updatedAt"] },
+  // Decision 120. After InterviewNotes, which it cascades from, and after
+  // InterviewQuestion, which it also references.
+  { table: "InterviewAnswer", columns: ["id", "interviewNotesId", "interviewQuestionId", "body", "createdAt", "updatedAt"] },
   { table: "InterviewImport", columns: ["id", "instanceId", "sheet", "headers", "mapping", "uploadedAt"] },
   { table: "InterviewImportRow", columns: ["id", "instanceId", "importId", "sheet", "rowIndex", "cells", "matchedApplicantId", "matchTier", "matchConfidence", "skipped", "createdAt", "updatedAt"] },
   { table: "FirstRoundVote", columns: ["id", "applicantId", "reviewerId", "value", "submittedAt", "updatedAt"] },
@@ -139,6 +145,7 @@ export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> 
   RubricCategory: ["createdAt", "updatedAt"],
   RubricLevel: ["createdAt", "updatedAt"],
   InterviewCategory: ["createdAt", "updatedAt"],
+  InterviewQuestion: ["createdAt", "updatedAt"],
   RoundAccessCode: ["createdAt", "updatedAt"],
   Reviewer: ["createdAt", "updatedAt"],
   Applicant: ["createdAt", "updatedAt"],
@@ -148,6 +155,7 @@ export const DATE_COLUMNS: Readonly<Record<ExportTableName, readonly string[]>> 
   InterviewResult: ["createdAt", "updatedAt"],
   InterviewCategoryScore: ["createdAt", "updatedAt"],
   InterviewNotes: ["createdAt", "updatedAt"],
+  InterviewAnswer: ["createdAt", "updatedAt"],
   InterviewImport: ["uploadedAt"],
   InterviewImportRow: ["createdAt", "updatedAt"],
   FirstRoundVote: ["submittedAt", "updatedAt"],
