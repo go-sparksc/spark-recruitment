@@ -7,6 +7,7 @@ import {
   confirmFuzzyMatch,
   discardStagedSheet,
   mapRowManually,
+  markRemainingAsTranscript,
   setColumnRole,
   setRowSkipped,
   type InterviewImportState,
@@ -80,6 +81,17 @@ export function ColumnRoleSelect({
           <option value="INTERVIEWER_NAME">Interviewer name</option>
           {sheet === "scores" ? <option value="AVERAGE">Average</option> : null}
           {sheet === "notes" ? <option value="NOTES">Notes</option> : null}
+          {/* Decision 120. Repeatable, unlike every other role — one per
+              interview question. */}
+          {sheet === "notes" ? (
+            <option value="TRANSCRIPT">Transcript question</option>
+          ) : null}
+          {sheet === "scores" ? (
+            <>
+              <option value="OVERALL_NOTE">Interviewer&rsquo;s overall note</option>
+              <option value="RECOMMENDATION">Move on to deliberations?</option>
+            </>
+          ) : null}
           {sheet === "scores"
             ? categories.map((category) => (
                 <option key={category.id} value={`CATEGORY:${category.id}`}>
@@ -87,9 +99,70 @@ export function ColumnRoleSelect({
                 </option>
               ))
             : null}
+          {sheet === "scores"
+            ? categories.map((category) => (
+                <option key={`note-${category.id}`} value={`CATEGORY_NOTE:${category.id}`}>
+                  Notes on — {category.name}
+                </option>
+              ))
+            : null}
         </select>
       </td>
     </tr>
+  );
+}
+
+/// PRD decision 120's bulk control, on the notes sheet only.
+///
+/// A notes sheet carries one column per interview question, and nothing proposes
+/// those roles — nine sentences have no exact header key to match, and guessing
+/// at them is the loose matching `interview-mapping.ts` opens by refusing. This
+/// is how the admin says so instead, over columns whose headers and sample values
+/// are on the screen in front of them.
+///
+/// **Only ever writes over "Not imported".** A column the admin has already given
+/// a role keeps it, so pressing this cannot undo a decision they made — which is
+/// the one thing that would make a bulk control worse than nine dropdowns rather
+/// than better.
+export function MarkTranscriptColumns({
+  instanceId,
+  sheet,
+  unmappedCount,
+}: {
+  instanceId: string;
+  sheet: string;
+  /// Rendered in the label so the admin knows what they are about to change
+  /// before they change it, rather than after.
+  unmappedCount: number;
+}) {
+  const [pending, start] = useTransition();
+  const [state, setState] = useState<InterviewImportState>({});
+
+  if (sheet !== "notes" || unmappedCount === 0) return null;
+
+  return (
+    <div className="mt-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        onClick={() =>
+          start(async () => {
+            setState(await markRemainingAsTranscript(instanceId, sheet));
+          })
+        }
+      >
+        Mark the {unmappedCount} remaining column{unmappedCount === 1 ? "" : "s"} as transcript
+        questions
+      </Button>
+      <p className="text-muted-foreground mt-1 text-xs">
+        Each becomes one question in the interview transcript, in the order the columns appear.
+        Columns you have already given a role are left alone.
+      </p>
+      {state.error ? <p className="text-destructive mt-1 text-xs">{state.error}</p> : null}
+      {state.message ? <p className="text-muted-foreground mt-1 text-xs">{state.message}</p> : null}
+    </div>
   );
 }
 

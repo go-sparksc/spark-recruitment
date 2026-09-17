@@ -7,6 +7,7 @@ import { ImportSheet, MatchTier } from "@/generated/prisma/enums";
 import { requireInstance } from "@/lib/auth";
 import { CsvParseError, parseCsv } from "@/lib/import/parse-csv";
 import {
+  isBulkTranscriptCandidate,
   proposeMapping,
   resolveMapping,
   type InterviewSheet,
@@ -15,6 +16,7 @@ import {
 import { loadInterviewSheet, parseSheetParam, scopedPool } from "./load";
 import { prisma } from "@/lib/prisma";
 import { matchRow, normalizeInterviewerName } from "@/lib/reconciliation";
+import { flattenTranscript } from "@/lib/transcript";
 
 export interface InterviewImportState {
   error?: string;
@@ -264,6 +266,73 @@ export async function setColumnRole(
   return ok;
 }
 
+/// PRD decision 120. Mark every still-IGNORED column on a notes sheet as a
+/// transcript question, in one action.
+///
+/// **Why this exists rather than a proposal in `proposeMapping`.** The nine
+/// prompts on F26's notes sheet have no exact key to match against — they are
+/// sentences, one of them 300 characters long, carrying their own numbering and
+/// instructions to the interviewer. Guessing at them by a leading-number pattern
+/// is precisely the loose matching that module refuses, and the `Black` /
+/// `Black or African American` lesson in its header is about what loose matching
+/// costs. So nothing is proposed, and the admin says so explicitly instead.
+///
+/// **It is still an explicit decision, not a guess wearing a button.** The admin
+/// is looking at the mapping table, with every column's header and a sample of
+/// its values in front of them, and this acts only on columns they have left
+/// alone. Anything already given a role — the applicant name, the interviewer,
+/// a column they deliberately ignored and want ignored — is untouched, so the
+/// one thing a bulk control must never do, quietly overwriting decisions already
+/// made, it cannot do.
+///
+/// One tap against nine dropdowns, which is the difference between a contract
+/// that gets used and one that gets worked around.
+export async function markRemainingAsTranscript(
+  instanceId: string,
+  sheetParam: string,
+): Promise<InterviewImportState> {
+  const sheet = parseSheetParam(sheetParam);
+  if (!sheet) return { error: "Unknown sheet." };
+  if (sheet !== "NOTES") {
+    return { error: "Transcript questions belong to the notes sheet." };
+  }
+  await requireInstance(instanceId, hubPath(instanceId));
+
+  const staged = await prisma.interviewImport.findUnique({
+    where: { instanceId_sheet: { instanceId, sheet: sheet as ImportSheet } },
+    select: { id: true, mapping: true, headers: true },
+  });
+  if (!staged) return { error: "No staged file for this sheet." };
+
+  const current = staged.mapping as StoredMapping;
+  const headers = staged.headers as string[];
+  const mapping: StoredMapping = { ...current };
+
+  // Driven by the header list rather than by the mapping's own keys: a column
+  // absent from the mapping entirely is unmapped in exactly the sense this
+  // action is about, and reading only the mapping would skip it.
+  let marked = 0;
+  headers.forEach((header, columnIndex) => {
+    const key = String(columnIndex);
+    if (!isBulkTranscriptCandidate(header, current[key])) return;
+    mapping[key] = "TRANSCRIPT";
+    marked += 1;
+  });
+
+  if (marked === 0) {
+    return { error: "There are no unmapped question columns left. Nothing was changed." };
+  }
+
+  await prisma.interviewImport.update({ where: { id: staged.id }, data: { mapping } });
+
+  // Not re-matched. Applicant matching reads the email and name columns, which
+  // this action cannot touch — it only ever writes over IGNORED.
+  revalidateSheet(instanceId, sheet);
+  return {
+    message: `Marked ${marked} column${marked === 1 ? "" : "s"} as transcript questions.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Reconciliation — FR-13's tiers 3 and 4
 // ---------------------------------------------------------------------------
@@ -446,11 +515,21 @@ export async function commitInterviewSheet(
         id: crypto.randomUUID(),
         applicantId: row.applicantId as string,
         interviewerName: storableInterviewerName(row.interviewerName),
-        // Clause 12h: verbatim from the sheet, never recomputed. `canCommit`
-        // guarantees this parsed, so the assertion is safe.
-        score: row.average as number,
+        // Clause 12h: verbatim from the sheet, never recomputed — except where
+        // the sheet carries no Average column at all, which PRD decision 120
+        // permits and `scoreIsComputed` records. The preview decided which of
+        // those applies; this reads the number it produced rather than deciding
+        // again, so the two cannot drift. `canCommit` guarantees it is non-null.
+        score: row.score as number,
+        scoreIsComputed: row.scoreIsComputed,
+        // Empty means the column was unmapped or the cell was blank. Stored as
+        // null so that "wrote nothing" and "wrote an empty string" do not have
+        // to be told apart downstream — they are the same thing here.
+        note: row.overallNote === "" ? null : row.overallNote,
+        recommendation: row.recommendation,
       },
       categoryPoints: row.categoryPoints,
+      categoryNotes: row.categoryNotes,
     }));
 
     // Decision 47's upsert, made robust to spelling drift ACROSS uploads. The
@@ -489,13 +568,23 @@ export async function commitInterviewSheet(
           data: results.map((r) => r.result),
         });
 
-        const categoryScores = results.flatMap((entry) =>
-          entry.categoryPoints.map((point) => ({
+        const categoryScores = results.flatMap((entry) => {
+          // PRD decision 120. Joined here rather than carried through the
+          // preview as one list, because the two are produced under different
+          // rules: decision 59 governs which cells yield points, and a note
+          // whose category produced none is already reported as not importing.
+          // Looking it up per point is what guarantees no note reaches a row
+          // that does not exist.
+          const noteFor = new Map(
+            entry.categoryNotes.map((note) => [note.interviewCategoryId, note.body]),
+          );
+          return entry.categoryPoints.map((point) => ({
             interviewResultId: entry.result.id,
             interviewCategoryId: point.interviewCategoryId,
             points: point.points,
-          })),
-        );
+            note: noteFor.get(point.interviewCategoryId) ?? null,
+          }));
+        });
         if (categoryScores.length > 0) {
           await tx.interviewCategoryScore.createMany({ data: categoryScores });
         }
@@ -515,28 +604,135 @@ export async function commitInterviewSheet(
 
   // NOTES. Keyed on applicantId alone — InterviewNotes already carries
   // UNIQUE (applicantId), which gives decision 47's behaviour for free.
+  //
+  // PRD decision 120: the sheet may carry one column per interview question
+  // instead of, or as well as, a single Notes column. `body` holds the assembled
+  // transcript either way, so nothing that reads it needs to know which.
   const notes = importable.map((row) => ({
-    id: crypto.randomUUID(),
-    applicantId: row.applicantId as string,
-    // Nullable by design: only one interviewer of the pair writes the notes, and
-    // the "Your Name" column records which — when the sheet has one.
-    interviewerName: storableInterviewerName(row.interviewerName) || null,
-    body: row.notes,
+    row,
+    note: {
+      id: crypto.randomUUID(),
+      applicantId: row.applicantId as string,
+      // Nullable by design: only one interviewer of the pair writes the notes,
+      // and the "Your Name" column records which — when the sheet has one.
+      interviewerName: storableInterviewerName(row.interviewerName) || null,
+      body: row.transcript.length > 0 ? flattenTranscript(row.transcript) : row.notes,
+    },
   }));
+
+  // One question row per mapped transcript column, taken from the first row —
+  // every staged row shares the sheet's header, so any row gives the same list.
+  // Ordinal is the column's position in that list, which `resolveMapping` has
+  // already sorted into the sheet's left-to-right order.
+  const questionColumns = notes[0]?.row.transcript ?? [];
 
   await prisma.$transaction(
     async (tx) => {
-      await tx.interviewNotes.deleteMany({
-        where: { applicantId: { in: notes.map((note) => note.applicantId) } },
+      // Upserted, never deleted. A delete would cascade to InterviewAnswer and
+      // take with it the answers of every applicant this batch does not contain
+      // — a re-import of ten rows would silently empty the other fifty-two.
+      //
+      // **Done in a constant number of statements rather than one upsert per
+      // question.** `createMany` has no upsert, so the obvious shape is a loop,
+      // and nine round trips looks harmless next to the 150 that made FR-11's
+      // finalize exceed Prisma's limit. It is not harmless here: this app is
+      // deployed in iad1 against Neon in us-west-2, one cross-country round trip
+      // per statement, and `commitImport` has ALREADY failed in production on a
+      // 197-row transaction for exactly that reason (plans/phase-8.md, "Open,
+      // not fixed", whose stated fix is batching into createMany). Measured at
+      // 42 ms per round trip from a machine on the same coast as the database,
+      // so roughly double that from the deployment. Adding nine sequential
+      // statements to a transaction with that history is the wrong direction.
+      //
+      // Read, then create only what is missing, then update only what actually
+      // changed. Re-importing the same sheet — the common case, and the one
+      // decision 47 is about — changes no prompt at all and costs two statements.
+      const existingQuestions = await tx.interviewQuestion.findMany({
+        where: { instanceId },
+        select: { id: true, ordinal: true, prompt: true },
       });
-      await tx.interviewNotes.createMany({ data: notes });
+      const byOrdinal = new Map(existingQuestions.map((q) => [q.ordinal, q]));
+
+      const missing = questionColumns
+        .map((column, ordinal) => ({ ordinal, prompt: column.prompt }))
+        .filter((entry) => !byOrdinal.has(entry.ordinal))
+        .map((entry) => ({
+          id: crypto.randomUUID(),
+          instanceId,
+          ordinal: entry.ordinal,
+          prompt: entry.prompt,
+        }));
+      if (missing.length > 0) {
+        await tx.interviewQuestion.createMany({ data: missing });
+        for (const created of missing) {
+          byOrdinal.set(created.ordinal, {
+            id: created.id,
+            ordinal: created.ordinal,
+            prompt: created.prompt,
+          });
+        }
+      }
+
+      // Only where the sheet's header text actually differs. A re-upload of the
+      // same file issues none of these.
+      for (const [ordinal, column] of questionColumns.entries()) {
+        const existing = byOrdinal.get(ordinal);
+        if (existing === undefined || existing.prompt === column.prompt) continue;
+        await tx.interviewQuestion.update({
+          where: { id: existing.id },
+          data: { prompt: column.prompt },
+        });
+      }
+
+      const questionIds = questionColumns.map((_column, ordinal) => byOrdinal.get(ordinal)?.id);
+
+      // InterviewAnswer cascades from InterviewNotes, so this one delete clears
+      // both. Adding a second delete for answers would be a second opinion about
+      // which rows this commit owns.
+      await tx.interviewNotes.deleteMany({
+        where: { applicantId: { in: notes.map((entry) => entry.note.applicantId) } },
+      });
+      await tx.interviewNotes.createMany({ data: notes.map((entry) => entry.note) });
+
+      const answers = notes.flatMap((entry) =>
+        entry.row.transcript.flatMap((column, ordinal) => {
+          // Blank answers write no row, for the reason `flattenTranscript` drops
+          // them: F26's ninth question is unanswered for five applicants, and an
+          // empty row would render as a question asked and not answered rather
+          // than as one that produced nothing worth writing down.
+          if (column.body.trim() === "") return [];
+          const interviewQuestionId = questionIds[ordinal];
+          if (interviewQuestionId === undefined) return [];
+          return [
+            {
+              interviewNotesId: entry.note.id,
+              interviewQuestionId,
+              body: column.body,
+            },
+          ];
+        }),
+      );
+      if (answers.length > 0) {
+        await tx.interviewAnswer.createMany({ data: answers });
+      }
+
       await tx.interviewImport.delete({ where: { id: loaded.importId } });
     },
-    { timeout: 20000 },
+    // Matched to `commitImport`'s, and for its reason: a 197-row commit failed in
+    // production against Prisma's 2000/5000 ms defaults over the iad1-to-us-west-2
+    // link. This transaction is bulk rather than per-row, so it should be far
+    // inside any of these numbers — the margin is for the link, not the work.
+    { maxWait: 10_000, timeout: 60_000 },
   );
 
   revalidateSheet(instanceId, sheet);
   return {
-    message: `Imported notes for ${notes.length} applicant${notes.length === 1 ? "" : "s"}.`,
+    message:
+      `Imported notes for ${notes.length} applicant${notes.length === 1 ? "" : "s"}` +
+      (questionColumns.length > 0
+        ? `, across ${questionColumns.length} interview question${
+            questionColumns.length === 1 ? "" : "s"
+          }.`
+        : "."),
   };
 }

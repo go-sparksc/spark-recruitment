@@ -6,12 +6,14 @@ import {
   CommitForm,
   DiscardStagedButton,
   FuzzyRow,
+  MarkTranscriptColumns,
   MatchedRow,
   SkippedRow,
   UnresolvedRow,
   type PoolOption,
 } from "./sheet-controls";
 import { SHEET_LABEL, loadInterviewSheet, parseSheetParam } from "../load";
+import { isBulkTranscriptCandidate } from "@/lib/import/interview-mapping";
 import { InstanceCrumbs } from "../../instance-crumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireInstance } from "@/lib/auth";
@@ -148,6 +150,19 @@ export default async function InterviewSheetPage({
               ))}
             </tbody>
           </table>
+
+          {/* Decision 120. Notes sheet only, and only while something is still
+              unmapped — the component decides both, so this page does not have
+              to know the rule twice. */}
+          <MarkTranscriptColumns
+            instanceId={id}
+            sheet={lowerSheet}
+            unmappedCount={
+              headers.filter((header, columnIndex) =>
+                isBulkTranscriptCandidate(header, mapping[String(columnIndex)]),
+              ).length
+            }
+          />
 
           {mappingErrors.length > 0 ? (
             <ul className="text-destructive mt-4 space-y-1 text-sm">
