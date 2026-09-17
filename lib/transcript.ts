@@ -55,9 +55,23 @@ export function shortenPrompt(prompt: string): string {
   // separator and whitespace.
   const unnumbered = firstLine.trim().replace(/^\d+\s*[.)]\s+/, "");
 
-  // A parenthesised aside at the end is the duration — "(2-3 min)", "(< 1 min)".
-  // It is the same for every question and tells a reader nothing at this size.
-  const undurationed = unnumbered.replace(/\s*\([^()]*\bmin\b[^()]*\)\s*$/i, "").trim();
+  // A parenthesised aside at the end is the duration — "(2-3 min)", "(< 1 min)",
+  // "(1-2 minutes)", "(2-3min)". It is near enough the same on every question and
+  // tells a reader nothing at this size.
+  //
+  // **Matched by inspecting the parenthetical rather than by one regex.** The
+  // obvious `\bmin\b` misses two of F26's nine — "minutes" has no word boundary
+  // after "min", and neither does "2-3min" before it — which left two of the nine
+  // labels carrying a duration and seven not. Widening it to a bare `min`
+  // substring instead swallows any trailing aside containing those three letters,
+  // "(administration)" among them. Requiring a digit as well is what separates a
+  // duration from a word that happens to contain one.
+  const trailingAside = unnumbered.match(/\s*\(([^()]*)\)\s*$/);
+  const isDuration =
+    trailingAside !== null && /\d/.test(trailingAside[1]) && /min/i.test(trailingAside[1]);
+  const undurationed = (
+    isDuration ? unnumbered.slice(0, unnumbered.length - trailingAside[0].length) : unnumbered
+  ).trim();
 
   if (undurationed.length <= LABEL_MAX) return undurationed;
 

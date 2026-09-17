@@ -40,13 +40,36 @@ describe("shortenPrompt", () => {
     expect(shortenPrompt("5.  Tell us about a time.")).toBe("Tell us about a time.");
   });
 
-  it("drops the duration, which is the same noise on every question", () => {
+  it("drops the duration, in every spelling the real sheet uses", () => {
+    // All four appear in F26's nine headers. The first two are the ones a
+    // `\bmin\b` regex misses — "minutes" has no word boundary after "min", and
+    // "2-3min" has none before it — which left two of the nine labels carrying a
+    // duration and seven not.
+    expect(shortenPrompt("1. Tell us about yourself. (1-2 minutes)")).toBe(
+      "Tell us about yourself.",
+    );
+    expect(shortenPrompt("5. How did you respond? (2-3min)")).toBe("How did you respond?");
     expect(shortenPrompt("3. What kept you up at night? (2-3 min)")).toBe(
       "What kept you up at night?",
     );
     expect(shortenPrompt("8. What snack would you be? (< 1 min)")).toBe(
       "What snack would you be?",
     );
+  });
+
+  it("keeps a trailing aside that is not a duration", () => {
+    // "administration" contains the letters min, so a bare substring match would
+    // eat this. Requiring a digit as well is what separates the two.
+    expect(shortenPrompt("4. Which team did you join? (administration)")).toBe(
+      "Which team did you join? (administration)",
+    );
+    expect(shortenPrompt("2. How many people? (about 30)")).toBe("How many people? (about 30)");
+  });
+
+  it("leaves none of the nine real labels carrying a duration", () => {
+    for (const prompt of F26_PROMPTS) {
+      expect(shortenPrompt(prompt)).not.toMatch(/\(\s*<?\s*\d[^()]*min/i);
+    }
   });
 
   it("keeps only the first line, dropping guidance aimed at the interviewer", () => {
