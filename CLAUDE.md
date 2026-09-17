@@ -102,6 +102,12 @@ Three things about that, learned the hard way in Phase 9:
   migrates production — so scope the variable to Production only, or give
   Preview its own Neon branch. Check this before the first push, not after.
 
+  **Checked on 2026-09-17, before decision 120's first push: Preview has its own
+  database.** A branch push therefore cannot migrate production. Recorded here so
+  the question is not asked a third time — but it is a fact about the Vercel
+  project, not about this repository, so anyone who changes the environment
+  variables owns re-checking it.
+
 **Production was five weeks stale on 2026-09-09**, which is what this fixes and
 what it is worth understanding precisely. `_prisma_migrations` held rows through
 `20260809200000_import_row_discarded` and nothing after: migrations had been run
