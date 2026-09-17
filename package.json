@@ -16,6 +16,7 @@
     "seed:passes": "tsx prisma/passes.ts",
     "seed:inspect": "tsx prisma/inspect.ts",
     "seed:demo": "tsx prisma/demo.ts",
+    "seed:throwaway": "tsx prisma/throwaway.ts",
     "check:round-trip": "tsx --conditions=react-server prisma/checks/round-trip.ts",
     "check:rate-limit": "tsx --conditions=react-server prisma/checks/rate-limit.ts",
     "check:closed-pass-conflicts": "tsx --conditions=react-server prisma/checks/closed-pass-conflicts.ts",
