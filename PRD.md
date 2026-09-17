@@ -489,7 +489,7 @@ Enforced server-side. A reviewer request for a hidden field returns nothing, rat
 | Class standing, derived from the designated graduation-date column | Follows that column | Follows that column | Follows that column | Follows that column |
 | Interview scores | Hidden | Visible | Visible | Visible |
 | Interview notes | Hidden | Visible | Visible | Visible |
-| Written rubric scores and review notes, from other reviewers | Hidden | Hidden | Visible | Visible |
+| Written rubric scores and review notes, from other reviewers | Hidden | Hidden | **Hidden** | Visible |
 | Round votes and tallies — first-round votes and pass votes | Hidden | Hidden | **Hidden** | Visible |
 | A resolved applicant's outcome — Sparklet or rejected | Hidden | Hidden | **Visible** | Visible |
 | Suspected AI use, from another reviewer | Hidden | Hidden | **Hidden** | Visible |
@@ -715,7 +715,12 @@ Selection and demographic-breakdown behavior mirrors FR-11's UI. Finalize semant
 
 ### 7.4 Second round and passes
 
-**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the complete applicant profile: every reviewer-visible field (with class standing under the graduation date when that column is one, per decision 119), written scores, written review notes, interview scores, interview notes. **Demographics are not in that list**, and neither is another reviewer's suspected-AI flag. Decision 108 locked demographics out of every reviewer round including this one, and decision 116 keeps the flag admin-only; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Written and interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+**FR-16 Second-round reviewer dashboard.** Round → Second Round, then name. Reviewer sees the applicant profile: every reviewer-visible field (with class standing under the graduation date when that column is one, per decision 119), interview scores, interview notes. **Demographics are not in that list**, and neither is another reviewer's suspected-AI flag, and — since decision 121 — neither is anything from the written round's evaluation. Decision 108 locked demographics out of every reviewer round including this one, and decision 116 keeps the flag admin-only; the demographic breakdowns remain an admin surface, FR-11 and FR-19. Interview evaluations are attributed to the person who gave them, per decision 77. Reviewer can flag conflict of interest per applicant, which is sticky across all passes.
+
+**Written scores and written review notes are not shown here. Decision 121**, reversing the half of decision 77 that put them on this page. The applicant's own written responses are unaffected and stay visible — the removal is of other reviewers' evaluation of them, not of the application.
+
+**Per decision 121 there is no Written review section on this page at all.** The
+profile reads: interview cards, transcript, application, vote.
 
 **Per decision 120 the interview section carries more than a score and one note.** Each interviewer's card shows their per-category notes beside their per-category scores, plus their overall note and their recommendation; a score computed because the sheet carried no average column is labelled as computed. The notetaker's transcript renders below the cards as one collapsed disclosure per question. FR-14's first-round profile and the admin results view show the same three things from the same transform, so no two of them can disagree about one interview.
 
@@ -1724,6 +1729,18 @@ and decision 79, checked in the same place.
     **Rendered in all three places an interview appears** — FR-16's second-round profile, FR-14's first-round profile, and the admin results view — from one shared transform, so three surfaces cannot disagree about one interview. Nine collapsed disclosures rather than 2,500 characters of prose above the vote controls, on the `<details>` pattern those pages already use.
 
     **Interviewer identity reconciliation is explicitly not in this decision.** F26's two sheets between them carry twelve name variants — `Cici` and `Cici Fang`, `Nandini` and `Nandini Iyer`, `Hansika Reddy Kondapally` and `Hansika Kondapally` — and for 7 of 62 applicants the notetaker's label matches neither interview card. That is decision 47's accepted cost, unchanged by this work and visible where it always was. It is named here so a reader meeting it on the second-round profile knows it is pre-existing rather than something this decision introduced. Worth its own decision if deliberation trips over it.
+
+121. **The written round's scores and review notes come off the second-round profile. RESOLVED, amending §6 and FR-16, and reversing the half of decision 77 that put them there.** A second-round reviewer sees the application, the interview, and their own vote. What thirty written reviewers scored, and what they wrote about it, is now an admin surface only — FR-10 and the results view still carry it in full.
+
+    **The applicant's own written responses are untouched.** Decision 108 makes every reviewer-visible field visible in this round and that is unchanged; so is class standing. What is removed is other reviewers' *evaluation* of the application, not the application. The two are easy to conflate because both were called "written" on one page, and the distinction is the whole of this decision.
+
+    Demographics stay hidden under §6's lock, the suspected-AI flag stays admin-only under decision 116, and the interview surfaces are identical to what they were — the same cards, notes, recommendations and transcript that decision 120 built, rendered from the same component on the first-round profile and the admin results view. Nothing about this decision touches those.
+
+    **What decision 77 argued, and what changes.** 77 said prior-round evidence is what a deliberation is conducted on, and that an attributed score means the person who gave the 2 is in the room and can be asked why. That reasoning still holds for the interview, which is why the interview stays. It is the written round this reverses: by the second round the written score has already done its work — it decided who got an interview at all — and carrying it forward gives a number from a blind reading of an essay the same standing as an hour spent with the person. The room has better evidence by then.
+
+    **This is a subtraction with a real cost, stated rather than discovered.** A second-round reviewer can no longer see that an applicant was scored 1.5 by three people in the written round. Where that is the thing someone needs, FR-10 and the admin results page have it, and an admin is in the room. Accepted deliberately.
+
+    **`buildWrittenReviews` and its tests are deleted rather than left unused.** The second-round profile was its only caller, and an exported function with a six-case suite and nothing calling it reads to the next maintainer as live code. It is in git — see the commit this decision names — and reversing 121 means restoring it, not rewriting it. The interfaces `WrittenReviewSource` and `WrittenReviewCard` go with it.
 
 ## 11. Out of scope for v1, worth noting for v2
 

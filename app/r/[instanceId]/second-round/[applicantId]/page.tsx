@@ -9,28 +9,34 @@ import { SECOND_ROUND_COHORT, voteAvailability } from "@/lib/passes";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { applicantLabel, buildApplicantView } from "@/lib/review";
-import { formatAverage, formatVariance } from "@/lib/results";
-import { buildInterviewCards, buildWrittenReviews } from "@/lib/second-round";
+import { buildInterviewCards } from "@/lib/second-round";
 import { buildTranscript } from "@/lib/transcript";
 import { InterviewCards, InterviewTranscript } from "@/components/interview-section";
 
 export const metadata = { title: "Applicant — Spark SC" };
 
-/// FR-16's profile: "the complete applicant profile — demographics, written
-/// responses, written scores, written review notes, interview scores, interview
-/// notes."
+/// FR-16's profile: the applicant's own answers, the interview, and this
+/// reviewer's vote.
+///
+/// **No written-round evaluation, per decision 121**, which reverses the half of
+/// decision 77 that put it here. Not hidden — not queried. The written scores and
+/// review notes are an admin surface now (FR-10, and the results view), and the
+/// `Assignment` rows they come from are no longer read on this page at all.
+///
+/// The applicant's own written RESPONSES are a different thing and are
+/// unaffected: they arrive through `buildApplicantView` with every other
+/// reviewer-visible field. The two were easy to conflate while both were called
+/// "written" on one screen, which is most of why 121 exists.
 ///
 /// **§6 is enforced by the shared helper, not re-derived here.** Everything from
 /// `Applicant.data` comes through `buildApplicantView(..., "SECOND_ROUND_REVIEWER")`,
-/// which projects down to the visible field ids ON THE SERVER. Under §6 that
-/// resolves to nearly everything for this viewer — demographics and responses
-/// are both visible in this round — which makes this the one reviewer surface
-/// where the projection returning a lot is the correct answer rather than a
-/// leak.
+/// which projects down to the visible field ids ON THE SERVER. Demographics are
+/// NOT among them — decision 108's lock applies to every reviewer round
+/// including this one — and neither is another reviewer's suspected-AI flag,
+/// per decision 116.
 ///
 /// **Nobody else's pass vote is loaded**, per decision 74. Not hidden: not
-/// queried. Prior-round evidence is visible (decision 77's first row) and the
-/// votes being cast now are not (its second).
+/// queried. The votes being cast now are the thing anchoring is about.
 export default async function SecondRoundApplicantPage({
   params,
 }: {
@@ -41,7 +47,7 @@ export default async function SecondRoundApplicantPage({
 
   if (session.rd !== Round.SECOND_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [applicant, fields, groups, rubric, interviewCategories, interviewQuestions, instance] =
+  const [applicant, fields, groups, interviewCategories, interviewQuestions, instance] =
     await Promise.all([
     prisma.applicant.findFirst({
       // **`SECOND_ROUND_COHORT`, matching the list** — decision 112. This used
@@ -67,16 +73,6 @@ export default async function SecondRoundApplicantPage({
         conflicts: {
           where: { reviewerId: reviewer.id, round: Round.SECOND_ROUND },
           select: { id: true },
-        },
-        assignments: {
-          where: { round: Round.WRITTEN },
-          select: {
-            id: true,
-            status: true,
-            reviewer: { select: { firstName: true, lastName: true, isSparklet: true } },
-            scores: { select: { rubricCategoryId: true, points: true } },
-            note: { select: { body: true } },
-          },
         },
         interviewNotes: {
           select: {
@@ -132,11 +128,6 @@ export default async function SecondRoundApplicantPage({
         isIncluded: true,
         isReviewerVisible: true,
       },
-    }),
-    prisma.rubricCategory.findMany({
-      where: { instanceId },
-      orderBy: { ordinal: "asc" },
-      select: { id: true, name: true, maxPoints: true },
     }),
     prisma.interviewCategory.findMany({
       where: { instanceId },
@@ -216,10 +207,6 @@ export default async function SecondRoundApplicantPage({
     instance === null ? null : currentTermOf(instance),
   );
 
-  const written = buildWrittenReviews(
-    applicant.assignments,
-    rubric.map((category) => category.id),
-  );
   const interviews = buildInterviewCards(
     applicant.interviewResults,
     interviewCategories.map((category) => category.id),
@@ -279,84 +266,10 @@ export default async function SecondRoundApplicantPage({
         ) : null}
       </section>
 
-      {/* Written scores and notes. Decision 77: visible in this round, and
-          attributed — the person who gave the 2 is in the room and can be asked
-          why, which is what a deliberation is for. */}
-      <section className="mt-6 space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-medium">Written review</h2>
-          <span className="text-muted-foreground text-sm tabular-nums">
-            {written.summary.average === null
-              ? "no complete reviews"
-              : `avg ${formatAverage(written.summary.average)} · var ${formatVariance(
-                  written.summary.variance,
-                )}`}
-          </span>
-        </div>
-
-        {written.cards.length === 0 ? (
-          <p className="text-muted-foreground rounded-md border p-4 text-sm">
-            No written review is recorded for this applicant.
-          </p>
-        ) : (
-          written.cards.map((card) => (
-            <div key={card.assignmentId} className="rounded-md border p-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="text-sm font-medium">
-                  {card.reviewerName}
-                  {card.isSparklet ? (
-                    <span className="bg-muted text-muted-foreground ml-2 rounded px-1.5 py-0.5 text-xs">
-                      Sparklet
-                    </span>
-                  ) : null}
-                </span>
-                <span className="text-muted-foreground text-sm tabular-nums">
-                  {card.average === null
-                    ? `${card.scoredCount}/${rubric.length} scored — incomplete`
-                    : `average ${card.average.toFixed(2)}`}
-                </span>
-              </div>
-
-              <details className="mt-2">
-                <summary className="text-muted-foreground cursor-pointer text-sm">
-                  Per-category scores
-                </summary>
-                <ul className="mt-2 space-y-1">
-                  {rubric.map((category, index) => (
-                    <li key={category.id} className="flex justify-between gap-3 text-sm">
-                      <span>{category.name}</span>
-                      <span className="tabular-nums">
-                        {card.points[index] ?? "—"} / {category.maxPoints}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-
-              {card.note ? (
-                <p className="mt-3 text-sm whitespace-pre-line">{card.note}</p>
-              ) : (
-                <p className="text-muted-foreground mt-3 text-sm italic">No note.</p>
-              )}
-            </div>
-          ))
-        )}
-
-        {/* Counted, never named. A returned assignment is a recusal, and which
-            colleague recused is not this room's business — but "three reviewers
-            were assigned and you are reading two" is. */}
-        {written.returnedCount > 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {written.returnedCount} assigned reviewer
-            {written.returnedCount === 1 ? "" : "s"} returned this applicant to the pool without
-            reviewing.
-          </p>
-        ) : null}
-      </section>
-
-      {/* The application itself. Demographics and responses are both visible to
-          this viewer under §6, resolved by the shared helper — this page has no
-          opinion of its own about what may be shown. */}
+      {/* The application itself — the applicant's own answers, which decision
+          121 does not touch. Demographics are excluded by §6's lock and
+          everything else follows its column's flag, all resolved by the shared
+          helper; this page has no opinion of its own about what may be shown. */}
       <section className="mt-6 space-y-3">
         <h2 className="text-sm font-medium">Application</h2>
         {view.fields.length === 0 ? (

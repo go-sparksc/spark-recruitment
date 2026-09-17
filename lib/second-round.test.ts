@@ -1,38 +1,28 @@
 // Smoke coverage for FR-16's page assembly — the seam CLAUDE.md's testing note
-// was written about. The pure functions underneath (`reviewerAverage`,
-// `scoreSummary`) have their own suites; what is untested anywhere else is the
-// assembly, which is exactly what went wrong twice in Phase 5.
+// was written about. What is untested anywhere else is the assembly, which is
+// exactly what went wrong twice in Phase 5.
 //
 // Three things here are behaviour rather than plumbing, and they are the reason
-// this file exists: a returned assignment is not a review, an incomplete review
-// contributes no average, and an unscored category is null rather than zero.
+// this file exists: an unscored interview category is null rather than zero, a
+// category note lands at the same index as the score it was written about, and a
+// computed average never renders as though it were the sheet's own number.
+//
+// The `buildWrittenReviews` suite lived here until decision 121 took the written
+// round's scores and review notes off this profile. Its six cases went with the
+// function — among them that a returned assignment is not a review and that an
+// incomplete review contributes no average — and are in git alongside it.
 
 import { describe, expect, it } from "vitest";
 
-import { ApplicantStatus, AssignmentStatus } from "@/generated/prisma/enums";
+import { ApplicantStatus } from "@/generated/prisma/enums";
 import {
   buildInterviewCards,
-  buildWrittenReviews,
   conflictCount,
   formatInterviewScore,
   toSecondRoundListRow,
   undecidedCount,
   type InterviewResultSource,
-  type WrittenReviewSource,
 } from "@/lib/second-round";
-
-const CATEGORIES = ["cat-1", "cat-2", "cat-3", "cat-4"];
-
-function assignment(overrides: Partial<WrittenReviewSource> = {}): WrittenReviewSource {
-  return {
-    id: "asg-1",
-    status: AssignmentStatus.ACTIVE,
-    reviewer: { firstName: "Ana", lastName: "Ruiz", isSparklet: false },
-    scores: CATEGORIES.map((rubricCategoryId, i) => ({ rubricCategoryId, points: i + 1 })),
-    note: { body: "Strong essays." },
-    ...overrides,
-  };
-}
 
 describe("toSecondRoundListRow", () => {
   it("carries the name — §6 gives a second-round reviewer the applicant's identity", () => {
@@ -135,86 +125,6 @@ describe("toSecondRoundListRow", () => {
 
     expect(rows).toHaveLength(4);
     expect(undecidedCount(rows)).toBe(2);
-  });
-});
-
-describe("buildWrittenReviews", () => {
-  it("aligns points to the live rubric and averages a complete review", () => {
-    const { cards, summary } = buildWrittenReviews([assignment()], CATEGORIES);
-
-    expect(cards[0].points).toEqual([1, 2, 3, 4]);
-    expect(cards[0].average).toBe(2.5);
-    expect(cards[0].scoredCount).toBe(4);
-    expect(summary.average).toBe(2.5);
-  });
-
-  it("gives an incomplete review no average and leaves the gap null", () => {
-    // Not zero. "Unscored" is the absence of a Score row, and a zero would both
-    // read as a real low mark and drag an average that should not exist at all.
-    const { cards, summary } = buildWrittenReviews(
-      [assignment({ scores: [{ rubricCategoryId: "cat-1", points: 4 }] })],
-      CATEGORIES,
-    );
-
-    expect(cards[0].points).toEqual([4, null, null, null]);
-    expect(cards[0].average).toBeNull();
-    expect(cards[0].scoredCount).toBe(1);
-    // Nothing complete, so there is no cohort average — null rather than 4.
-    expect(summary.average).toBeNull();
-    expect(summary.completedCount).toBe(0);
-  });
-
-  it("excludes a returned assignment from the cards and counts it separately", () => {
-    // A returned assignment is not a review: the reviewer recognized the
-    // applicant and handed them back, and any score they left was given before
-    // that. Rendering it as an opinion would also leak a recusal into a room
-    // that is about to discuss the applicant.
-    const reviews = buildWrittenReviews(
-      [
-        assignment(),
-        assignment({
-          id: "asg-2",
-          status: AssignmentStatus.RETURNED_TO_POOL,
-          reviewer: { firstName: "Sam", lastName: "Oyelaran", isSparklet: true },
-        }),
-      ],
-      CATEGORIES,
-    );
-
-    expect(reviews.cards).toHaveLength(1);
-    expect(reviews.cards[0].reviewerName).toBe("Ana Ruiz");
-    expect(reviews.returnedCount).toBe(1);
-    expect(reviews.summary.completedCount).toBe(1);
-  });
-
-  it("attributes the note to its author, per decision 77", () => {
-    const { cards } = buildWrittenReviews([assignment()], CATEGORIES);
-
-    expect(cards[0].reviewerName).toBe("Ana Ruiz");
-    expect(cards[0].note).toBe("Strong essays.");
-  });
-
-  it("renders a missing note as null rather than an empty card", () => {
-    const { cards } = buildWrittenReviews([assignment({ note: null })], CATEGORIES);
-
-    expect(cards[0].note).toBeNull();
-  });
-
-  it("ignores a score whose category has left the rubric", () => {
-    const { cards } = buildWrittenReviews(
-      [
-        assignment({
-          scores: [
-            { rubricCategoryId: "cat-1", points: 3 },
-            { rubricCategoryId: "gone", points: 4 },
-          ],
-        }),
-      ],
-      CATEGORIES,
-    );
-
-    expect(cards[0].points).toEqual([3, null, null, null]);
-    expect(cards[0].scoredCount).toBe(1);
   });
 });
 

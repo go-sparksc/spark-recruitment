@@ -8,10 +8,15 @@
 //
 // The resolution state machine is NOT here. That is lib/passes.ts, which knows
 // nothing about rendering; this module knows nothing about resolution.
+//
+// `buildWrittenReviews` was here until decision 121 took the written round's
+// scores and review notes off this profile. The profile was its only caller, so
+// it and its two interfaces were deleted rather than left exported with nothing
+// calling them. Reversing 121 means restoring them from git, not rewriting them —
+// the decision entry in PRD §10 names the commit.
 
-import { ApplicantStatus, AssignmentStatus } from "@/generated/prisma/enums";
+import { ApplicantStatus } from "@/generated/prisma/enums";
 import { outcomeOfStatus, type Outcome } from "@/lib/labels";
-import { reviewerAverage, scoreSummary, type ScoreSummary } from "@/lib/results";
 
 // ---------------------------------------------------------------------------
 // The list
@@ -80,94 +85,6 @@ export function conflictCount(rows: readonly SecondRoundListRow[]): number {
 /// the component would be a second definition of "still in the round".
 export function undecidedCount(rows: readonly SecondRoundListRow[]): number {
   return rows.filter((row) => row.outcome === null).length;
-}
-
-// ---------------------------------------------------------------------------
-// Written scores, for the profile
-// ---------------------------------------------------------------------------
-
-export interface WrittenReviewSource {
-  id: string;
-  status: AssignmentStatus;
-  reviewer: { firstName: string; lastName: string; isSparklet: boolean };
-  scores: readonly { rubricCategoryId: string; points: number }[];
-  note: { body: string } | null;
-}
-
-export interface WrittenReviewCard {
-  assignmentId: string;
-  /// Decision 77: attributed, not anonymized. FR-14 names the interviewer and
-  /// FR-11's admin view names the written reviewer; anonymizing here would make
-  /// this the only surface in the product that hides a scorer, and in a
-  /// deliberation the point of knowing who gave the 2 is that they are in the
-  /// room to be asked why.
-  reviewerName: string;
-  isSparklet: boolean;
-  /// Null where the review is incomplete — `reviewerAverage`'s rule, not a
-  /// second one. A mean over two of four categories is not comparable with a
-  /// mean over four and must not render as though it were.
-  average: number | null;
-  /// Points per live rubric category, in the caller's category order. Null is an
-  /// unscored category, which is the absence of a `Score` row and never a zero.
-  points: (number | null)[];
-  scoredCount: number;
-  /// Decision 77's second half: the written reviewer's own reasoning, which
-  /// FR-16's list omitted and which is the most useful thing on this card.
-  note: string | null;
-}
-
-export interface WrittenReviews {
-  cards: WrittenReviewCard[];
-  /// Across the completed reviews only, exactly as FR-10 computes it.
-  summary: ScoreSummary;
-  /// Assignments that exist but were handed back. Counted, never rendered as a
-  /// review: a returned assignment produced no opinion, and showing the reviewer
-  /// who recused would leak a recusal to the room.
-  returnedCount: number;
-}
-
-/// The written round's evidence, shaped for one applicant's profile.
-///
-/// **Returned assignments are excluded from everything.** They are not a review,
-/// their scores (if any) were given before the reviewer recognized the
-/// applicant, and FR-10 already treats them this way. They are counted so the
-/// profile can say "2 of 3 reviewed" honestly rather than silently showing two.
-export function buildWrittenReviews(
-  assignments: readonly WrittenReviewSource[],
-  categoryIds: readonly string[],
-): WrittenReviews {
-  const active = assignments.filter(
-    (assignment) => assignment.status === AssignmentStatus.ACTIVE,
-  );
-
-  const cards = active.map((assignment) => {
-    const byCategory = new Map(
-      assignment.scores.map((score) => [score.rubricCategoryId, score.points]),
-    );
-
-    return {
-      assignmentId: assignment.id,
-      reviewerName: `${assignment.reviewer.firstName} ${assignment.reviewer.lastName}`,
-      isSparklet: assignment.reviewer.isSparklet,
-      average: reviewerAverage(
-        assignment.scores.map((score) => score.points),
-        categoryIds.length,
-      ),
-      points: categoryIds.map((id) => byCategory.get(id) ?? null),
-      // Counted over the LIVE rubric, matching `completionOf`: a score against a
-      // category no longer in the rubric contributes nothing.
-      scoredCount: categoryIds.filter((id) => byCategory.has(id)).length,
-      note: assignment.note?.body ?? null,
-    };
-  });
-
-  return {
-    cards,
-    summary: scoreSummary(
-      cards.map((card) => card.average).filter((value): value is number => value !== null),
-    ),
-    returnedCount: assignments.length - active.length,
-  };
 }
 
 // ---------------------------------------------------------------------------
