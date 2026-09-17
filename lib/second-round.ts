@@ -178,7 +178,15 @@ export interface InterviewResultSource {
   id: string;
   interviewerName: string;
   score: number;
-  categoryScores: readonly { interviewCategoryId: string; points: number }[];
+  /// PRD decision 120. See `InterviewCard.scoreIsComputed`.
+  scoreIsComputed: boolean;
+  note: string | null;
+  recommendation: "YES" | "NO" | null;
+  categoryScores: readonly {
+    interviewCategoryId: string;
+    points: number;
+    note: string | null;
+  }[];
 }
 
 export interface InterviewCard {
@@ -188,7 +196,25 @@ export interface InterviewCard {
   /// disagrees with the mean of the categories below, the sheet wins, because
   /// that is the number the interviewers actually recorded.
   score: number;
+  /// True when the sheet carried no Average column and this score is the mean of
+  /// the categories below. PRD decision 120.
+  ///
+  /// **Every render site must show this.** A computed average that reads like a
+  /// recorded one is precisely what decision 6 forbids; the arithmetic itself is
+  /// fine. Carried on the card rather than left for a page to look up, so a page
+  /// cannot forget to.
+  scoreIsComputed: boolean;
+  /// This interviewer's overall prose, or null. PRD decision 120.
+  note: string | null;
+  /// Advisory, and counted by nothing. PRD decision 120.
+  recommendation: "YES" | "NO" | null;
   points: (number | null)[];
+  /// Aligned to `categoryIds` exactly as `points` is, and independently of it:
+  /// a category can have a score and no note, and the two arrays must stay
+  /// index-parallel so a page can read `points[i]` and `categoryNotes[i]` as one
+  /// row. A note without a score cannot occur — decision 59 writes no row for an
+  /// unreadable score, and the note is a column on that row.
+  categoryNotes: (string | null)[];
 }
 
 /// One card per interviewer, points aligned to the configured categories.
@@ -204,12 +230,32 @@ export function buildInterviewCards(
     const byCategory = new Map(
       result.categoryScores.map((score) => [score.interviewCategoryId, score.points]),
     );
+    const notesByCategory = new Map(
+      result.categoryScores.map((score) => [score.interviewCategoryId, score.note]),
+    );
 
     return {
       resultId: result.id,
       interviewerName: result.interviewerName,
       score: result.score,
+      scoreIsComputed: result.scoreIsComputed,
+      note: result.note,
+      recommendation: result.recommendation,
       points: categoryIds.map((id) => byCategory.get(id) ?? null),
+      categoryNotes: categoryIds.map((id) => notesByCategory.get(id) ?? null),
     };
   });
+}
+
+/// How an interview score should read, given its provenance. PRD decision 120.
+///
+/// One function rather than three copies of the same ternary, so the three pages
+/// that render an interview cannot come to differ about what a computed average
+/// looks like — which is the failure decision 120's "one shared transform" is
+/// about.
+export function formatInterviewScore(card: {
+  score: number;
+  scoreIsComputed: boolean;
+}): string {
+  return card.scoreIsComputed ? `${card.score} (computed)` : String(card.score);
 }

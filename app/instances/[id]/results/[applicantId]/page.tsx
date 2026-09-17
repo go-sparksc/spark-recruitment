@@ -14,6 +14,8 @@ import { resolutionLabel } from "@/lib/passes";
 import { buildApplicantView } from "@/lib/review";
 import { formatAverage, formatVariance, reviewerAverage, scoreSummary } from "@/lib/results";
 import { buildInterviewCards } from "@/lib/second-round";
+import { buildTranscript } from "@/lib/transcript";
+import { InterviewCards, InterviewTranscript } from "@/components/interview-section";
 
 export const metadata = { title: "Applicant — Spark SC Recruitment" };
 
@@ -43,6 +45,7 @@ export default async function ApplicantResultPage({
     interviewCategories,
     interviewResults,
     interviewNotes,
+    interviewQuestions,
     passes,
     secondRoundReviewers,
     conflicts,
@@ -130,12 +133,29 @@ export default async function ApplicantResultPage({
         id: true,
         interviewerName: true,
         score: true,
-        categoryScores: { select: { interviewCategoryId: true, points: true } },
+        scoreIsComputed: true,
+        note: true,
+        recommendation: true,
+        categoryScores: {
+          select: { interviewCategoryId: true, points: true, note: true },
+        },
       },
     }),
     prisma.interviewNotes.findUnique({
       where: { applicantId },
-      select: { interviewerName: true, body: true },
+      select: {
+        interviewerName: true,
+        body: true,
+        // Decision 120. Ordered by `buildTranscript` on the question's ordinal,
+        // not here — see the note on the same query in FR-16's profile.
+        answers: { select: { interviewQuestionId: true, body: true } },
+      },
+    }),
+    // Decision 120. The prompts the answers above refer to.
+    prisma.interviewQuestion.findMany({
+      where: { instanceId: id },
+      orderBy: { ordinal: "asc" },
+      select: { id: true, ordinal: true, prompt: true },
     }),
     // The second round. §6's last row makes the admin the only viewer who sees a
     // pass vote at all, and decision 74 is why no reviewer surface renders one.
@@ -196,6 +216,10 @@ export default async function ApplicantResultPage({
     interviewResults,
     interviewCategories.map((category) => category.id),
   );
+  // Empty for a transcript imported before decision 120, or from a sheet with a
+  // single Notes column. InterviewTranscript falls back to InterviewNotes.body
+  // in that case, which is exactly what this page rendered before.
+  const transcript = buildTranscript(interviewQuestions, interviewNotes?.answers ?? []);
   const passHistory = buildPassHistory(
     applicantId,
     passes.map((pass) => ({
@@ -344,45 +368,25 @@ export default async function ApplicantResultPage({
         <section className="space-y-3">
           <h2 className="text-lg font-medium">First-round interviews</h2>
 
-          {interviewCards.map((card) => (
-            <Card key={card.resultId}>
-              <CardContent className="space-y-3 p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-medium">{card.interviewerName}</span>
-                  {/* The average as imported, never recomputed from the
-                      categories — if the two disagree the sheet wins, because
-                      that is the number the interviewers recorded. */}
-                  <span className="text-muted-foreground text-sm tabular-nums">
-                    average {card.score}
-                  </span>
-                </div>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
-                  {interviewCategories.map((category, index) => (
-                    <div key={category.id}>
-                      <dt className="text-muted-foreground text-xs">{category.name}</dt>
-                      <dd className="font-medium tabular-nums">
-                        {card.points[index] ?? "—"}{" "}
-                        <span className="text-muted-foreground text-xs font-normal">
-                          / {category.maxPoints}
-                        </span>
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </CardContent>
-            </Card>
-          ))}
+          {/* Decision 120: the same component FR-14 and FR-16 render. The
+              admin surface deliberately stopped having its own copy of this
+              markup — an interview now carries per-category prose, two overall
+              notes, two recommendations and a provenance flag on each score,
+              and three copies of that is three chances for one screen to omit
+              something the other two show. */}
+          <InterviewCards
+            cards={interviewCards}
+            categories={interviewCategories}
+            whitespace="pre-wrap"
+          />
 
           {interviewNotes ? (
-            <Card>
-              <CardContent className="space-y-1 p-4">
-                <p className="text-muted-foreground text-xs">
-                  Interview notes
-                  {interviewNotes.interviewerName ? ` · ${interviewNotes.interviewerName}` : null}
-                </p>
-                <p className="text-sm whitespace-pre-wrap">{interviewNotes.body}</p>
-              </CardContent>
-            </Card>
+            <InterviewTranscript
+              interviewerName={interviewNotes.interviewerName}
+              sections={transcript}
+              fallbackBody={interviewNotes.body}
+              whitespace="pre-wrap"
+            />
           ) : (
             <p className="text-muted-foreground rounded-md border p-4 text-sm">
               No interview notes were imported for this applicant.

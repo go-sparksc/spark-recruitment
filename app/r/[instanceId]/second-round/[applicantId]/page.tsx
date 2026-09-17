@@ -11,6 +11,8 @@ import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { applicantLabel, buildApplicantView } from "@/lib/review";
 import { formatAverage, formatVariance } from "@/lib/results";
 import { buildInterviewCards, buildWrittenReviews } from "@/lib/second-round";
+import { buildTranscript } from "@/lib/transcript";
+import { InterviewCards, InterviewTranscript } from "@/components/interview-section";
 
 export const metadata = { title: "Applicant — Spark SC" };
 
@@ -39,7 +41,8 @@ export default async function SecondRoundApplicantPage({
 
   if (session.rd !== Round.SECOND_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [applicant, fields, groups, rubric, interviewCategories, instance] = await Promise.all([
+  const [applicant, fields, groups, rubric, interviewCategories, interviewQuestions, instance] =
+    await Promise.all([
     prisma.applicant.findFirst({
       // **`SECOND_ROUND_COHORT`, matching the list** — decision 112. This used
       // to be `SECOND_ROUND_POOL`, with a comment saying a resolved applicant
@@ -75,14 +78,29 @@ export default async function SecondRoundApplicantPage({
             note: { select: { body: true } },
           },
         },
-        interviewNotes: { select: { body: true, interviewerName: true } },
+        interviewNotes: {
+          select: {
+            body: true,
+            interviewerName: true,
+            // Decision 120. Deliberately not ordered here — `buildTranscript`
+            // orders by the question's ordinal, which is the sheet's own column
+            // order, and an `orderBy` on this list would look like it decided
+            // that while actually deciding nothing.
+            answers: { select: { interviewQuestionId: true, body: true } },
+          },
+        },
         interviewResults: {
           orderBy: { interviewerName: "asc" },
           select: {
             id: true,
             interviewerName: true,
             score: true,
-            categoryScores: { select: { interviewCategoryId: true, points: true } },
+            scoreIsComputed: true,
+            note: true,
+            recommendation: true,
+            categoryScores: {
+              select: { interviewCategoryId: true, points: true, note: true },
+            },
           },
         },
       },
@@ -124,6 +142,14 @@ export default async function SecondRoundApplicantPage({
       where: { instanceId },
       orderBy: { ordinal: "asc" },
       select: { id: true, name: true, maxPoints: true },
+    }),
+    // Decision 120. Instance-scoped like the rubric above it: an answer row
+    // carries a question id and nothing else, so the prompts come from here
+    // rather than being repeated on every applicant's transcript.
+    prisma.interviewQuestion.findMany({
+      where: { instanceId },
+      orderBy: { ordinal: "asc" },
+      select: { id: true, ordinal: true, prompt: true },
     }),
     // Decision 119: the semester class standing counts from.
     prisma.instance.findUnique({
@@ -198,6 +224,10 @@ export default async function SecondRoundApplicantPage({
     applicant.interviewResults,
     interviewCategories.map((category) => category.id),
   );
+  // Empty for a transcript imported before decision 120, or from a sheet with a
+  // single Notes column. InterviewTranscript falls back to InterviewNotes.body
+  // in that case, which is exactly what this page rendered before.
+  const transcript = buildTranscript(interviewQuestions, applicant.interviewNotes?.answers ?? []);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-6">
@@ -232,46 +262,20 @@ export default async function SecondRoundApplicantPage({
             No interview scores were imported for this applicant.
           </p>
         ) : (
-          interviews.map((card) => (
-            <div key={card.resultId} className="rounded-md border p-4">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm font-medium">{card.interviewerName}</span>
-                <span className="text-2xl font-semibold tabular-nums">{card.score}</span>
-              </div>
-
-              {interviewCategories.length > 0 ? (
-                <details className="mt-2">
-                  <summary className="text-muted-foreground cursor-pointer text-sm">
-                    Per-category scores
-                  </summary>
-                  <ul className="mt-2 space-y-1">
-                    {interviewCategories.map((category, index) => (
-                      <li key={category.id} className="flex justify-between gap-3 text-sm">
-                        <span>{category.name}</span>
-                        <span className="tabular-nums">
-                          {card.points[index] ?? "—"} / {category.maxPoints}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
-            </div>
-          ))
+          <InterviewCards
+            cards={interviews}
+            categories={interviewCategories}
+            whitespace="pre-line"
+          />
         )}
 
         {applicant.interviewNotes ? (
-          <div className="rounded-md border p-4">
-            <h3 className="text-sm font-medium">
-              Interview notes
-              {applicant.interviewNotes.interviewerName
-                ? ` — ${applicant.interviewNotes.interviewerName}`
-                : ""}
-            </h3>
-            {/* whitespace-pre-line: the notes sheet carries paragraph breaks
-                inside a quoted field and they are part of what was written. */}
-            <p className="mt-2 text-sm whitespace-pre-line">{applicant.interviewNotes.body}</p>
-          </div>
+          <InterviewTranscript
+            interviewerName={applicant.interviewNotes.interviewerName}
+            sections={transcript}
+            fallbackBody={applicant.interviewNotes.body}
+            whitespace="pre-line"
+          />
         ) : null}
       </section>
 

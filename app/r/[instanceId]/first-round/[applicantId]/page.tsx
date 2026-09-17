@@ -8,6 +8,9 @@ import { FIRST_ROUND_POOL } from "@/lib/first-round";
 import { prisma } from "@/lib/prisma";
 import { requireReviewerOnRoster } from "@/lib/reviewer-auth";
 import { applicantLabel, buildApplicantView } from "@/lib/review";
+import { buildInterviewCards } from "@/lib/second-round";
+import { buildTranscript } from "@/lib/transcript";
+import { InterviewCards, InterviewTranscript } from "@/components/interview-section";
 
 export const metadata = { title: "Applicant — Spark SC" };
 
@@ -30,7 +33,8 @@ export default async function FirstRoundApplicantPage({
 
   if (session.rd !== Round.FIRST_ROUND) redirect(`/r/${instanceId}/list`);
 
-  const [applicant, fields, groups, categories, instance] = await Promise.all([
+  const [applicant, fields, groups, interviewCategories, interviewQuestions, instance] =
+    await Promise.all([
     prisma.applicant.findFirst({
       // The pool predicate again, so an applicant who left the round cannot be
       // reached by keeping the URL.
@@ -40,15 +44,28 @@ export default async function FirstRoundApplicantPage({
         displayName: true,
         sourceRowIndex: true,
         data: true,
-        interviewNotes: { select: { body: true, interviewerName: true } },
+        interviewNotes: {
+          select: {
+            body: true,
+            interviewerName: true,
+            // Decision 120. Deliberately not ordered here — `buildTranscript`
+            // orders by the question's ordinal, which is the sheet's own column
+            // order, and an `orderBy` on this list would look like it decided
+            // that while actually deciding nothing.
+            answers: { select: { interviewQuestionId: true, body: true } },
+          },
+        },
         interviewResults: {
           orderBy: { interviewerName: "asc" },
           select: {
             id: true,
             interviewerName: true,
             score: true,
+            scoreIsComputed: true,
+            note: true,
+            recommendation: true,
             categoryScores: {
-              select: { interviewCategoryId: true, points: true },
+              select: { interviewCategoryId: true, points: true, note: true },
             },
           },
         },
@@ -90,6 +107,14 @@ export default async function FirstRoundApplicantPage({
       orderBy: { ordinal: "asc" },
       select: { id: true, name: true, maxPoints: true },
     }),
+    // Decision 120. Instance-scoped like the rubric above it: an answer row
+    // carries a question id and nothing else, so the prompts come from here
+    // rather than being repeated on every applicant's transcript.
+    prisma.interviewQuestion.findMany({
+      where: { instanceId },
+      orderBy: { ordinal: "asc" },
+      select: { id: true, ordinal: true, prompt: true },
+    }),
     // Decision 119: the semester class standing counts from.
     prisma.instance.findUnique({
       where: { id: instanceId },
@@ -113,7 +138,18 @@ export default async function FirstRoundApplicantPage({
   );
 
   const vote = applicant.firstRoundVotes[0]?.value ?? null;
-  const categoryName = new Map(categories.map((c) => [c.id, c]));
+
+  // Both transformations live in `lib/`, per CLAUDE.md's Phase 5 lesson. The
+  // page holds the queries and nothing else. Decision 120 moved the card markup
+  // out too, into the component FR-16 and the admin results view also render.
+  const interviews = buildInterviewCards(
+    applicant.interviewResults,
+    interviewCategories.map((category) => category.id),
+  );
+  // Empty for a transcript imported before decision 120, or from a sheet with a
+  // single Notes column. InterviewTranscript falls back to InterviewNotes.body
+  // in that case, which is exactly what this page rendered before.
+  const transcript = buildTranscript(interviewQuestions, applicant.interviewNotes?.answers ?? []);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-6">
@@ -133,63 +169,34 @@ export default async function FirstRoundApplicantPage({
       </h1>
 
       {/* Clause 14b. The averages are the headline — largest type on the page,
-          one line per interviewer, above everything else. */}
+          one line per interviewer, above everything else.
+
+          Decision 120: the markup itself now lives in components/interview-section,
+          shared with FR-16's profile and the admin results view, so the three
+          cannot come to disagree about one interview. */}
       <section className="mt-5 space-y-3">
-        {applicant.interviewResults.length === 0 ? (
+        {interviews.length === 0 ? (
           <p className="text-muted-foreground rounded-md border p-4 text-sm">
             No interview scores have been imported for this applicant yet.
           </p>
         ) : (
-          applicant.interviewResults.map((result) => (
-            <div key={result.id} className="rounded-md border p-4">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm font-medium">{result.interviewerName}</span>
-                <span className="text-2xl font-semibold tabular-nums">{result.score}</span>
-              </div>
-
-              {/* Clause 14c: collapsed by default, expandable. `<details>`
-                  rather than state, so it works before hydration. */}
-              {result.categoryScores.length > 0 ? (
-                <details className="mt-2">
-                  <summary className="text-muted-foreground cursor-pointer text-sm">
-                    Per-category scores
-                  </summary>
-                  <ul className="mt-2 space-y-1">
-                    {result.categoryScores.map((score) => {
-                      const category = categoryName.get(score.interviewCategoryId);
-                      return (
-                        <li
-                          key={score.interviewCategoryId}
-                          className="flex justify-between gap-3 text-sm"
-                        >
-                          <span>{category?.name ?? "Category"}</span>
-                          <span className="tabular-nums">
-                            {score.points}
-                            {category ? ` / ${category.maxPoints}` : ""}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </details>
-              ) : null}
-            </div>
-          ))
+          <InterviewCards
+            cards={interviews}
+            categories={interviewCategories}
+            whitespace="pre-line"
+          />
         )}
       </section>
 
       {/* Clause 14d. */}
       {applicant.interviewNotes ? (
-        <section className="mt-5 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
-            Interview notes
-            {applicant.interviewNotes.interviewerName
-              ? ` — ${applicant.interviewNotes.interviewerName}`
-              : ""}
-          </h2>
-          {/* whitespace-pre-line: the notes sheet carries paragraph breaks
-              inside a quoted field and they are part of what was written. */}
-          <p className="mt-2 text-sm whitespace-pre-line">{applicant.interviewNotes.body}</p>
+        <section className="mt-5">
+          <InterviewTranscript
+            interviewerName={applicant.interviewNotes.interviewerName}
+            sections={transcript}
+            fallbackBody={applicant.interviewNotes.body}
+            whitespace="pre-line"
+          />
         </section>
       ) : null}
 
